@@ -8,7 +8,7 @@ pub const DevicesInfo = struct {
 
     pub fn init() DevicesInfo {
         return .{
-            .list = .{},
+            .list = .empty,
             .default_output = null,
             .default_input = null,
         };

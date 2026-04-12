@@ -377,7 +377,7 @@ pub const DefaultPipelineLayoutDescriptor = struct {
                 }
 
                 while (desc.groups_len <= group) {
-                    desc.groups_buf[desc.groups_len] = .{};
+                    desc.groups_buf[desc.groups_len] = .empty;
                     desc.groups_len += 1;
                 }
 

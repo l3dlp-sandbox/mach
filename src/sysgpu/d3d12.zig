@@ -2003,10 +2003,10 @@ pub const BindGroupLayout = struct {
     pub fn init(device: *Device, desc: *const sysgpu.BindGroupLayout.Descriptor) !*BindGroupLayout {
         _ = device;
 
-        var entries = std.ArrayListUnmanaged(Entry){};
+        var entries = std.ArrayListUnmanaged(Entry).empty;
         errdefer entries.deinit(allocator);
 
-        var dynamic_entries = std.ArrayListUnmanaged(DynamicEntry){};
+        var dynamic_entries = std.ArrayListUnmanaged(DynamicEntry).empty;
         errdefer dynamic_entries.deinit(allocator);
 
         var general_table_size: u32 = 0;
@@ -2242,13 +2242,13 @@ pub const BindGroup = struct {
         var dynamic_resources = try allocator.alloc(DynamicResource, layout.dynamic_entries.items.len);
         errdefer allocator.free(dynamic_resources);
 
-        var buffers = std.ArrayListUnmanaged(*Buffer){};
+        var buffers = std.ArrayListUnmanaged(*Buffer).empty;
         errdefer buffers.deinit(allocator);
 
-        var textures = std.ArrayListUnmanaged(*Texture){};
+        var textures = std.ArrayListUnmanaged(*Texture).empty;
         errdefer textures.deinit(allocator);
 
-        var accesses = std.ArrayListUnmanaged(ResourceAccess){};
+        var accesses = std.ArrayListUnmanaged(ResourceAccess).empty;
         errdefer accesses.deinit(allocator);
 
         for (0..desc.entry_count) |i| {

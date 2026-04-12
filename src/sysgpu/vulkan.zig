@@ -1798,13 +1798,13 @@ pub const BindGroup = struct {
         vkd.updateDescriptorSets(device.vk_device, @intCast(writes.len), writes.ptr, 0, undefined);
 
         // Resource tracking
-        var buffers = std.ArrayListUnmanaged(BufferAccess){};
+        var buffers = std.ArrayListUnmanaged(BufferAccess).empty;
         errdefer buffers.deinit(allocator);
 
-        var texture_views = std.ArrayListUnmanaged(TextureViewAccess){};
+        var texture_views = std.ArrayListUnmanaged(TextureViewAccess).empty;
         errdefer texture_views.deinit(allocator);
 
-        var samplers = std.ArrayListUnmanaged(*Sampler){};
+        var samplers = std.ArrayListUnmanaged(*Sampler).empty;
         errdefer samplers.deinit(allocator);
 
         for (0..desc.entry_count) |i| {

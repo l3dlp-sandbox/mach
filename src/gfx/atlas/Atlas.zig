@@ -112,7 +112,7 @@ pub fn init(alloc: Allocator, size: u32, format: Format) !Atlas {
     var result = Atlas{
         .data = try alloc.alloc(u8, size * size * format.depth()),
         .size = size,
-        .nodes = .{},
+        .nodes = .empty,
         .format = format,
     };
     errdefer result.deinit(alloc);
