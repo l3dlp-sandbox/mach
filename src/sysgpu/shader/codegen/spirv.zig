@@ -2021,13 +2021,14 @@ fn emitTripleIntrinsic(spv: *SpirV, section: *Section, triple: Inst.TripleIntrin
 
     if (triple.op == .mix and spv.air.getInst(triple.result_type) == .vector) {
         const vec_type_inst = spv.air.getInst(triple.result_type).vector;
-        var constituents = std.BoundedArray(IdRef, 4){};
+        var constituents_buf: [4]IdRef = undefined;
+        var constituents = std.ArrayListUnmanaged(IdRef).initBuffer(&constituents_buf);
         constituents.appendNTimesAssumeCapacity(a3, @intFromEnum(vec_type_inst.size));
         a3 = spv.allocId();
         try section.emit(.OpCompositeConstruct, .{
             .id_result_type = result_type,
             .id_result = a3,
-            .constituents = constituents.slice(),
+            .constituents = constituents.items,
         });
     }
 

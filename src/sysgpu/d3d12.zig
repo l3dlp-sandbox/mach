@@ -733,7 +733,8 @@ pub const MemoryAllocator = struct {
     const max_memory_groups = 9;
     device: *Device,
 
-    memory_groups: std.BoundedArray(MemoryGroup, max_memory_groups),
+    memory_groups_buf: [max_memory_groups]MemoryGroup = undefined,
+    memory_groups_len: usize = 0,
     allocation_sizes: AllocationSizes,
 
     /// a single heap,
@@ -962,7 +963,8 @@ pub const MemoryAllocator = struct {
 
         self.* = .{
             .device = device,
-            .memory_groups = std.BoundedArray(MemoryGroup, max_memory_groups).init(0) catch unreachable,
+            .memory_groups_buf = undefined,
+            .memory_groups_len = 0,
             .allocation_sizes = .{},
         };
 
@@ -977,40 +979,44 @@ pub const MemoryAllocator = struct {
 
         const tier_one_heap = options.ResourceHeapTier == c.D3D12_RESOURCE_HEAP_TIER_1;
 
-        self.memory_groups = std.BoundedArray(MemoryGroup, max_memory_groups).init(0) catch unreachable;
+        self.memory_groups_len = 0;
         inline for (heap_types) |heap_type| {
             if (tier_one_heap) {
-                self.memory_groups.appendAssumeCapacity(MemoryGroup.init(
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
                     self,
                     heap_type.location,
                     .buffer,
                     heap_type.properties,
-                ));
-                self.memory_groups.appendAssumeCapacity(MemoryGroup.init(
+                );
+                self.memory_groups_len += 1;
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
                     self,
                     heap_type.location,
                     .rtv_dsv_texture,
                     heap_type.properties,
-                ));
-                self.memory_groups.appendAssumeCapacity(MemoryGroup.init(
+                );
+                self.memory_groups_len += 1;
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
                     self,
                     heap_type.location,
                     .other_texture,
                     heap_type.properties,
-                ));
+                );
+                self.memory_groups_len += 1;
             } else {
-                self.memory_groups.appendAssumeCapacity(MemoryGroup.init(
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
                     self,
                     heap_type.location,
                     .all,
                     heap_type.properties,
-                ));
+                );
+                self.memory_groups_len += 1;
             }
         }
     }
 
     pub fn deinit(self: *MemoryAllocator) void {
-        for (self.memory_groups.slice()) |*group| {
+        for (self.memory_groups_buf[0..self.memory_groups_len]) |*group| {
             group.deinit();
         }
     }
@@ -1018,7 +1024,7 @@ pub const MemoryAllocator = struct {
     pub fn reportMemoryLeaks(self: *const MemoryAllocator) void {
         log.info("memory leaks:", .{});
         var total_blocks: u64 = 0;
-        for (self.memory_groups.constSlice(), 0..) |mem_group, mem_group_index| {
+        for (self.memory_groups_buf[0..self.memory_groups_len], 0..) |mem_group, mem_group_index| {
             log.info("   memory group {} ({s}, {s}):", .{
                 mem_group_index,
                 @tagName(mem_group.heap_category),
@@ -1040,7 +1046,7 @@ pub const MemoryAllocator = struct {
 
     pub fn allocate(self: *MemoryAllocator, desc: *const AllocationCreateDescriptor) gpu_allocator.Error!Allocation {
         // TODO: handle alignment
-        for (self.memory_groups.slice()) |*memory_group| {
+        for (self.memory_groups_buf[0..self.memory_groups_len]) |*memory_group| {
             if (memory_group.memory_location != desc.location and desc.location != .unknown) continue;
             if (!desc.resource_category.heapUsable(memory_group.heap_category)) continue;
             const allocation = try memory_group.allocate(desc.size);
@@ -1443,12 +1449,15 @@ pub const SwapChain = struct {
         errdefer _ = dxgi_swap_chain.lpVtbl.*.Release.?(dxgi_swap_chain);
 
         // Views
-        var textures = std.BoundedArray(*Texture, max_back_buffer_count){};
-        var views = std.BoundedArray(*TextureView, max_back_buffer_count){};
-        var fence_values = std.BoundedArray(u64, max_back_buffer_count){};
+        var textures_buf: [max_back_buffer_count]*Texture = undefined;
+        var textures = std.ArrayListUnmanaged(*Texture).initBuffer(&textures_buf);
+        var views_buf: [max_back_buffer_count]*TextureView = undefined;
+        var views = std.ArrayListUnmanaged(*TextureView).initBuffer(&views_buf);
+        var fence_values_buf: [max_back_buffer_count]u64 = undefined;
+        var fence_values = std.ArrayListUnmanaged(u64).initBuffer(&fence_values_buf);
         errdefer {
-            for (views.slice()) |view| view.manager.release();
-            for (textures.slice()) |texture| texture.manager.release();
+            for (views.items) |view| view.manager.release();
+            for (textures.items) |texture| texture.manager.release();
         }
 
         for (0..back_buffer_count) |i| {
@@ -1483,9 +1492,9 @@ pub const SwapChain = struct {
             .back_buffer_count = back_buffer_count,
             .sync_interval = if (desc.present_mode == .immediate) 0 else 1,
             .present_flags = if (desc.present_mode == .immediate and instance.allow_tearing) DXGI_PRESENT_ALLOW_TEARING else 0,
-            .textures = textures.buffer,
-            .views = views.buffer,
-            .fence_values = fence_values.buffer,
+            .textures = textures_buf,
+            .views = views_buf,
+            .fence_values = fence_values_buf,
         };
         return swapchain;
     }
@@ -2324,7 +2333,8 @@ pub const PipelineLayout = struct {
     manager: utils.Manager(PipelineLayout) = .{},
     root_signature: *c.ID3D12RootSignature,
     group_layouts: []*BindGroupLayout,
-    group_parameter_indices: std.BoundedArray(u32, limits.max_bind_groups),
+    group_parameter_indices_buf: [limits.max_bind_groups]u32 = undefined,
+    group_parameter_indices_len: usize = 0,
 
     pub fn init(device: *Device, desc: *const sysgpu.PipelineLayout.Descriptor) !*PipelineLayout {
         const d3d_device = device.d3d_device;
@@ -2339,7 +2349,8 @@ pub const PipelineLayout = struct {
         var group_layouts = try allocator.alloc(*BindGroupLayout, desc.bind_group_layout_count);
         errdefer allocator.free(group_layouts);
 
-        var group_parameter_indices = std.BoundedArray(u32, limits.max_bind_groups){};
+        var group_parameter_indices_buf: [limits.max_bind_groups]u32 = undefined;
+        var group_parameter_indices = std.ArrayListUnmanaged(u32).initBuffer(&group_parameter_indices_buf);
 
         var parameter_count: u32 = 0;
         var range_count: u32 = 0;
@@ -2494,19 +2505,21 @@ pub const PipelineLayout = struct {
         layout.* = .{
             .root_signature = root_signature,
             .group_layouts = group_layouts,
-            .group_parameter_indices = group_parameter_indices,
+            .group_parameter_indices_buf = group_parameter_indices_buf,
+            .group_parameter_indices_len = group_parameter_indices.items.len,
         };
         return layout;
     }
 
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
-        const groups = default_pipeline_layout.groups;
-        var bind_group_layouts = std.BoundedArray(*sysgpu.BindGroupLayout, limits.max_bind_groups){};
+        const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
+        var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
+        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
-            for (bind_group_layouts.slice()) |bind_group_layout| bind_group_layout.release();
+            for (bind_group_layouts.items) |bind_group_layout| bind_group_layout.release();
         }
 
-        for (groups.slice()) |entries| {
+        for (groups) |entries| {
             const bind_group_layout = try device.createBindGroupLayout(
                 &sysgpu.BindGroupLayout.Descriptor.init(.{ .entries = entries.items }),
             );
@@ -2514,7 +2527,7 @@ pub const PipelineLayout = struct {
         }
 
         return device.createPipelineLayout(
-            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.slice() }),
+            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.items }),
         );
     }
 
@@ -2679,7 +2692,8 @@ pub const RenderPipeline = struct {
     d3d_pipeline: *c.ID3D12PipelineState,
     layout: *PipelineLayout,
     topology: c.D3D12_PRIMITIVE_TOPOLOGY_TYPE,
-    vertex_strides: std.BoundedArray(c.UINT, limits.max_vertex_buffers),
+    vertex_strides_buf: [limits.max_vertex_buffers]c.UINT = undefined,
+    vertex_strides_len: usize = 0,
 
     pub fn init(device: *Device, desc: *const sysgpu.RenderPipeline.Descriptor) !*RenderPipeline {
         const d3d_device = device.d3d_device;
@@ -2731,8 +2745,10 @@ pub const RenderPipeline = struct {
         };
 
         // PSO
-        var input_elements = std.BoundedArray(c.D3D12_INPUT_ELEMENT_DESC, limits.max_vertex_buffers){};
-        var vertex_strides = std.BoundedArray(c.UINT, limits.max_vertex_buffers){};
+        var input_elements_buf: [limits.max_vertex_buffers]c.D3D12_INPUT_ELEMENT_DESC = undefined;
+        var input_elements = std.ArrayListUnmanaged(c.D3D12_INPUT_ELEMENT_DESC).initBuffer(&input_elements_buf);
+        var vertex_strides_buf: [limits.max_vertex_buffers]c.UINT = undefined;
+        var vertex_strides = std.ArrayListUnmanaged(c.UINT).initBuffer(&vertex_strides_buf);
         for (0..desc.vertex.buffer_count) |i| {
             const buffer = desc.vertex.buffers.?[i];
             for (0..buffer.attribute_count) |j| {
@@ -2768,8 +2784,8 @@ pub const RenderPipeline = struct {
                 .RasterizerState = conv.d3d12RasterizerDesc(desc),
                 .DepthStencilState = conv.d3d12DepthStencilDesc(desc.depth_stencil),
                 .InputLayout = .{
-                    .pInputElementDescs = if (desc.vertex.buffer_count > 0) &input_elements.buffer else null,
-                    .NumElements = @intCast(input_elements.len),
+                    .pInputElementDescs = if (desc.vertex.buffer_count > 0) input_elements.items.ptr else null,
+                    .NumElements = @intCast(input_elements.items.len),
                 },
                 .IBStripCutValue = conv.d3d12IndexBufferStripCutValue(desc.primitive.strip_index_format),
                 .PrimitiveTopologyType = conv.d3d12PrimitiveTopologyType(desc.primitive.topology),
@@ -2799,7 +2815,8 @@ pub const RenderPipeline = struct {
             .device = device,
             .layout = layout,
             .topology = conv.d3d12PrimitiveTopology(desc.primitive.topology),
-            .vertex_strides = vertex_strides,
+            .vertex_strides_buf = vertex_strides_buf,
+            .vertex_strides_len = vertex_strides.items.len,
         };
         return pipeline;
     }
@@ -3525,7 +3542,7 @@ pub const ComputePassEncoder = struct {
 
         try encoder.reference_tracker.referenceComputePipeline(pipeline);
 
-        encoder.group_parameter_indices = pipeline.layout.group_parameter_indices.slice();
+        encoder.group_parameter_indices = pipeline.layout.group_parameter_indices_buf[0..pipeline.layout.group_parameter_indices_len];
 
         command_list.lpVtbl.*.SetComputeRootSignature.?(
             command_list,
@@ -3544,7 +3561,8 @@ pub const RenderPassEncoder = struct {
     command_list: *c.ID3D12GraphicsCommandList,
     reference_tracker: *ReferenceTracker,
     state_tracker: *StateTracker,
-    color_attachments: std.BoundedArray(sysgpu.RenderPassColorAttachment, limits.max_color_attachments) = .{},
+    color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined,
+    color_attachments_len: usize = 0,
     depth_attachment: ?sysgpu.RenderPassDepthStencilAttachment,
     group_parameter_indices: []u32 = undefined,
     vertex_apply_count: u32 = 0,
@@ -3557,7 +3575,8 @@ pub const RenderPassEncoder = struct {
 
         var width: u32 = 0;
         var height: u32 = 0;
-        var color_attachments: std.BoundedArray(sysgpu.RenderPassColorAttachment, limits.max_color_attachments) = .{};
+        var color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined;
+        var color_attachments = std.ArrayListUnmanaged(sysgpu.RenderPassColorAttachment).initBuffer(&color_attachments_buf);
         var rtv_handles = try cmd_encoder.command_buffer.allocateRtvDescriptors(desc.color_attachment_count);
         const descriptor_size = cmd_encoder.device.rtv_heap.descriptor_size;
 
@@ -3697,7 +3716,8 @@ pub const RenderPassEncoder = struct {
         const encoder = try allocator.create(RenderPassEncoder);
         encoder.* = .{
             .command_list = command_list,
-            .color_attachments = color_attachments,
+            .color_attachments_buf = color_attachments_buf,
+            .color_attachments_len = color_attachments.items.len,
             .depth_attachment = depth_attachment,
             .reference_tracker = cmd_encoder.reference_tracker,
             .state_tracker = &cmd_encoder.state_tracker,
@@ -3755,7 +3775,7 @@ pub const RenderPassEncoder = struct {
     pub fn end(encoder: *RenderPassEncoder) !void {
         const command_list = encoder.command_list;
 
-        for (encoder.color_attachments.slice()) |attach| {
+        for (encoder.color_attachments_buf[0..encoder.color_attachments_len]) |attach| {
             const view: *TextureView = @ptrCast(@alignCast(attach.view.?));
 
             if (attach.resolve_target) |resolve_target_raw| {
@@ -3892,8 +3912,8 @@ pub const RenderPassEncoder = struct {
 
         try encoder.reference_tracker.referenceRenderPipeline(pipeline);
 
-        encoder.group_parameter_indices = pipeline.layout.group_parameter_indices.slice();
-        encoder.vertex_strides = pipeline.vertex_strides.slice();
+        encoder.group_parameter_indices = pipeline.layout.group_parameter_indices_buf[0..pipeline.layout.group_parameter_indices_len];
+        encoder.vertex_strides = pipeline.vertex_strides_buf[0..pipeline.vertex_strides_len];
 
         command_list.lpVtbl.*.SetGraphicsRootSignature.?(
             command_list,

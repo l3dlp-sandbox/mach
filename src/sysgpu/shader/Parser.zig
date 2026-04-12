@@ -48,7 +48,8 @@ fn parameterizeTemplates(p: *Parser) !void {
         token_tag: *Token.Tag,
         depth: u32,
     };
-    var discovered_tmpls = std.BoundedArray(UnclosedCandidate, 16).init(0) catch unreachable;
+    var discovered_tmpls_buf: [16]UnclosedCandidate = undefined;
+    var discovered_tmpls = std.ArrayListUnmanaged(UnclosedCandidate).initBuffer(&discovered_tmpls_buf);
     var depth: u32 = 0;
 
     var i: u32 = 0;
@@ -83,7 +84,7 @@ fn parameterizeTemplates(p: *Parser) !void {
             .k_texture_storage_2d_array,
             .k_texture_storage_3d,
             => if (p.tokens.items(.tag)[i + 1] == .angle_bracket_left) {
-                discovered_tmpls.append(.{
+                discovered_tmpls.appendBounded(.{
                     .token_tag = &p.tokens.items(.tag)[i + 1],
                     .depth = depth,
                 }) catch {
@@ -93,15 +94,15 @@ fn parameterizeTemplates(p: *Parser) !void {
                 i += 1;
             },
             .angle_bracket_right => {
-                if (discovered_tmpls.len > 0 and discovered_tmpls.get(discovered_tmpls.len - 1).depth == depth) {
-                    discovered_tmpls.pop().token_tag.* = .template_left;
+                if (discovered_tmpls.items.len > 0 and discovered_tmpls.items[discovered_tmpls.items.len - 1].depth == depth) {
+                    discovered_tmpls.pop().?.token_tag.* = .template_left;
                     p.tokens.items(.tag)[i] = .template_right;
                 }
             },
             .angle_bracket_angle_bracket_right => {
-                if (discovered_tmpls.len > 0 and discovered_tmpls.get(discovered_tmpls.len - 1).depth == depth) {
-                    discovered_tmpls.pop().token_tag.* = .template_left;
-                    discovered_tmpls.pop().token_tag.* = .template_left;
+                if (discovered_tmpls.items.len > 0 and discovered_tmpls.items[discovered_tmpls.items.len - 1].depth == depth) {
+                    discovered_tmpls.pop().?.token_tag.* = .template_left;
+                    discovered_tmpls.pop().?.token_tag.* = .template_left;
 
                     p.tokens.items(.tag)[i] = .template_right;
                     try p.tokens.insert(p.allocator, i, Token{
@@ -117,7 +118,7 @@ fn parameterizeTemplates(p: *Parser) !void {
                 depth += 1;
             },
             .paren_right, .bracket_right => {
-                while (discovered_tmpls.len > 0 and discovered_tmpls.get(discovered_tmpls.len - 1).depth == depth) {
+                while (discovered_tmpls.items.len > 0 and discovered_tmpls.items[discovered_tmpls.items.len - 1].depth == depth) {
                     _ = discovered_tmpls.pop();
                 }
 
@@ -127,10 +128,10 @@ fn parameterizeTemplates(p: *Parser) !void {
             },
             .semicolon, .colon, .brace_left => {
                 depth = 0;
-                discovered_tmpls.resize(0) catch unreachable;
+                discovered_tmpls.items.len = 0;
             },
             .pipe_pipe, .ampersand_ampersand => {
-                while (discovered_tmpls.len > 0 and discovered_tmpls.get(discovered_tmpls.len - 1).depth == depth) {
+                while (discovered_tmpls.items.len > 0 and discovered_tmpls.items[discovered_tmpls.items.len - 1].depth == depth) {
                     _ = discovered_tmpls.pop();
                 }
             },

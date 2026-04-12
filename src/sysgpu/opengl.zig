@@ -666,11 +666,13 @@ pub const SwapChain = struct {
 
         const back_buffer_count: u32 = if (desc.present_mode == .mailbox) 3 else 2;
 
-        var textures = std.BoundedArray(*Texture, max_back_buffer_count){};
-        var views = std.BoundedArray(*TextureView, max_back_buffer_count){};
+        var textures_buf: [max_back_buffer_count]*Texture = undefined;
+        var textures = std.ArrayListUnmanaged(*Texture).initBuffer(&textures_buf);
+        var views_buf: [max_back_buffer_count]*TextureView = undefined;
+        var views = std.ArrayListUnmanaged(*TextureView).initBuffer(&views_buf);
         errdefer {
-            for (views.slice()) |view| view.manager.release();
-            for (textures.slice()) |texture| texture.manager.release();
+            for (views.items) |view| view.manager.release();
+            for (textures.items) |texture| texture.manager.release();
         }
 
         for (0..back_buffer_count) |_| {
@@ -691,8 +693,8 @@ pub const SwapChain = struct {
                 break :blk proc.libgl.lookup(*const fn (*anyopaque, c_ulong) callconv(.c) bool, "glXSwapBuffers") orelse return error.SymbolNotFound;
             } else {},
             .back_buffer_count = back_buffer_count,
-            .textures = textures.buffer,
-            .views = views.buffer,
+            .textures = textures_buf,
+            .views = views_buf,
         };
         return swapchain;
     }
@@ -1197,16 +1199,17 @@ pub const PipelineLayout = struct {
     }
 
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
-        const groups = default_pipeline_layout.groups;
-        var bind_group_layouts = std.BoundedArray(*sysgpu.BindGroupLayout, limits.max_bind_groups){};
+        const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
+        var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
+        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
-            for (bind_group_layouts.slice()) |bind_group_layout_raw| {
+            for (bind_group_layouts.items) |bind_group_layout_raw| {
                 const bind_group_layout: *BindGroupLayout = @ptrCast(@alignCast(bind_group_layout_raw));
                 bind_group_layout.manager.release();
             }
         }
 
-        for (groups.slice()) |entries| {
+        for (groups) |entries| {
             const bind_group_layout = try device.createBindGroupLayout(
                 &sysgpu.BindGroupLayout.Descriptor.init(.{ .entries = entries.items }),
             );
@@ -1214,7 +1217,7 @@ pub const PipelineLayout = struct {
         }
 
         return device.createPipelineLayout(
-            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.slice() }),
+            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.items }),
         );
     }
 
@@ -1795,7 +1798,8 @@ pub const RenderPipeline = struct {
 
 const Command = union(enum) {
     begin_render_pass: struct {
-        color_attachments: std.BoundedArray(sysgpu.RenderPassColorAttachment, limits.max_color_attachments),
+        color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined,
+        color_attachments_len: usize = 0,
         depth_stencil_attachment: ?sysgpu.RenderPassDepthStencilAttachment,
     },
     end_render_pass,
@@ -1836,7 +1840,8 @@ const Command = union(enum) {
     set_compute_bind_group: struct {
         group_index: u32,
         group: *BindGroup,
-        dynamic_offsets: std.BoundedArray(u32, limits.max_bind_groups),
+        dynamic_offsets_buf: [limits.max_bind_groups]u32 = undefined,
+        dynamic_offsets_len: usize = 0,
     },
     set_compute_pipeline: struct {
         pipeline: *ComputePipeline,
@@ -1844,7 +1849,8 @@ const Command = union(enum) {
     set_render_bind_group: struct {
         group_index: u32,
         group: *BindGroup,
-        dynamic_offsets: std.BoundedArray(u32, limits.max_bind_groups),
+        dynamic_offsets_buf: [limits.max_bind_groups]u32 = undefined,
+        dynamic_offsets_len: usize = 0,
     },
     set_index_buffer: struct {
         buffer: *Buffer,
@@ -1910,7 +1916,7 @@ pub const CommandBuffer = struct {
             .buffer => {
                 var offset = entry.offset;
                 if (entry.dynamic_index) |i|
-                    offset += dynamic_offsets.buffer[i];
+                    offset += dynamic_offsets.dynamic_offsets_buf[i];
                 gl.bindBufferRange(entry.target, slot, entry.buffer.?.handle, offset, entry.size);
             },
             .texture => {
@@ -1952,8 +1958,8 @@ pub const CommandBuffer = struct {
                 .begin_render_pass => |cmd| {
                     // Test if rendering to default framebuffer
                     var default_framebuffer = false;
-                    if (cmd.color_attachments.len == 1) {
-                        const attach = cmd.color_attachments.buffer[0];
+                    if (cmd.color_attachments_len == 1) {
+                        const attach = cmd.color_attachments_buf[0];
                         if (attach.view) |view_raw| {
                             const view: *TextureView = @ptrCast(@alignCast(view_raw));
                             if (view.texture.swapchain) |swapchain| {
@@ -1976,9 +1982,10 @@ pub const CommandBuffer = struct {
 
                         gl.bindFramebuffer(c.GL_DRAW_FRAMEBUFFER, fbo);
 
-                        var draw_buffers: std.BoundedArray(c.GLenum, limits.max_color_attachments) = .{};
+                        var draw_buffers_buf: [limits.max_color_attachments]c.GLenum = undefined;
+                        var draw_buffers = std.ArrayListUnmanaged(c.GLenum).initBuffer(&draw_buffers_buf);
 
-                        for (cmd.color_attachments.buffer, 0..) |attach, i| {
+                        for (cmd.color_attachments_buf, 0..) |attach, i| {
                             if (attach.view) |view_raw| {
                                 const view: *TextureView = @ptrCast(@alignCast(view_raw));
                                 width = view.width();
@@ -2017,13 +2024,13 @@ pub const CommandBuffer = struct {
                             );
                         }
 
-                        gl.drawBuffers(@intCast(draw_buffers.len), &draw_buffers.buffer);
+                        gl.drawBuffers(@intCast(draw_buffers.items.len), draw_buffers.items.ptr);
                         if (gl.checkFramebufferStatus(c.GL_FRAMEBUFFER) != c.GL_FRAMEBUFFER_COMPLETE)
                             return error.CheckFramebufferStatusFailed;
                     } else {
                         // TODO - always render to framebuffer?
                         gl.bindFramebuffer(c.GL_DRAW_FRAMEBUFFER, 0);
-                        const view: *TextureView = @ptrCast(@alignCast(cmd.color_attachments.buffer[0].view.?));
+                        const view: *TextureView = @ptrCast(@alignCast(cmd.color_attachments_buf[0].view.?));
 
                         width = view.width();
                         height = view.height();
@@ -2048,7 +2055,7 @@ pub const CommandBuffer = struct {
                     gl.stencilMask(0xff);
 
                     // Clear color targets
-                    for (cmd.color_attachments.buffer, 0..) |attach, i| {
+                    for (cmd.color_attachments_buf, 0..) |attach, i| {
                         if (attach.view) |view_raw| {
                             const view: *TextureView = @ptrCast(@alignCast(view_raw));
 
@@ -2117,7 +2124,7 @@ pub const CommandBuffer = struct {
                     }
 
                     // Release references
-                    for (cmd.color_attachments.buffer) |attach| {
+                    for (cmd.color_attachments_buf) |attach| {
                         if (attach.view) |view_raw| {
                             const view: *TextureView = @ptrCast(@alignCast(view_raw));
                             view.manager.release();
@@ -2221,7 +2228,7 @@ pub const CommandBuffer = struct {
                         const key = BindingPoint{ .group = cmd.group_index, .binding = entry.binding };
 
                         if (compute_pipeline.?.layout.bindings.get(key)) |slot| {
-                            bindEntry(gl, entry, slot, &cmd.dynamic_offsets);
+                            bindEntry(gl, entry, slot, cmd);
                         }
                     }
 
@@ -2236,7 +2243,7 @@ pub const CommandBuffer = struct {
                         const key = BindingPoint{ .group = cmd.group_index, .binding = entry.binding };
 
                         if (render_pipeline.?.layout.bindings.get(key)) |slot| {
-                            bindEntry(gl, entry, slot, &cmd.dynamic_offsets);
+                            bindEntry(gl, entry, slot, cmd);
                         }
                     }
                     group.manager.release();
@@ -2590,14 +2597,18 @@ pub const ComputePassEncoder = struct {
         dynamic_offsets: ?[*]const u32,
     ) !void {
         group.manager.reference();
-        var dynamic_offsets_array: std.BoundedArray(u32, limits.max_bind_groups) = .{};
-        if (dynamic_offset_count > 0)
-            dynamic_offsets_array.appendSliceAssumeCapacity(dynamic_offsets.?[0..dynamic_offset_count]);
+        var dynamic_offsets_buf: [limits.max_bind_groups]u32 = undefined;
+        var dynamic_offsets_len: usize = 0;
+        if (dynamic_offset_count > 0) {
+            @memcpy(dynamic_offsets_buf[0..dynamic_offset_count], dynamic_offsets.?[0..dynamic_offset_count]);
+            dynamic_offsets_len = dynamic_offset_count;
+        }
 
         try encoder.commands.append(allocator, .{ .set_compute_bind_group = .{
             .group_index = group_index,
             .group = group,
-            .dynamic_offsets = dynamic_offsets_array,
+            .dynamic_offsets_buf = dynamic_offsets_buf,
+            .dynamic_offsets_len = dynamic_offsets_len,
         } });
     }
 
@@ -2621,14 +2632,16 @@ pub const RenderPassEncoder = struct {
             .reference_tracker = cmd_encoder.reference_tracker,
         };
 
-        var color_attachments: std.BoundedArray(sysgpu.RenderPassColorAttachment, limits.max_color_attachments) = .{};
+        var color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined;
+        var color_attachments_len: usize = 0;
         for (0..desc.color_attachment_count) |i| {
             const attach = &desc.color_attachments.?[i];
             if (attach.view) |view_raw| {
                 const view: *TextureView = @ptrCast(@alignCast(view_raw));
                 view.manager.reference();
             }
-            color_attachments.appendAssumeCapacity(attach.*);
+            color_attachments_buf[color_attachments_len] = attach.*;
+            color_attachments_len += 1;
         }
 
         if (desc.depth_stencil_attachment) |attach| {
@@ -2637,7 +2650,8 @@ pub const RenderPassEncoder = struct {
         }
 
         try encoder.commands.append(allocator, .{ .begin_render_pass = .{
-            .color_attachments = color_attachments,
+            .color_attachments_buf = color_attachments_buf,
+            .color_attachments_len = color_attachments_len,
             .depth_stencil_attachment = if (desc.depth_stencil_attachment) |ds| ds.* else null,
         } });
 
@@ -2692,14 +2706,18 @@ pub const RenderPassEncoder = struct {
         dynamic_offsets: ?[*]const u32,
     ) !void {
         group.manager.reference();
-        var dynamic_offsets_array: std.BoundedArray(u32, limits.max_bind_groups) = .{};
-        if (dynamic_offset_count > 0)
-            dynamic_offsets_array.appendSliceAssumeCapacity(dynamic_offsets.?[0..dynamic_offset_count]);
+        var dynamic_offsets_buf: [limits.max_bind_groups]u32 = undefined;
+        var dynamic_offsets_len: usize = 0;
+        if (dynamic_offset_count > 0) {
+            @memcpy(dynamic_offsets_buf[0..dynamic_offset_count], dynamic_offsets.?[0..dynamic_offset_count]);
+            dynamic_offsets_len = dynamic_offset_count;
+        }
 
         try encoder.commands.append(allocator, .{ .set_render_bind_group = .{
             .group_index = group_index,
             .group = group,
-            .dynamic_offsets = dynamic_offsets_array,
+            .dynamic_offsets_buf = dynamic_offsets_buf,
+            .dynamic_offsets_len = dynamic_offsets_len,
         } });
     }
 

@@ -958,15 +958,16 @@ pub const PipelineLayout = struct {
 
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
         const groups = default_pipeline_layout.groups;
-        var bind_group_layouts = std.BoundedArray(*sysgpu.BindGroupLayout, limits.max_bind_groups){};
+        var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
+        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
-            for (bind_group_layouts.slice()) |bind_group_layout_raw| {
+            for (bind_group_layouts.items) |bind_group_layout_raw| {
                 const bind_group_layout: *BindGroupLayout = @ptrCast(@alignCast(bind_group_layout_raw));
                 bind_group_layout.manager.release();
             }
         }
 
-        for (groups.slice()) |entries| {
+        for (groups.items) |entries| {
             const bind_group_layout = try device.createBindGroupLayout(
                 &sysgpu.BindGroupLayout.Descriptor.init(.{ .entries = entries.items }),
             );
@@ -974,7 +975,7 @@ pub const PipelineLayout = struct {
         }
 
         return device.createPipelineLayout(
-            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.slice() }),
+            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.items }),
         );
     }
 

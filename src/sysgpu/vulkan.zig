@@ -65,7 +65,8 @@ pub const Instance = struct {
         defer allocator.free(available_layers);
         _ = try vkb.enumerateInstanceLayerProperties(&count, available_layers.ptr);
 
-        var layers = std.BoundedArray([*:0]const u8, instance_layers.len){};
+        var layers_buf: [instance_layers.len][*:0]const u8 = undefined;
+        var layers = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&layers_buf);
         for (instance_layers) |optional| {
             for (available_layers) |available| {
                 if (std.mem.eql(
@@ -86,7 +87,8 @@ pub const Instance = struct {
         defer allocator.free(available_extensions);
         _ = try vkb.enumerateInstanceExtensionProperties(null, &count, available_extensions.ptr);
 
-        var extensions = std.BoundedArray([*:0]const u8, instance_extensions.len){};
+        var extensions_buf: [instance_extensions.len][*:0]const u8 = undefined;
+        var extensions = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&extensions_buf);
 
         for (instance_extensions) |required| {
             for (available_extensions) |available| {
@@ -112,10 +114,10 @@ pub const Instance = struct {
         };
         const instance_info = vk.InstanceCreateInfo{
             .p_application_info = &application_info,
-            .enabled_layer_count = @intCast(layers.len),
-            .pp_enabled_layer_names = layers.slice().ptr,
-            .enabled_extension_count = @intCast(extensions.len),
-            .pp_enabled_extension_names = extensions.slice().ptr,
+            .enabled_layer_count = @intCast(layers.items.len),
+            .pp_enabled_layer_names = layers.items.ptr,
+            .enabled_extension_count = @intCast(extensions.items.len),
+            .pp_enabled_extension_names = extensions.items.ptr,
         };
         const vk_instance = try vkb.createInstance(&instance_info, null);
 
@@ -510,7 +512,8 @@ pub const Device = struct {
         defer allocator.free(available_layers);
         _ = try vki.enumerateDeviceLayerProperties(adapter.physical_device, &count, available_layers.ptr);
 
-        var layers = std.BoundedArray([*:0]const u8, device_layers.len){};
+        var layers_buf: [device_layers.len][*:0]const u8 = undefined;
+        var layers = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&layers_buf);
         for (device_layers) |optional| {
             for (available_layers) |available| {
                 if (std.mem.eql(
@@ -531,7 +534,8 @@ pub const Device = struct {
         defer allocator.free(available_extensions);
         _ = try vki.enumerateDeviceExtensionProperties(adapter.physical_device, null, &count, available_extensions.ptr);
 
-        var extensions = std.BoundedArray([*:0]const u8, device_extensions.len){};
+        var extensions_buf: [device_extensions.len][*:0]const u8 = undefined;
+        var extensions = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&extensions_buf);
         for (device_extensions) |required| {
             for (available_extensions) |available| {
                 if (std.mem.eql(
@@ -550,10 +554,10 @@ pub const Device = struct {
         var create_info = vk.DeviceCreateInfo{
             .queue_create_info_count = @intCast(queue_infos.len),
             .p_queue_create_infos = queue_infos.ptr,
-            .enabled_layer_count = @intCast(layers.len),
-            .pp_enabled_layer_names = layers.slice().ptr,
-            .enabled_extension_count = @intCast(extensions.len),
-            .pp_enabled_extension_names = extensions.slice().ptr,
+            .enabled_layer_count = @intCast(layers.items.len),
+            .pp_enabled_layer_names = layers.items.ptr,
+            .enabled_extension_count = @intCast(extensions.items.len),
+            .pp_enabled_extension_names = extensions.items.ptr,
         };
         if (adapter.hasExtension("GetPhysicalDeviceProperties2")) {
             create_info.p_next = &features;
@@ -742,12 +746,13 @@ pub const Device = struct {
     };
 
     pub const RenderPassKey = struct {
-        colors: std.BoundedArray(ColorAttachmentKey, 8),
+        colors_buf: [8]ColorAttachmentKey = undefined,
+        colors_len: usize = 0,
         depth_stencil: ?DepthStencilAttachmentKey,
 
         pub fn init() RenderPassKey {
-            var colors = std.BoundedArray(ColorAttachmentKey, 8){};
-            for (&colors.buffer) |*color| {
+            var colors_buf: [8]ColorAttachmentKey = undefined;
+            for (&colors_buf) |*color| {
                 color.* = .{
                     .format = .undefined,
                     .samples = 1,
@@ -759,7 +764,8 @@ pub const Device = struct {
             }
 
             return .{
-                .colors = .{},
+                .colors_buf = colors_buf,
+                .colors_len = 0,
                 .depth_stencil = null,
             };
         }
@@ -770,10 +776,13 @@ pub const Device = struct {
 
         if (device.render_passes.get(key)) |render_pass| return render_pass;
 
-        var attachments = std.BoundedArray(vk.AttachmentDescription, 8){};
-        var color_refs = std.BoundedArray(vk.AttachmentReference, 8){};
-        var resolve_refs = std.BoundedArray(vk.AttachmentReference, 8){};
-        for (key.colors.slice()) |attach| {
+        var attachments_buf: [8]vk.AttachmentDescription = undefined;
+        var attachments = std.ArrayListUnmanaged(vk.AttachmentDescription).initBuffer(&attachments_buf);
+        var color_refs_buf: [8]vk.AttachmentReference = undefined;
+        var color_refs = std.ArrayListUnmanaged(vk.AttachmentReference).initBuffer(&color_refs_buf);
+        var resolve_refs_buf: [8]vk.AttachmentReference = undefined;
+        var resolve_refs = std.ArrayListUnmanaged(vk.AttachmentReference).initBuffer(&resolve_refs_buf);
+        for (key.colors_buf[0..key.colors_len]) |attach| {
             attachments.appendAssumeCapacity(.{
                 .format = attach.format,
                 .samples = conv.vulkanSampleCount(attach.samples),
@@ -785,7 +794,7 @@ pub const Device = struct {
                 .final_layout = attach.layout,
             });
             color_refs.appendAssumeCapacity(.{
-                .attachment = @intCast(attachments.len - 1),
+                .attachment = @intCast(attachments.items.len - 1),
                 .layout = .color_attachment_optimal,
             });
 
@@ -801,7 +810,7 @@ pub const Device = struct {
                     .final_layout = resolve.layout,
                 });
                 resolve_refs.appendAssumeCapacity(.{
-                    .attachment = @intCast(attachments.len - 1),
+                    .attachment = @intCast(attachments.items.len - 1),
                     .layout = .color_attachment_optimal,
                 });
             }
@@ -831,15 +840,15 @@ pub const Device = struct {
         } else null;
 
         const render_pass = try vkd.createRenderPass(vk_device, &vk.RenderPassCreateInfo{
-            .attachment_count = @intCast(attachments.len),
-            .p_attachments = attachments.slice().ptr,
+            .attachment_count = @intCast(attachments.items.len),
+            .p_attachments = attachments.items.ptr,
             .subpass_count = 1,
             .p_subpasses = &[_]vk.SubpassDescription{
                 .{
                     .pipeline_bind_point = .graphics,
-                    .color_attachment_count = @intCast(color_refs.len),
-                    .p_color_attachments = color_refs.slice().ptr,
-                    .p_resolve_attachments = if (resolve_refs.len != 0) resolve_refs.slice().ptr else null,
+                    .color_attachment_count = @intCast(color_refs.items.len),
+                    .p_color_attachments = color_refs.items.ptr,
+                    .p_resolve_attachments = if (resolve_refs.items.len != 0) resolve_refs.items.ptr else null,
                     .p_depth_stencil_attachment = depth_stencil_ref,
                 },
             },
@@ -1897,13 +1906,14 @@ pub const PipelineLayout = struct {
     }
 
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
-        const groups = default_pipeline_layout.groups;
-        var bind_group_layouts = std.BoundedArray(*sysgpu.BindGroupLayout, limits.max_bind_groups){};
+        const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
+        var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
+        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
-            for (bind_group_layouts.slice()) |bind_group_layout| bind_group_layout.release();
+            for (bind_group_layouts.items) |bind_group_layout| bind_group_layout.release();
         }
 
-        for (groups.slice()) |entries| {
+        for (groups) |entries| {
             const bind_group_layout = try device.createBindGroupLayout(
                 &sysgpu.BindGroupLayout.Descriptor.init(.{ .entries = entries.items }),
             );
@@ -1911,7 +1921,7 @@ pub const PipelineLayout = struct {
         }
 
         return device.createPipelineLayout(
-            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.slice() }),
+            &sysgpu.PipelineLayout.Descriptor.init(.{ .bind_group_layouts = bind_group_layouts.items }),
         );
     }
 
@@ -2041,7 +2051,8 @@ pub const RenderPipeline = struct {
     pub fn init(device: *Device, desc: *const sysgpu.RenderPipeline.Descriptor) !*RenderPipeline {
         const vk_device = device.vk_device;
 
-        var stages = std.BoundedArray(vk.PipelineShaderStageCreateInfo, 2){};
+        var stages_buf: [2]vk.PipelineShaderStageCreateInfo = undefined;
+        var stages = std.ArrayListUnmanaged(vk.PipelineShaderStageCreateInfo).initBuffer(&stages_buf);
 
         const vertex_module: *ShaderModule = @ptrCast(@alignCast(desc.vertex.module));
         stages.appendAssumeCapacity(.{
@@ -2187,14 +2198,15 @@ pub const RenderPipeline = struct {
                         .a_bit = target.write_mask.alpha,
                     },
                 };
-                rp_key.colors.appendAssumeCapacity(.{
+                rp_key.colors_buf[rp_key.colors_len] = .{
                     .format = conv.vulkanFormat(device, target.format),
                     .samples = desc.multisample.count,
                     .load_op = .clear,
                     .store_op = .store,
                     .layout = .color_attachment_optimal,
                     .resolve = null,
-                });
+                };
+                rp_key.colors_len += 1;
             }
         }
 
@@ -2283,8 +2295,8 @@ pub const RenderPipeline = struct {
 
         var vk_pipeline: vk.Pipeline = undefined;
         _ = try vkd.createGraphicsPipelines(vk_device, .null_handle, 1, &[_]vk.GraphicsPipelineCreateInfo{.{
-            .stage_count = @intCast(stages.len),
-            .p_stages = stages.slice().ptr,
+            .stage_count = @intCast(stages.items.len),
+            .p_stages = stages.items.ptr,
             .p_vertex_input_state = &vertex_input,
             .p_input_assembly_state = &input_assembly,
             .p_viewport_state = &viewport,
@@ -2946,7 +2958,8 @@ pub const StateTracker = struct {
             tracker.image_barriers.items.len == 0)
             return;
 
-        var memory_barriers = std.BoundedArray(vk.MemoryBarrier, 1){};
+        var memory_barriers_buf: [1]vk.MemoryBarrier = undefined;
+        var memory_barriers = std.ArrayListUnmanaged(vk.MemoryBarrier).initBuffer(&memory_barriers_buf);
         if (tracker.src_access_mask.merge(tracker.dst_access_mask).toInt() != 0) {
             memory_barriers.appendAssumeCapacity(.{
                 .src_access_mask = tracker.src_access_mask,
@@ -2965,8 +2978,8 @@ pub const StateTracker = struct {
             src_stage_mask,
             tracker.dst_stage_mask,
             .{},
-            @intCast(memory_barriers.len),
-            &memory_barriers.buffer,
+            @intCast(memory_barriers.items.len),
+            memory_barriers.items.ptr,
             0,
             null,
             @intCast(tracker.image_barriers.items.len),
@@ -3208,7 +3221,7 @@ pub const RenderPassEncoder = struct {
                 if (resolve_view) |rv|
                     image_views.appendAssumeCapacity(rv.vk_view);
 
-                rp_key.colors.appendAssumeCapacity(.{
+                rp_key.colors_buf[rp_key.colors_len] = .{
                     .format = view.vk_format,
                     .samples = view.texture.sample_count,
                     .load_op = attach.load_op,
@@ -3218,7 +3231,8 @@ pub const RenderPassEncoder = struct {
                         .format = rv.vk_format,
                         .layout = rv.texture.read_image_layout,
                     } else null,
-                });
+                };
+                rp_key.colors_len += 1;
 
                 try clear_values.append(.{
                     .color = .{

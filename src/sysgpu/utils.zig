@@ -225,14 +225,15 @@ pub const DefaultPipelineLayoutDescriptor = struct {
     pub const Group = std.ArrayListUnmanaged(sysgpu.BindGroupLayout.Entry);
 
     allocator: std.mem.Allocator,
-    groups: std.BoundedArray(Group, limits.max_bind_groups) = .{},
+    groups_buf: [limits.max_bind_groups]Group = undefined,
+    groups_len: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator) DefaultPipelineLayoutDescriptor {
         return .{ .allocator = allocator };
     }
 
     pub fn deinit(desc: *DefaultPipelineLayoutDescriptor) void {
-        for (desc.groups.slice()) |*group| {
+        for (desc.groups_buf[0..desc.groups_len]) |*group| {
             group.deinit(desc.allocator);
         }
     }
@@ -375,12 +376,13 @@ pub const DefaultPipelineLayoutDescriptor = struct {
                     },
                 }
 
-                while (desc.groups.len <= group) {
-                    desc.groups.appendAssumeCapacity(.{});
+                while (desc.groups_len <= group) {
+                    desc.groups_buf[desc.groups_len] = .{};
+                    desc.groups_len += 1;
                 }
 
                 var append = true;
-                var group_entries = &desc.groups.buffer[group];
+                var group_entries = &desc.groups_buf[group];
                 for (group_entries.items) |*previous_entry| {
                     if (previous_entry.binding == binding) {
                         // TODO - bitfield or?
