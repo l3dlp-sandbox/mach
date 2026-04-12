@@ -309,6 +309,7 @@ fn linkSysgpu(b: *std.Build, module: *std.Build.Module) void {
             module.addLibraryPath(dep.path("lib"));
         }
     } else if (target.result.os.tag == .windows) {
+        module.link_libc = true;
         // TODO(build): Windows should never link OpenGL except in debug builds.
         module.linkSystemLibrary("dxgi", .{});
         module.linkSystemLibrary("d3d12", .{});

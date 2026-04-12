@@ -20,7 +20,6 @@ const Key = Core.Key;
 const KeyMods = Core.KeyMods;
 
 const log = std.log.scoped(.mach);
-const EventQueue = std.fifo.LinearFifo(Event, .Dynamic);
 const Win32 = @This();
 
 const window_ex_style: w.WINDOW_EX_STYLE = .{
@@ -265,7 +264,7 @@ fn initWindow(
     {
         // TODO: make this lifetime better
         var surface_descriptor_from_hwnd: gpu.Surface.DescriptorFromWindowsHWND = .{
-            .hinstance = std.os.windows.kernel32.GetModuleHandleW(null).?,
+            .hinstance = w.GetModuleHandleW(null).?,
             .hwnd = hwnd,
         };
         core.windows.setRaw(window_id, .surface_descriptor, .{ .next_in_chain = .{
