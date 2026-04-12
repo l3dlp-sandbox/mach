@@ -5,7 +5,7 @@ const MapModeFlags = @import("main.zig").MapModeFlags;
 const Impl = @import("interface.zig").Impl;
 
 pub const Buffer = opaque {
-    pub const MapCallback = *const fn (status: MapAsyncStatus, userdata: ?*anyopaque) callconv(.C) void;
+    pub const MapCallback = *const fn (status: MapAsyncStatus, userdata: ?*anyopaque) callconv(.c) void;
 
     pub const BindingType = enum(u32) {
         undefined = 0x00000000,
@@ -139,7 +139,7 @@ pub const Buffer = opaque {
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {
-            pub fn cCallback(status: MapAsyncStatus, userdata: ?*anyopaque) callconv(.C) void {
+            pub fn cCallback(status: MapAsyncStatus, userdata: ?*anyopaque) callconv(.c) void {
                 callback(if (Context == void) {} else @as(Context, @ptrCast(@alignCast(userdata))), status);
             }
         };

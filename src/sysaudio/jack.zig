@@ -9,30 +9,30 @@ var lib: Lib = undefined;
 const Lib = struct {
     handle: std.DynLib,
 
-    jack_free: *const fn (ptr: ?*anyopaque) callconv(.C) void,
-    jack_set_error_function: *const fn (?*const fn ([*c]const u8) callconv(.C) void) callconv(.C) void,
-    jack_set_info_function: *const fn (?*const fn ([*c]const u8) callconv(.C) void) callconv(.C) void,
-    jack_client_open: *const fn ([*c]const u8, c.jack_options_t, [*c]c.jack_status_t, ...) callconv(.C) ?*c.jack_client_t,
-    jack_client_close: *const fn (?*c.jack_client_t) callconv(.C) c_int,
-    jack_connect: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8) callconv(.C) c_int,
-    jack_disconnect: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8) callconv(.C) c_int,
-    jack_activate: *const fn (?*c.jack_client_t) callconv(.C) c_int,
-    jack_deactivate: *const fn (?*c.jack_client_t) callconv(.C) c_int,
-    jack_port_by_name: *const fn (?*c.jack_client_t, [*c]const u8) callconv(.C) ?*c.jack_port_t,
-    jack_port_register: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8, c_ulong, c_ulong) callconv(.C) ?*c.jack_port_t,
-    jack_set_sample_rate_callback: *const fn (?*c.jack_client_t, c.JackSampleRateCallback, ?*anyopaque) callconv(.C) c_int,
-    jack_set_port_registration_callback: *const fn (?*c.jack_client_t, c.JackPortRegistrationCallback, ?*anyopaque) callconv(.C) c_int,
-    jack_set_process_callback: *const fn (?*c.jack_client_t, c.JackProcessCallback, ?*anyopaque) callconv(.C) c_int,
-    jack_set_port_rename_callback: *const fn (?*c.jack_client_t, c.JackPortRenameCallback, ?*anyopaque) callconv(.C) c_int,
-    jack_get_sample_rate: *const fn (?*c.jack_client_t) callconv(.C) c.jack_nframes_t,
-    jack_get_ports: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8, c_ulong) callconv(.C) [*c][*c]const u8,
-    jack_port_type: *const fn (port: ?*const c.jack_port_t) callconv(.C) [*c]const u8,
-    jack_port_flags: *const fn (port: ?*const c.jack_port_t) callconv(.C) c_int,
-    jack_port_name: *const fn (?*const c.jack_port_t) callconv(.C) [*c]const u8,
-    jack_port_get_buffer: *const fn (?*c.jack_port_t, c.jack_nframes_t) callconv(.C) ?*anyopaque,
-    jack_port_connected_to: *const fn (?*const c.jack_port_t, [*c]const u8) callconv(.C) c_int,
+    jack_free: *const fn (ptr: ?*anyopaque) callconv(.c) void,
+    jack_set_error_function: *const fn (?*const fn ([*c]const u8) callconv(.c) void) callconv(.c) void,
+    jack_set_info_function: *const fn (?*const fn ([*c]const u8) callconv(.c) void) callconv(.c) void,
+    jack_client_open: *const fn ([*c]const u8, c.jack_options_t, [*c]c.jack_status_t, ...) callconv(.c) ?*c.jack_client_t,
+    jack_client_close: *const fn (?*c.jack_client_t) callconv(.c) c_int,
+    jack_connect: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8) callconv(.c) c_int,
+    jack_disconnect: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8) callconv(.c) c_int,
+    jack_activate: *const fn (?*c.jack_client_t) callconv(.c) c_int,
+    jack_deactivate: *const fn (?*c.jack_client_t) callconv(.c) c_int,
+    jack_port_by_name: *const fn (?*c.jack_client_t, [*c]const u8) callconv(.c) ?*c.jack_port_t,
+    jack_port_register: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8, c_ulong, c_ulong) callconv(.c) ?*c.jack_port_t,
+    jack_set_sample_rate_callback: *const fn (?*c.jack_client_t, c.JackSampleRateCallback, ?*anyopaque) callconv(.c) c_int,
+    jack_set_port_registration_callback: *const fn (?*c.jack_client_t, c.JackPortRegistrationCallback, ?*anyopaque) callconv(.c) c_int,
+    jack_set_process_callback: *const fn (?*c.jack_client_t, c.JackProcessCallback, ?*anyopaque) callconv(.c) c_int,
+    jack_set_port_rename_callback: *const fn (?*c.jack_client_t, c.JackPortRenameCallback, ?*anyopaque) callconv(.c) c_int,
+    jack_get_sample_rate: *const fn (?*c.jack_client_t) callconv(.c) c.jack_nframes_t,
+    jack_get_ports: *const fn (?*c.jack_client_t, [*c]const u8, [*c]const u8, c_ulong) callconv(.c) [*c][*c]const u8,
+    jack_port_type: *const fn (port: ?*const c.jack_port_t) callconv(.c) [*c]const u8,
+    jack_port_flags: *const fn (port: ?*const c.jack_port_t) callconv(.c) c_int,
+    jack_port_name: *const fn (?*const c.jack_port_t) callconv(.c) [*c]const u8,
+    jack_port_get_buffer: *const fn (?*c.jack_port_t, c.jack_nframes_t) callconv(.c) ?*anyopaque,
+    jack_port_connected_to: *const fn (?*const c.jack_port_t, [*c]const u8) callconv(.c) c_int,
     jack_port_type_size: *const fn () c_int,
-    jack_get_buffer_size: *const fn (?*c.jack_client_t) callconv(.C) c.jack_nframes_t,
+    jack_get_buffer_size: *const fn (?*c.jack_client_t) callconv(.c) c.jack_nframes_t,
 
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libjack.so.0", "libjack.so" });
@@ -58,8 +58,8 @@ pub const Context = struct {
     pub fn init(allocator: std.mem.Allocator, options: main.Context.Options) !backends.Context {
         try Lib.load();
 
-        lib.jack_set_error_function(@as(?*const fn ([*c]const u8) callconv(.C) void, @ptrCast(&util.doNothing)));
-        lib.jack_set_info_function(@as(?*const fn ([*c]const u8) callconv(.C) void, @ptrCast(&util.doNothing)));
+        lib.jack_set_error_function(@as(?*const fn ([*c]const u8) callconv(.c) void, @ptrCast(&util.doNothing)));
+        lib.jack_set_info_function(@as(?*const fn ([*c]const u8) callconv(.c) void, @ptrCast(&util.doNothing)));
 
         var status: c.jack_status_t = 0;
         const ctx = try allocator.create(Context);
@@ -155,18 +155,18 @@ pub const Context = struct {
         }
     }
 
-    fn sampleRateCallback(_: c.jack_nframes_t, arg: ?*anyopaque) callconv(.C) c_int {
+    fn sampleRateCallback(_: c.jack_nframes_t, arg: ?*anyopaque) callconv(.c) c_int {
         var ctx = @as(*Context, @ptrCast(@alignCast(arg.?)));
         ctx.watcher.?.deviceChangeFn(ctx.watcher.?.user_data);
         return 0;
     }
 
-    fn portRegistrationCallback(_: c.jack_port_id_t, _: c_int, arg: ?*anyopaque) callconv(.C) void {
+    fn portRegistrationCallback(_: c.jack_port_id_t, _: c_int, arg: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(arg.?)));
         ctx.watcher.?.deviceChangeFn(ctx.watcher.?.user_data);
     }
 
-    fn portRenameCalllback(_: c.jack_port_id_t, _: [*c]const u8, _: [*c]const u8, arg: ?*anyopaque) callconv(.C) void {
+    fn portRenameCalllback(_: c.jack_port_id_t, _: [*c]const u8, _: [*c]const u8, arg: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(arg.?)));
         ctx.watcher.?.deviceChangeFn(ctx.watcher.?.user_data);
     }
@@ -291,7 +291,7 @@ pub const Player = struct {
         }
     }
 
-    fn processCallback(n_frames: c.jack_nframes_t, player_opaque: ?*anyopaque) callconv(.C) c_int {
+    fn processCallback(n_frames: c.jack_nframes_t, player_opaque: ?*anyopaque) callconv(.c) c_int {
         const player = @as(*Player, @ptrCast(@alignCast(player_opaque.?)));
         const num_channels = player.ports.len;
         const frame_size = player.format.frameSize(@intCast(num_channels));
@@ -385,7 +385,7 @@ pub const Recorder = struct {
         }
     }
 
-    fn processCallback(n_frames: c.jack_nframes_t, recorder_opaque: ?*anyopaque) callconv(.C) c_int {
+    fn processCallback(n_frames: c.jack_nframes_t, recorder_opaque: ?*anyopaque) callconv(.c) c_int {
         const recorder = @as(*Recorder, @ptrCast(@alignCast(recorder_opaque.?)));
         const num_channels = recorder.ports.len;
         const frame_size = recorder.format.frameSize(@intCast(num_channels));

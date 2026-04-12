@@ -2228,7 +2228,7 @@ pub const Queue = struct {
         mtl_command_buffer.commit();
     }
 
-    fn completedHandler(block: *ns.BlockLiteral(CompletedContext), mtl_command_buffer: *mtl.CommandBuffer) callconv(.C) void {
+    fn completedHandler(block: *ns.BlockLiteral(CompletedContext), mtl_command_buffer: *mtl.CommandBuffer) callconv(.c) void {
         _ = mtl_command_buffer;
         block.context.queue.completed_value.store(block.context.fence_value, .release);
     }

@@ -163,7 +163,7 @@ fn spvMessageConsumer(
     src: [*c]const u8,
     pos: [*c]const c.spv_position_t,
     msg: [*c]const u8,
-) callconv(.C) void {
+) callconv(.c) void {
     switch (level) {
         c.SPV_MSG_FATAL,
         c.SPV_MSG_INTERNAL_ERROR,
@@ -197,7 +197,7 @@ fn spvExecutionModel(stage: Stage) c.SpvExecutionModel {
     };
 }
 
-fn spvcErrorCallback(userdata: ?*anyopaque, err: [*c]const u8) callconv(.C) void {
+fn spvcErrorCallback(userdata: ?*anyopaque, err: [*c]const u8) callconv(.c) void {
     _ = userdata;
     // TODO - don't panic
     @panic(std.mem.span(err));

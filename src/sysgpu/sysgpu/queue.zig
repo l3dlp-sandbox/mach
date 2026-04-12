@@ -13,7 +13,7 @@ pub const Queue = opaque {
     pub const WorkDoneCallback = *const fn (
         status: WorkDoneStatus,
         userdata: ?*anyopaque,
-    ) callconv(.C) void;
+    ) callconv(.c) void;
 
     pub const WorkDoneStatus = enum(u32) {
         success = 0x00000000,
@@ -43,7 +43,7 @@ pub const Queue = opaque {
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {
-            pub fn cCallback(status: WorkDoneStatus, userdata: ?*anyopaque) callconv(.C) void {
+            pub fn cCallback(status: WorkDoneStatus, userdata: ?*anyopaque) callconv(.c) void {
                 callback(if (Context == void) {} else @as(Context, @ptrCast(@alignCast(userdata))), status);
             }
         };

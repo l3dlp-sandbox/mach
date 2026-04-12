@@ -463,11 +463,11 @@ pub const LibGL = struct {
     const sample_buffers = 0x186a0;
     const samples = 0x186a1;
     handle: std.DynLib,
-    glXCreateContext: *const fn (*c.Display, *c.XVisualInfo, ?*Context, bool) callconv(.C) ?*Context,
-    glXDestroyContext: *const fn (*c.Display, ?*Context) callconv(.C) void,
-    glXMakeCurrent: *const fn (*c.Display, Drawable, ?*Context) callconv(.C) bool,
-    glXChooseVisual: *const fn (*c.Display, c_int, [*]const c_int) callconv(.C) *c.XVisualInfo,
-    glXSwapBuffers: *const fn (*c.Display, Drawable) callconv(.C) bool,
+    glXCreateContext: *const fn (*c.Display, *c.XVisualInfo, ?*Context, bool) callconv(.c) ?*Context,
+    glXDestroyContext: *const fn (*c.Display, ?*Context) callconv(.c) void,
+    glXMakeCurrent: *const fn (*c.Display, Drawable, ?*Context) callconv(.c) bool,
+    glXChooseVisual: *const fn (*c.Display, c_int, [*]const c_int) callconv(.c) *c.XVisualInfo,
+    glXSwapBuffers: *const fn (*c.Display, Drawable) callconv(.c) bool,
 
     pub fn load() !LibGL {
         var lib: LibGL = undefined;

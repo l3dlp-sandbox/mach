@@ -124,7 +124,7 @@ fn messageCallback(
     length: c.GLsizei,
     message: [*c]const c.GLchar,
     user_data: ?*const anyopaque,
-) callconv(.C) void {
+) callconv(.c) void {
     _ = source;
     _ = length;
     _ = user_data;
@@ -656,7 +656,7 @@ pub const SwapChain = struct {
     pixel_format: if (builtin.target.os.tag == .windows) c_int else void,
     x11_display: if (builtin.target.os.tag == .linux) ?*anyopaque else void,
     x11_window: if (builtin.target.os.tag == .linux) u32 else void,
-    glXSwapBuffers: if (builtin.target.os.tag == .linux) *const fn (*anyopaque, c_ulong) callconv(.C) bool else void,
+    glXSwapBuffers: if (builtin.target.os.tag == .linux) *const fn (*anyopaque, c_ulong) callconv(.c) bool else void,
     back_buffer_count: u32,
     textures: [max_back_buffer_count]*Texture,
     views: [max_back_buffer_count]*TextureView,
@@ -688,7 +688,7 @@ pub const SwapChain = struct {
             .x11_display = if (builtin.target.os.tag == .linux) surface.x11_display else {},
             .x11_window = if (builtin.target.os.tag == .linux) surface.x11_window else {},
             .glXSwapBuffers = if (builtin.target.os.tag == .linux) blk: {
-                break :blk proc.libgl.lookup(*const fn (*anyopaque, c_ulong) callconv(.C) bool, "glXSwapBuffers") orelse return error.SymbolNotFound;
+                break :blk proc.libgl.lookup(*const fn (*anyopaque, c_ulong) callconv(.c) bool, "glXSwapBuffers") orelse return error.SymbolNotFound;
             } else {},
             .back_buffer_count = back_buffer_count,
             .textures = textures.buffer,

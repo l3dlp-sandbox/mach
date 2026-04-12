@@ -41,7 +41,7 @@ pub const Instance = opaque {
                 adapter: ?*Adapter,
                 message: ?[*:0]const u8,
                 userdata: ?*anyopaque,
-            ) callconv(.C) void {
+            ) callconv(.c) void {
                 callback(
                     if (Context == void) {} else @as(Context, @ptrCast(@alignCast(userdata))),
                     status,

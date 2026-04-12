@@ -42,7 +42,7 @@ var core_ptr: *Core = undefined;
 // and then the linker gets confused. They reference undefined `libwaylandclient` at
 // compile time, but since they are not run until run time, after `libwaylandclient` is
 // defined, an error never occurs.
-export fn wl_proxy_add_listener(proxy: ?*c.struct_wl_proxy, implementation: [*c]?*const fn () callconv(.C) void, data: ?*anyopaque) c_int {
+export fn wl_proxy_add_listener(proxy: ?*c.struct_wl_proxy, implementation: [*c]?*const fn () callconv(.c) void, data: ?*anyopaque) c_int {
     return @call(.always_tail, libwaylandclient.?.wl_proxy_add_listener, .{ proxy, implementation, data });
 }
 export fn wl_proxy_get_version(proxy: ?*c.struct_wl_proxy) u32 {
@@ -58,7 +58,7 @@ export fn wl_proxy_get_version(proxy: ?*c.struct_wl_proxy) u32 {
 //     return @call(.always_tail, libwaylandclient.?.wl_proxy_marshal_flags, .{ proxy, opcode, interface, version, flags, arg_list });
 // }
 //
-export var wl_proxy_marshal_array_flags_ptr: ?*const fn () callconv(.C) void = null;
+export var wl_proxy_marshal_array_flags_ptr: ?*const fn () callconv(.c) void = null;
 // TODO(aarch64-linux): remove the code above, and uncomment the commented out code once aarch64-linux has a varargs implementation.
 
 export fn wl_proxy_destroy(proxy: ?*c.struct_wl_proxy) void {
@@ -257,10 +257,10 @@ pub fn initWindow(
     try core.initWindow(window_id);
 }
 
-const DispatchFn = fn (*anyopaque, c_int) callconv(.C) c_int;
+const DispatchFn = fn (*anyopaque, c_int) callconv(.c) c_int;
 
 // thin wrapper to match the function signature of libdecor dispatch
-fn wlDispatchHelper(ctx: *anyopaque, _: c_int) callconv(.C) c_int {
+fn wlDispatchHelper(ctx: *anyopaque, _: c_int) callconv(.c) c_int {
     return libwaylandclient.?.wl_display_dispatch(@ptrCast(ctx));
 }
 
@@ -459,7 +459,7 @@ const KeyModInd = struct {
 };
 
 const registry_listener = struct {
-    fn registryHandleGlobal(window_id: mach.ObjectID, registry: ?*c.struct_wl_registry, name: u32, interface_ptr: [*:0]const u8, version: u32) callconv(.C) void {
+    fn registryHandleGlobal(window_id: mach.ObjectID, registry: ?*c.struct_wl_registry, name: u32, interface_ptr: [*:0]const u8, version: u32) callconv(.c) void {
         const interface = std.mem.span(interface_ptr);
         var core_window = core_ptr.windows.getValue(window_id);
         const wl = &core_window.native.?.wayland;
@@ -536,7 +536,7 @@ const registry_listener = struct {
         core_ptr.windows.setValue(window_id, core_window);
     }
 
-    fn registryHandleGlobalRemove(window_id: mach.ObjectID, registry: ?*c.struct_wl_registry, name: u32) callconv(.C) void {
+    fn registryHandleGlobalRemove(window_id: mach.ObjectID, registry: ?*c.struct_wl_registry, name: u32) callconv(.c) void {
         _ = window_id;
         _ = registry;
         _ = name;
@@ -609,7 +609,7 @@ const wl_output_listener = struct {
 };
 
 const keyboard_listener = struct {
-    fn keyboardHandleKeymap(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, format: u32, fd: i32, keymap_size: u32) callconv(.C) void {
+    fn keyboardHandleKeymap(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, format: u32, fd: i32, keymap_size: u32) callconv(.c) void {
         _ = keyboard;
         var core_window = core_ptr.windows.getValue(window_id);
         const wl = &core_window.native.?.wayland;
@@ -669,7 +669,7 @@ const keyboard_listener = struct {
         core_ptr.windows.setValue(window_id, core_window);
     }
 
-    fn keyboardHandleEnter(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, surface: ?*c.struct_wl_surface, keys: [*c]c.struct_wl_array) callconv(.C) void {
+    fn keyboardHandleEnter(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, surface: ?*c.struct_wl_surface, keys: [*c]c.struct_wl_array) callconv(.c) void {
         _ = keyboard;
         _ = serial;
         _ = surface;
@@ -678,7 +678,7 @@ const keyboard_listener = struct {
         core_ptr.pushEvent(.{ .focus_gained = .{ .window_id = window_id } });
     }
 
-    fn keyboardHandleLeave(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, surface: ?*c.struct_wl_surface) callconv(.C) void {
+    fn keyboardHandleLeave(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, surface: ?*c.struct_wl_surface) callconv(.c) void {
         _ = keyboard;
         _ = serial;
         _ = surface;
@@ -686,7 +686,7 @@ const keyboard_listener = struct {
         core_ptr.pushEvent(.{ .focus_lost = .{ .window_id = window_id } });
     }
 
-    fn keyboardHandleKey(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, time: u32, scancode: u32, state: u32) callconv(.C) void {
+    fn keyboardHandleKey(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, time: u32, scancode: u32, state: u32) callconv(.c) void {
         _ = keyboard;
         _ = serial;
         _ = time;
@@ -716,7 +716,7 @@ const keyboard_listener = struct {
         }
     }
 
-    fn keyboardHandleModifiers(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, mods_depressed: u32, mods_latched: u32, mods_locked: u32, group: u32) callconv(.C) void {
+    fn keyboardHandleModifiers(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, serial: u32, mods_depressed: u32, mods_latched: u32, mods_locked: u32, group: u32) callconv(.c) void {
         _ = keyboard;
         _ = serial;
         var core_window = core_ptr.windows.getValue(window_id);
@@ -755,7 +755,7 @@ const keyboard_listener = struct {
         core_ptr.windows.setValue(window_id, core_window);
     }
 
-    fn keyboardHandleRepeatInfo(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, rate: i32, delay: i32) callconv(.C) void {
+    fn keyboardHandleRepeatInfo(window_id: mach.ObjectID, keyboard: ?*c.struct_wl_keyboard, rate: i32, delay: i32) callconv(.c) void {
         _ = window_id;
         _ = keyboard;
         _ = rate;
@@ -773,7 +773,7 @@ const keyboard_listener = struct {
 };
 
 const pointer_listener = struct {
-    fn handlePointerAxis(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, time: u32, axis: u32, value: c.wl_fixed_t) callconv(.C) void {
+    fn handlePointerAxis(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, time: u32, axis: u32, value: c.wl_fixed_t) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = time;
@@ -781,46 +781,46 @@ const pointer_listener = struct {
         _ = value;
     }
 
-    fn handlePointerFrame(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer) callconv(.C) void {
+    fn handlePointerFrame(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer) callconv(.c) void {
         _ = window_id;
         _ = pointer;
     }
 
-    fn handlePointerAxisSource(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis_source: u32) callconv(.C) void {
+    fn handlePointerAxisSource(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis_source: u32) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = axis_source;
     }
 
-    fn handlePointerAxisStop(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, time: u32, axis: u32) callconv(.C) void {
+    fn handlePointerAxisStop(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, time: u32, axis: u32) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = time;
         _ = axis;
     }
 
-    fn handlePointerAxisDiscrete(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, discrete: i32) callconv(.C) void {
+    fn handlePointerAxisDiscrete(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, discrete: i32) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = axis;
         _ = discrete;
     }
 
-    fn handlePointerAxisValue120(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, value_120: i32) callconv(.C) void {
+    fn handlePointerAxisValue120(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, value_120: i32) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = axis;
         _ = value_120;
     }
 
-    fn handlePointerAxisRelativeDirection(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, direction: u32) callconv(.C) void {
+    fn handlePointerAxisRelativeDirection(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, axis: u32, direction: u32) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = axis;
         _ = direction;
     }
 
-    fn handlePointerEnter(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, surface: ?*c.struct_wl_surface, fixed_x: c.wl_fixed_t, fixed_y: c.wl_fixed_t) callconv(.C) void {
+    fn handlePointerEnter(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, surface: ?*c.struct_wl_surface, fixed_x: c.wl_fixed_t, fixed_y: c.wl_fixed_t) callconv(.c) void {
         _ = fixed_x;
         _ = fixed_y;
         _ = window_id;
@@ -829,14 +829,14 @@ const pointer_listener = struct {
         _ = surface;
     }
 
-    fn handlePointerLeave(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, surface: ?*c.struct_wl_surface) callconv(.C) void {
+    fn handlePointerLeave(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, surface: ?*c.struct_wl_surface) callconv(.c) void {
         _ = window_id;
         _ = pointer;
         _ = serial;
         _ = surface;
     }
 
-    fn handlePointerMotion(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, fixed_x: c.wl_fixed_t, fixed_y: c.wl_fixed_t) callconv(.C) void {
+    fn handlePointerMotion(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, fixed_x: c.wl_fixed_t, fixed_y: c.wl_fixed_t) callconv(.c) void {
         _ = pointer;
         _ = serial;
 
@@ -846,7 +846,7 @@ const pointer_listener = struct {
         core_ptr.pushEvent(.{ .mouse_motion = .{ .pos = .{ .x = x, .y = y }, .window_id = window_id } });
     }
 
-    fn handlePointerButton(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, time: u32, button: u32, state: u32) callconv(.C) void {
+    fn handlePointerButton(window_id: mach.ObjectID, pointer: ?*c.struct_wl_pointer, serial: u32, time: u32, button: u32, state: u32) callconv(.c) void {
         _ = pointer;
         _ = serial;
         _ = time;
@@ -890,13 +890,13 @@ const pointer_listener = struct {
 };
 
 const seat_listener = struct {
-    fn seatHandleName(window_id: mach.ObjectID, seat: ?*c.struct_wl_seat, name_ptr: [*:0]const u8) callconv(.C) void {
+    fn seatHandleName(window_id: mach.ObjectID, seat: ?*c.struct_wl_seat, name_ptr: [*:0]const u8) callconv(.c) void {
         _ = window_id;
         _ = seat;
         _ = name_ptr;
     }
 
-    fn seatHandleCapabilities(window_id: mach.ObjectID, seat: ?*c.struct_wl_seat, caps: c.wl_seat_capability) callconv(.C) void {
+    fn seatHandleCapabilities(window_id: mach.ObjectID, seat: ?*c.struct_wl_seat, caps: c.wl_seat_capability) callconv(.c) void {
         var core_window = core_ptr.windows.getValue(window_id);
         const wl = &core_window.native.?.wayland;
         var changed = false;
@@ -950,7 +950,7 @@ const seat_listener = struct {
 };
 
 const xdg_wm_base_listener = struct {
-    fn wmBaseHandlePing(window_id: mach.ObjectID, wm_base: ?*c.struct_xdg_wm_base, serial: u32) callconv(.C) void {
+    fn wmBaseHandlePing(window_id: mach.ObjectID, wm_base: ?*c.struct_xdg_wm_base, serial: u32) callconv(.c) void {
         _ = window_id;
         c.xdg_wm_base_pong(wm_base, serial);
     }
@@ -959,7 +959,7 @@ const xdg_wm_base_listener = struct {
 };
 
 const xdg_surface_listener = struct {
-    fn xdgSurfaceHandleConfigure(window_id: mach.ObjectID, xdg_surface: ?*c.struct_xdg_surface, serial: u32) callconv(.C) void {
+    fn xdgSurfaceHandleConfigure(window_id: mach.ObjectID, xdg_surface: ?*c.struct_xdg_surface, serial: u32) callconv(.c) void {
         c.xdg_surface_ack_configure(xdg_surface, serial);
         var core_window = core_ptr.windows.getValue(window_id);
         const wl = &core_window.native.?.wayland;
@@ -979,13 +979,13 @@ const xdg_surface_listener = struct {
 };
 
 const xdg_toplevel_listener = struct {
-    fn xdgToplevelHandleClose(window_id: mach.ObjectID, toplevel: ?*c.struct_xdg_toplevel) callconv(.C) void {
+    fn xdgToplevelHandleClose(window_id: mach.ObjectID, toplevel: ?*c.struct_xdg_toplevel) callconv(.c) void {
         // TODO: implement this
         _ = window_id;
         _ = toplevel;
     }
 
-    fn xdgToplevelHandleConfigure(window_id: mach.ObjectID, toplevel: ?*c.struct_xdg_toplevel, width: i32, height: i32, states: [*c]c.struct_wl_array) callconv(.C) void {
+    fn xdgToplevelHandleConfigure(window_id: mach.ObjectID, toplevel: ?*c.struct_xdg_toplevel, width: i32, height: i32, states: [*c]c.struct_wl_array) callconv(.c) void {
         var core_window = core_ptr.windows.getValue(window_id);
         _ = toplevel;
         _ = states;

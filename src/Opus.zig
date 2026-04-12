@@ -93,13 +93,13 @@ const Decoder = struct {
     samples: []f32 = &.{},
     sample_index: usize = 0,
 
-    fn readCallback(decoder_opaque: ?*anyopaque, ptr: [*c]u8, nbytes: c_int) callconv(.C) c_int {
+    fn readCallback(decoder_opaque: ?*anyopaque, ptr: [*c]u8, nbytes: c_int) callconv(.c) c_int {
         const decoder: *Decoder = @ptrCast(@alignCast(decoder_opaque));
         const read = decoder.stream.read(ptr[0..@intCast(nbytes)]) catch return -1;
         return @intCast(read);
     }
 
-    fn seekCallback(decoder_opaque: ?*anyopaque, offset: i64, whence: c_int) callconv(.C) c_int {
+    fn seekCallback(decoder_opaque: ?*anyopaque, offset: i64, whence: c_int) callconv(.c) c_int {
         const decoder: *Decoder = @ptrCast(@alignCast(decoder_opaque));
         switch (whence) {
             c.SEEK_SET => decoder.stream.seekTo(@intCast(offset)) catch return -1,
@@ -110,13 +110,13 @@ const Decoder = struct {
         return 0;
     }
 
-    fn tellCallback(decoder_opaque: ?*anyopaque) callconv(.C) i64 {
+    fn tellCallback(decoder_opaque: ?*anyopaque) callconv(.c) i64 {
         const decoder: *Decoder = @ptrCast(@alignCast(decoder_opaque));
         const pos = decoder.stream.getPos() catch unreachable;
         return @intCast(pos);
     }
 
-    fn closeCallback(decoder_opaque: ?*anyopaque) callconv(.C) c_int {
+    fn closeCallback(decoder_opaque: ?*anyopaque) callconv(.c) c_int {
         _ = decoder_opaque;
         return 0;
     }
@@ -233,13 +233,13 @@ pub fn encodeStream(
 const Encoder = struct {
     stream: std.io.StreamSource,
 
-    fn writeCallback(encoder_opaque: ?*anyopaque, ptr: [*c]const u8, len: i32) callconv(.C) c_int {
+    fn writeCallback(encoder_opaque: ?*anyopaque, ptr: [*c]const u8, len: i32) callconv(.c) c_int {
         const encoder: *Encoder = @ptrCast(@alignCast(encoder_opaque));
         _ = encoder.stream.write(ptr[0..@intCast(len)]) catch return 1;
         return 0;
     }
 
-    fn closeCallback(encoder_opaque: ?*anyopaque) callconv(.C) c_int {
+    fn closeCallback(encoder_opaque: ?*anyopaque) callconv(.c) c_int {
         _ = encoder_opaque;
         return 0;
     }

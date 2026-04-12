@@ -58,7 +58,7 @@ pub const RenderLoop = struct {
         objc.system.dispatch_source_cancel(self.display_source);
     }
 
-    fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.C) void {
+    fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.c) void {
         const self: *RenderLoop = @ptrCast(@alignCast(ctx));
 
         // Render all windows with vsync enabled, sequentially
@@ -84,7 +84,7 @@ pub const RenderLoop = struct {
         _: u64,
         _: *u64,
         ctx: ?*anyopaque,
-    ) callconv(.C) objc.core_video.CVReturn {
+    ) callconv(.c) objc.core_video.CVReturn {
         const source: objc.system.dispatch_source_t = @ptrCast(@alignCast(ctx));
         objc.system.dispatch_source_merge_data(source, 1);
         return 0; // kCVReturnSuccess
@@ -105,7 +105,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
         // TODO: port libdispatch and use it instead of doing this directly.
         extern "System" fn dispatch_async(queue: *anyopaque, block: *objc.foundation.Block(fn () void)) void;
         extern "System" var _dispatch_main_q: anyopaque;
-        pub fn cCallback(block: *objc.foundation.BlockLiteral(ArgsBytes)) callconv(.C) void {
+        pub fn cCallback(block: *objc.foundation.BlockLiteral(ArgsBytes)) callconv(.c) void {
             const args: *Args = @ptrCast(&block.context);
             if (@call(.auto, on_each_update_fn, args.*) catch false) {
                 dispatch_async(&_dispatch_main_q, block.asBlockWithSignature(fn () void));
@@ -229,7 +229,7 @@ fn initWindow(
         // On macos, the command key in particular seems to be handled a bit differently and tends to block the `keyUp` event
         // from firing. To remedy this, we borrow the same fix GLFW uses and add a monitor.
         const commandFn = struct {
-            pub fn commandFn(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) ?*objc.app_kit.Event {
+            pub fn commandFn(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) ?*objc.app_kit.Event {
                 const core_: *Core = block.context.core;
                 const window_id_ = block.context.window_id;
 
@@ -455,7 +455,7 @@ fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core)) !void {
 }
 
 const WindowDelegateCallbacks = struct {
-    pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*Context)) callconv(.C) void {
+    pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*Context)) callconv(.c) void {
         const core: *Core = block.context.core;
 
         var core_window = core.windows.getValue(block.context.window_id);
@@ -493,7 +493,7 @@ const WindowDelegateCallbacks = struct {
         }
     }
 
-    pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*Context)) callconv(.C) bool {
+    pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*Context)) callconv(.c) bool {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -511,7 +511,7 @@ const WindowDelegateCallbacks = struct {
 };
 
 const ViewCallbacks = struct {
-    pub fn mouseMoved(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn mouseMoved(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -525,7 +525,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn mouseDown(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn mouseDown(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -536,7 +536,7 @@ const ViewCallbacks = struct {
             .mods = machModifierFromModifierFlag(event.modifierFlags()),
         } });
     }
-    pub fn mouseUp(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn mouseUp(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -548,7 +548,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn scrollWheel(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn scrollWheel(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -568,7 +568,7 @@ const ViewCallbacks = struct {
     }
 
     // This is currently only supported on macOS using a trackpad
-    pub fn magnify(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn magnify(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -579,7 +579,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn keyDown(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn keyDown(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
         if (event.isARepeat()) {
@@ -597,7 +597,7 @@ const ViewCallbacks = struct {
         }
     }
 
-    pub fn insertText(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event, codepoint: u32) callconv(.C) void {
+    pub fn insertText(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event, codepoint: u32) callconv(.c) void {
         _ = event; // autofix
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
@@ -607,7 +607,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn keyUp(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn keyUp(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -618,7 +618,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn flagsChanged(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.C) void {
+    pub fn flagsChanged(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 

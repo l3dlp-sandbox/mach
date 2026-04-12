@@ -527,7 +527,7 @@ pub const Player = struct {
         bus_number: u32,
         frames_left: u32,
         buf: [*c]c.AudioBufferList,
-    ) callconv(.C) c.OSStatus {
+    ) callconv(.c) c.OSStatus {
         _ = action_flags;
         _ = time_stamp;
         _ = bus_number;
@@ -621,7 +621,7 @@ pub const Recorder = struct {
         bus_number: u32,
         num_frames: u32,
         buffer_list: [*c]c.AudioBufferList,
-    ) callconv(.C) c.OSStatus {
+    ) callconv(.c) c.OSStatus {
         _ = buffer_list;
 
         const recorder = @as(*Recorder, @ptrCast(@alignCast(recorder_opaque.?)));

@@ -58,4 +58,4 @@ pub fn Range(comptime T: type) type {
     };
 }
 
-pub fn doNothing() callconv(.C) void {}
+pub fn doNothing() callconv(.c) void {}

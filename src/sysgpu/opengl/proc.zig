@@ -5,7 +5,7 @@ const mach = @import("../../main.zig");
 
 pub var libgl: std.DynLib = undefined;
 
-const GlFuncPtr = *align(1) const fn () callconv(.C) void;
+const GlFuncPtr = *align(1) const fn () callconv(.c) void;
 
 fn removeOptional(comptime T: type) type {
     return switch (@typeInfo(T)) {
@@ -30,12 +30,12 @@ fn getExtProcAddress(name_ptr: [*:0]const u8) ?GlFuncPtr {
     }
 }
 
-var glXGetProcAddress: ?*const fn ([*:0]const u8) callconv(.C) ?GlFuncPtr = null;
+var glXGetProcAddress: ?*const fn ([*:0]const u8) callconv(.c) ?GlFuncPtr = null;
 
 pub fn init() !void {
     if (builtin.target.os.tag == .linux) {
         libgl = try mach.dynLibOpen(.{ "libGL.so.1", "libGL.so" });
-        glXGetProcAddress = libgl.lookup(*const fn ([*:0]const u8) callconv(.C) ?GlFuncPtr, "glXGetProcAddress");
+        glXGetProcAddress = libgl.lookup(*const fn ([*:0]const u8) callconv(.c) ?GlFuncPtr, "glXGetProcAddress");
     } else {
         libgl = try mach.dynLibOpen(.{"opengl32.dll"});
     }

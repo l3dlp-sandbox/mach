@@ -14,24 +14,24 @@ var lib: Lib = undefined;
 const Lib = struct {
     handle: std.DynLib,
 
-    pw_init: *const fn ([*c]c_int, [*c][*c][*c]u8) callconv(.C) void,
-    pw_deinit: *const fn () callconv(.C) void,
-    pw_thread_loop_new: *const fn ([*c]const u8, [*c]const c.spa_dict) callconv(.C) ?*c.pw_thread_loop,
-    pw_thread_loop_destroy: *const fn (?*c.pw_thread_loop) callconv(.C) void,
-    pw_thread_loop_start: *const fn (?*c.pw_thread_loop) callconv(.C) c_int,
-    pw_thread_loop_stop: *const fn (?*c.pw_thread_loop) callconv(.C) void,
-    pw_thread_loop_signal: *const fn (?*c.pw_thread_loop, bool) callconv(.C) void,
-    pw_thread_loop_wait: *const fn (?*c.pw_thread_loop) callconv(.C) void,
-    pw_thread_loop_lock: *const fn (?*c.pw_thread_loop) callconv(.C) void,
-    pw_thread_loop_unlock: *const fn (?*c.pw_thread_loop) callconv(.C) void,
-    pw_thread_loop_get_loop: *const fn (?*c.pw_thread_loop) callconv(.C) [*c]c.pw_loop,
-    pw_properties_new: *const fn ([*c]const u8, ...) callconv(.C) [*c]c.pw_properties,
-    pw_stream_new_simple: *const fn ([*c]c.pw_loop, [*c]const u8, [*c]c.pw_properties, [*c]const c.pw_stream_events, ?*anyopaque) callconv(.C) ?*c.pw_stream,
-    pw_stream_destroy: *const fn (?*c.pw_stream) callconv(.C) void,
-    pw_stream_connect: *const fn (?*c.pw_stream, c.spa_direction, u32, c.pw_stream_flags, [*c][*c]const c.spa_pod, u32) callconv(.C) c_int,
-    pw_stream_queue_buffer: *const fn (?*c.pw_stream, [*c]c.pw_buffer) callconv(.C) c_int,
-    pw_stream_dequeue_buffer: *const fn (?*c.pw_stream) callconv(.C) [*c]c.pw_buffer,
-    pw_stream_get_state: *const fn (?*c.pw_stream, [*c][*c]const u8) callconv(.C) c.pw_stream_state,
+    pw_init: *const fn ([*c]c_int, [*c][*c][*c]u8) callconv(.c) void,
+    pw_deinit: *const fn () callconv(.c) void,
+    pw_thread_loop_new: *const fn ([*c]const u8, [*c]const c.spa_dict) callconv(.c) ?*c.pw_thread_loop,
+    pw_thread_loop_destroy: *const fn (?*c.pw_thread_loop) callconv(.c) void,
+    pw_thread_loop_start: *const fn (?*c.pw_thread_loop) callconv(.c) c_int,
+    pw_thread_loop_stop: *const fn (?*c.pw_thread_loop) callconv(.c) void,
+    pw_thread_loop_signal: *const fn (?*c.pw_thread_loop, bool) callconv(.c) void,
+    pw_thread_loop_wait: *const fn (?*c.pw_thread_loop) callconv(.c) void,
+    pw_thread_loop_lock: *const fn (?*c.pw_thread_loop) callconv(.c) void,
+    pw_thread_loop_unlock: *const fn (?*c.pw_thread_loop) callconv(.c) void,
+    pw_thread_loop_get_loop: *const fn (?*c.pw_thread_loop) callconv(.c) [*c]c.pw_loop,
+    pw_properties_new: *const fn ([*c]const u8, ...) callconv(.c) [*c]c.pw_properties,
+    pw_stream_new_simple: *const fn ([*c]c.pw_loop, [*c]const u8, [*c]c.pw_properties, [*c]const c.pw_stream_events, ?*anyopaque) callconv(.c) ?*c.pw_stream,
+    pw_stream_destroy: *const fn (?*c.pw_stream) callconv(.c) void,
+    pw_stream_connect: *const fn (?*c.pw_stream, c.spa_direction, u32, c.pw_stream_flags, [*c][*c]const c.spa_pod, u32) callconv(.c) c_int,
+    pw_stream_queue_buffer: *const fn (?*c.pw_stream, [*c]c.pw_buffer) callconv(.c) c_int,
+    pw_stream_dequeue_buffer: *const fn (?*c.pw_stream) callconv(.c) [*c]c.pw_buffer,
+    pw_stream_get_state: *const fn (?*c.pw_stream, [*c][*c]const u8) callconv(.c) c.pw_stream_state,
 
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libpipewire-0.3.so.0", "libpipewire-0.3.so" });
@@ -364,7 +364,7 @@ pub const Context = struct {
     }
 };
 
-fn stateChangedCb(player_opaque: ?*anyopaque, old_state: c.pw_stream_state, state: c.pw_stream_state, err: [*c]const u8) callconv(.C) void {
+fn stateChangedCb(player_opaque: ?*anyopaque, old_state: c.pw_stream_state, state: c.pw_stream_state, err: [*c]const u8) callconv(.c) void {
     _ = old_state;
     _ = err;
 
@@ -388,7 +388,7 @@ pub const Player = struct {
     format: main.Format,
     sample_rate: u24,
 
-    pub fn processCb(player_opaque: ?*anyopaque) callconv(.C) void {
+    pub fn processCb(player_opaque: ?*anyopaque) callconv(.c) void {
         var player = @as(*Player, @ptrCast(@alignCast(player_opaque.?)));
 
         const buf = lib.pw_stream_dequeue_buffer(player.stream) orelse return;
@@ -463,7 +463,7 @@ pub const Recorder = struct {
     format: main.Format,
     sample_rate: u24,
 
-    pub fn processCb(recorder_opaque: ?*anyopaque) callconv(.C) void {
+    pub fn processCb(recorder_opaque: ?*anyopaque) callconv(.c) void {
         var recorder = @as(*Recorder, @ptrCast(@alignCast(recorder_opaque.?)));
 
         const buf = lib.pw_stream_dequeue_buffer(recorder.stream) orelse return;
@@ -525,4 +525,4 @@ fn freeDevice(allocator: std.mem.Allocator, device: main.Device) void {
     allocator.free(device.channels);
 }
 
-extern fn sysaudio_spa_format_audio_raw_build(builder: [*c]c.spa_pod_builder, id: u32, info: [*c]c.spa_audio_info_raw) callconv(.C) [*c]c.spa_pod;
+extern fn sysaudio_spa_format_audio_raw_build(builder: [*c]c.spa_pod_builder, id: u32, info: [*c]c.spa_audio_info_raw) callconv(.c) [*c]c.spa_pod;

@@ -54,8 +54,8 @@ pub const whole_map_size = std.math.maxInt(usize);
 pub const whole_size = 0xffffffffffffffff;
 
 /// Generic function pointer type, used for returning API function pointers. Must be
-/// cast to the right `fn (...) callconv(.C) T` type before use.
-pub const Proc = *const fn () callconv(.C) void;
+/// cast to the right `fn (...) callconv(.c) T` type before use.
+pub const Proc = *const fn () callconv(.c) void;
 
 /// 32-bit unsigned boolean type, as used in webgpu.h
 pub const Bool32 = enum(u32) {
@@ -962,47 +962,47 @@ pub const CompilationInfoCallback = *const fn (
     status: CompilationInfoRequestStatus,
     compilation_info: *const CompilationInfo,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const ErrorCallback = *const fn (
     typ: ErrorType,
     message: [*:0]const u8,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const LoggingCallback = *const fn (
     typ: LoggingType,
     message: [*:0]const u8,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const RequestDeviceCallback = *const fn (
     status: RequestDeviceStatus,
     device: *Device,
     message: ?[*:0]const u8,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const RequestAdapterCallback = *const fn (
     status: RequestAdapterStatus,
     adapter: ?*Adapter,
     message: ?[*:0]const u8,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const CreateComputePipelineAsyncCallback = *const fn (
     status: CreatePipelineAsyncStatus,
     compute_pipeline: ?*ComputePipeline,
     message: ?[*:0]const u8,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const CreateRenderPipelineAsyncCallback = *const fn (
     status: CreatePipelineAsyncStatus,
     pipeline: ?*RenderPipeline,
     message: ?[*:0]const u8,
     userdata: ?*anyopaque,
-) callconv(.C) void;
+) callconv(.c) void;
 
 test {
     std.testing.refAllDeclsRecursive(@This());

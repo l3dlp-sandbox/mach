@@ -13,51 +13,51 @@ var lib: Lib = undefined;
 const Lib = struct {
     handle: std.DynLib,
 
-    pa_threaded_mainloop_new: *const fn () callconv(.C) ?*c.pa_threaded_mainloop,
-    pa_threaded_mainloop_free: *const fn (?*c.pa_threaded_mainloop) callconv(.C) void,
-    pa_threaded_mainloop_start: *const fn (?*c.pa_threaded_mainloop) callconv(.C) c_int,
-    pa_threaded_mainloop_stop: *const fn (?*c.pa_threaded_mainloop) callconv(.C) void,
-    pa_threaded_mainloop_signal: *const fn (?*c.pa_threaded_mainloop, c_int) callconv(.C) void,
-    pa_threaded_mainloop_wait: *const fn (?*c.pa_threaded_mainloop) callconv(.C) void,
-    pa_threaded_mainloop_lock: *const fn (?*c.pa_threaded_mainloop) callconv(.C) void,
-    pa_threaded_mainloop_unlock: *const fn (?*c.pa_threaded_mainloop) callconv(.C) void,
-    pa_threaded_mainloop_get_api: *const fn (?*c.pa_threaded_mainloop) callconv(.C) [*c]c.pa_mainloop_api,
-    pa_operation_unref: *const fn (?*c.pa_operation) callconv(.C) void,
-    pa_operation_get_state: *const fn (?*const c.pa_operation) callconv(.C) c.pa_operation_state_t,
-    pa_context_new_with_proplist: *const fn ([*c]c.pa_mainloop_api, [*c]const u8, ?*const c.pa_proplist) callconv(.C) ?*c.pa_context,
-    pa_context_unref: *const fn (?*c.pa_context) callconv(.C) void,
-    pa_context_connect: *const fn (?*c.pa_context, [*c]const u8, c.pa_context_flags_t, [*c]const c.pa_spawn_api) callconv(.C) c_int,
-    pa_context_disconnect: *const fn (?*c.pa_context) callconv(.C) void,
-    pa_context_subscribe: *const fn (?*c.pa_context, c.pa_subscription_mask_t, c.pa_context_success_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_context_get_state: *const fn (?*const c.pa_context) callconv(.C) c.pa_context_state_t,
-    pa_context_set_state_callback: *const fn (?*c.pa_context, c.pa_context_notify_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_context_set_subscribe_callback: *const fn (?*c.pa_context, c.pa_context_subscribe_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_context_get_sink_input_info: *const fn (?*c.pa_context, u32, c.pa_sink_input_info_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_context_get_sink_info_list: *const fn (?*c.pa_context, c.pa_sink_info_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_context_set_sink_input_volume: *const fn (?*c.pa_context, u32, [*c]const c.pa_cvolume, c.pa_context_success_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_context_get_source_info_list: *const fn (?*c.pa_context, c.pa_source_info_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_context_get_server_info: *const fn (?*c.pa_context, c.pa_server_info_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_stream_new: *const fn (?*c.pa_context, [*c]const u8, [*c]const c.pa_sample_spec, [*c]const c.pa_channel_map) callconv(.C) ?*c.pa_stream,
-    pa_stream_unref: *const fn (?*c.pa_stream) callconv(.C) void,
-    pa_stream_connect_playback: *const fn (?*c.pa_stream, [*c]const u8, [*c]const c.pa_buffer_attr, c.pa_stream_flags_t, [*c]const c.pa_cvolume, ?*c.pa_stream) callconv(.C) c_int,
-    pa_stream_connect_record: *const fn (?*c.pa_stream, [*c]const u8, [*c]const c.pa_buffer_attr, c.pa_stream_flags_t) callconv(.C) c_int,
-    pa_stream_disconnect: *const fn (?*c.pa_stream) callconv(.C) c_int,
-    pa_stream_cork: *const fn (?*c.pa_stream, c_int, c.pa_stream_success_cb_t, ?*anyopaque) callconv(.C) ?*c.pa_operation,
-    pa_stream_is_corked: *const fn (?*const c.pa_stream) callconv(.C) c_int,
-    pa_stream_begin_write: *const fn (?*c.pa_stream, [*c]?*anyopaque, [*c]usize) callconv(.C) c_int,
-    pa_stream_peek: *const fn (?*c.pa_stream, [*c]?*anyopaque, [*c]usize) callconv(.C) c_int,
-    pa_stream_drop: *const fn (?*c.pa_stream) callconv(.C) c_int,
-    pa_stream_write: *const fn (?*c.pa_stream, ?*const anyopaque, usize, c.pa_free_cb_t, i64, c.pa_seek_mode_t) callconv(.C) c_int,
-    pa_stream_get_state: *const fn (?*const c.pa_stream) callconv(.C) c.pa_stream_state_t,
-    pa_stream_get_index: *const fn (?*const c.pa_stream) callconv(.C) u32,
-    pa_stream_set_state_callback: *const fn (?*c.pa_stream, c.pa_stream_notify_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_stream_set_read_callback: *const fn (?*c.pa_stream, c.pa_stream_request_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_stream_set_write_callback: *const fn (?*c.pa_stream, c.pa_stream_request_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_stream_set_underflow_callback: *const fn (?*c.pa_stream, c.pa_stream_notify_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_stream_set_overflow_callback: *const fn (?*c.pa_stream, c.pa_stream_notify_cb_t, ?*anyopaque) callconv(.C) void,
-    pa_cvolume_init: *const fn ([*c]c.pa_cvolume) callconv(.C) [*c]c.pa_cvolume,
-    pa_cvolume_set: *const fn ([*c]c.pa_cvolume, c_uint, c.pa_volume_t) callconv(.C) [*c]c.pa_cvolume,
-    pa_sw_volume_from_linear: *const fn (f64) callconv(.C) c.pa_volume_t,
+    pa_threaded_mainloop_new: *const fn () callconv(.c) ?*c.pa_threaded_mainloop,
+    pa_threaded_mainloop_free: *const fn (?*c.pa_threaded_mainloop) callconv(.c) void,
+    pa_threaded_mainloop_start: *const fn (?*c.pa_threaded_mainloop) callconv(.c) c_int,
+    pa_threaded_mainloop_stop: *const fn (?*c.pa_threaded_mainloop) callconv(.c) void,
+    pa_threaded_mainloop_signal: *const fn (?*c.pa_threaded_mainloop, c_int) callconv(.c) void,
+    pa_threaded_mainloop_wait: *const fn (?*c.pa_threaded_mainloop) callconv(.c) void,
+    pa_threaded_mainloop_lock: *const fn (?*c.pa_threaded_mainloop) callconv(.c) void,
+    pa_threaded_mainloop_unlock: *const fn (?*c.pa_threaded_mainloop) callconv(.c) void,
+    pa_threaded_mainloop_get_api: *const fn (?*c.pa_threaded_mainloop) callconv(.c) [*c]c.pa_mainloop_api,
+    pa_operation_unref: *const fn (?*c.pa_operation) callconv(.c) void,
+    pa_operation_get_state: *const fn (?*const c.pa_operation) callconv(.c) c.pa_operation_state_t,
+    pa_context_new_with_proplist: *const fn ([*c]c.pa_mainloop_api, [*c]const u8, ?*const c.pa_proplist) callconv(.c) ?*c.pa_context,
+    pa_context_unref: *const fn (?*c.pa_context) callconv(.c) void,
+    pa_context_connect: *const fn (?*c.pa_context, [*c]const u8, c.pa_context_flags_t, [*c]const c.pa_spawn_api) callconv(.c) c_int,
+    pa_context_disconnect: *const fn (?*c.pa_context) callconv(.c) void,
+    pa_context_subscribe: *const fn (?*c.pa_context, c.pa_subscription_mask_t, c.pa_context_success_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_context_get_state: *const fn (?*const c.pa_context) callconv(.c) c.pa_context_state_t,
+    pa_context_set_state_callback: *const fn (?*c.pa_context, c.pa_context_notify_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_context_set_subscribe_callback: *const fn (?*c.pa_context, c.pa_context_subscribe_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_context_get_sink_input_info: *const fn (?*c.pa_context, u32, c.pa_sink_input_info_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_context_get_sink_info_list: *const fn (?*c.pa_context, c.pa_sink_info_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_context_set_sink_input_volume: *const fn (?*c.pa_context, u32, [*c]const c.pa_cvolume, c.pa_context_success_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_context_get_source_info_list: *const fn (?*c.pa_context, c.pa_source_info_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_context_get_server_info: *const fn (?*c.pa_context, c.pa_server_info_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_stream_new: *const fn (?*c.pa_context, [*c]const u8, [*c]const c.pa_sample_spec, [*c]const c.pa_channel_map) callconv(.c) ?*c.pa_stream,
+    pa_stream_unref: *const fn (?*c.pa_stream) callconv(.c) void,
+    pa_stream_connect_playback: *const fn (?*c.pa_stream, [*c]const u8, [*c]const c.pa_buffer_attr, c.pa_stream_flags_t, [*c]const c.pa_cvolume, ?*c.pa_stream) callconv(.c) c_int,
+    pa_stream_connect_record: *const fn (?*c.pa_stream, [*c]const u8, [*c]const c.pa_buffer_attr, c.pa_stream_flags_t) callconv(.c) c_int,
+    pa_stream_disconnect: *const fn (?*c.pa_stream) callconv(.c) c_int,
+    pa_stream_cork: *const fn (?*c.pa_stream, c_int, c.pa_stream_success_cb_t, ?*anyopaque) callconv(.c) ?*c.pa_operation,
+    pa_stream_is_corked: *const fn (?*const c.pa_stream) callconv(.c) c_int,
+    pa_stream_begin_write: *const fn (?*c.pa_stream, [*c]?*anyopaque, [*c]usize) callconv(.c) c_int,
+    pa_stream_peek: *const fn (?*c.pa_stream, [*c]?*anyopaque, [*c]usize) callconv(.c) c_int,
+    pa_stream_drop: *const fn (?*c.pa_stream) callconv(.c) c_int,
+    pa_stream_write: *const fn (?*c.pa_stream, ?*const anyopaque, usize, c.pa_free_cb_t, i64, c.pa_seek_mode_t) callconv(.c) c_int,
+    pa_stream_get_state: *const fn (?*const c.pa_stream) callconv(.c) c.pa_stream_state_t,
+    pa_stream_get_index: *const fn (?*const c.pa_stream) callconv(.c) u32,
+    pa_stream_set_state_callback: *const fn (?*c.pa_stream, c.pa_stream_notify_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_stream_set_read_callback: *const fn (?*c.pa_stream, c.pa_stream_request_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_stream_set_write_callback: *const fn (?*c.pa_stream, c.pa_stream_request_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_stream_set_underflow_callback: *const fn (?*c.pa_stream, c.pa_stream_notify_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_stream_set_overflow_callback: *const fn (?*c.pa_stream, c.pa_stream_notify_cb_t, ?*anyopaque) callconv(.c) void,
+    pa_cvolume_init: *const fn ([*c]c.pa_cvolume) callconv(.c) [*c]c.pa_cvolume,
+    pa_cvolume_set: *const fn ([*c]c.pa_cvolume, c_uint, c.pa_volume_t) callconv(.c) [*c]c.pa_cvolume,
+    pa_sw_volume_from_linear: *const fn (f64) callconv(.c) c.pa_volume_t,
 
     pa_usec_to_bytes: *const fn (t: c.pa_usec_t, spec: [*c]const c.pa_sample_spec) usize,
     pa_stream_get_sample_spec: *const fn (s: ?*c.pa_stream) [*c]const c.pa_sample_spec,
@@ -166,12 +166,12 @@ pub const Context = struct {
         return .{ .pulseaudio = ctx };
     }
 
-    fn subscribeOp(_: ?*c.pa_context, _: c.pa_subscription_event_type_t, _: u32, ctx_opaque: ?*anyopaque) callconv(.C) void {
+    fn subscribeOp(_: ?*c.pa_context, _: c.pa_subscription_event_type_t, _: u32, ctx_opaque: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(ctx_opaque.?)));
         ctx.watcher.?.deviceChangeFn(ctx.watcher.?.user_data);
     }
 
-    fn contextStateOp(pulse_ctx: ?*c.pa_context, ctx_opaque: ?*anyopaque) callconv(.C) void {
+    fn contextStateOp(pulse_ctx: ?*c.pa_context, ctx_opaque: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(ctx_opaque.?)));
 
         ctx.pulse_ctx_state = lib.pa_context_get_state(pulse_ctx);
@@ -229,7 +229,7 @@ pub const Context = struct {
         }
     }
 
-    fn serverInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_server_info, user_data: ?*anyopaque) callconv(.C) void {
+    fn serverInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_server_info, user_data: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(user_data.?)));
 
         defer lib.pa_threaded_mainloop_signal(ctx.main_loop, 0);
@@ -240,7 +240,7 @@ pub const Context = struct {
         };
     }
 
-    fn sinkInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_sink_info, eol: c_int, user_data: ?*anyopaque) callconv(.C) void {
+    fn sinkInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_sink_info, eol: c_int, user_data: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(user_data.?)));
         if (eol != 0) {
             lib.pa_threaded_mainloop_signal(ctx.main_loop, 0);
@@ -250,7 +250,7 @@ pub const Context = struct {
         ctx.deviceInfoOp(info, .playback) catch return;
     }
 
-    fn sourceInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_source_info, eol: c_int, user_data: ?*anyopaque) callconv(.C) void {
+    fn sourceInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_source_info, eol: c_int, user_data: ?*anyopaque) callconv(.c) void {
         var ctx = @as(*Context, @ptrCast(@alignCast(user_data.?)));
         if (eol != 0) {
             lib.pa_threaded_mainloop_signal(ctx.main_loop, 0);
@@ -437,7 +437,7 @@ pub const Context = struct {
         },
     };
 
-    fn streamStateOp(stream: ?*c.pa_stream, stream_status_opaque: ?*anyopaque) callconv(.C) void {
+    fn streamStateOp(stream: ?*c.pa_stream, stream_status_opaque: ?*anyopaque) callconv(.c) void {
         const stream_status = @as(*StreamStatus, @ptrCast(@alignCast(stream_status_opaque.?)));
         switch (lib.pa_stream_get_state(stream)) {
             c.PA_STREAM_UNCONNECTED,
@@ -494,7 +494,7 @@ pub const Player = struct {
         lib.pa_stream_set_write_callback(player.stream, playbackStreamWriteOp, player);
     }
 
-    fn playbackStreamWriteOp(stream: ?*c.pa_stream, nbytes: usize, user_data: ?*anyopaque) callconv(.C) void {
+    fn playbackStreamWriteOp(stream: ?*c.pa_stream, nbytes: usize, user_data: ?*anyopaque) callconv(.c) void {
         var player = @as(*Player, @ptrCast(@alignCast(user_data.?)));
 
         var frames_left = nbytes;
@@ -624,7 +624,7 @@ pub const Recorder = struct {
         lib.pa_stream_set_read_callback(recorder.stream, playbackStreamReadOp, recorder);
     }
 
-    fn playbackStreamReadOp(stream: ?*c.pa_stream, nbytes: usize, user_data: ?*anyopaque) callconv(.C) void {
+    fn playbackStreamReadOp(stream: ?*c.pa_stream, nbytes: usize, user_data: ?*anyopaque) callconv(.c) void {
         var recorder = @as(*Recorder, @ptrCast(@alignCast(user_data.?)));
 
         var frames_left = nbytes;
@@ -711,13 +711,13 @@ pub const Recorder = struct {
     }
 };
 
-fn successOp(_: ?*c.pa_context, success: c_int, player_opaque: ?*anyopaque) callconv(.C) void {
+fn successOp(_: ?*c.pa_context, success: c_int, player_opaque: ?*anyopaque) callconv(.c) void {
     const player = @as(*Player, @ptrCast(@alignCast(player_opaque.?)));
     if (success == 1)
         lib.pa_threaded_mainloop_signal(player.main_loop, 0);
 }
 
-fn sinkInputInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_sink_input_info, eol: c_int, player_opaque: ?*anyopaque) callconv(.C) void {
+fn sinkInputInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_sink_input_info, eol: c_int, player_opaque: ?*anyopaque) callconv(.c) void {
     var player = @as(*Player, @ptrCast(@alignCast(player_opaque.?)));
 
     if (eol != 0) {
