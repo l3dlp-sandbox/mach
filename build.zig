@@ -375,7 +375,8 @@ fn linkSysaudio(b: *std.Build, module: *std.Build.Module) void {
         module.link_libc = true;
 
         if (b.lazyDependency("linux_audio_headers", .{})) |dep| {
-            module.addSystemIncludePath(dep.path("."));
+            module.addIncludePath(dep.path("."));
+            module.addIncludePath(dep.path("alsa-lib"));
         }
     } else if (target.result.os.tag.isDarwin()) {
         module.linkFramework("AudioToolbox", .{});

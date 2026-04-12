@@ -55,8 +55,8 @@
             .lazy = true,
         },
         .linux_audio_headers = .{
-            .url = "https://pkg.hexops.org/pkg/hexops/linux-audio-headers/871a98e0b1a8489c7adec9114e30699873a864f8.tar.gz",
-            .hash = "N-V-__8AAF0yIADxybtDV4odYGqxZ-NnHFTm1VUp2osG00xT",
+            .url = "https://pkg.hexops.org/pkg/hexops/linux-audio-headers/5e016e7bf15a52ec720c73f92c6fba58cbe97a05.tar.gz",
+            .hash = "N-V-__8AAHY2IADL1G0UHC3EtMpaBhN9Z-yMzvCGuCKQSpNN",
             .lazy = true,
         },
         .wayland_headers = .{
