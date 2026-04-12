@@ -119,7 +119,7 @@ input: mach.time.Frequency,
 allocator: std.mem.Allocator,
 events: EventQueue,
 input_state: InputState,
-oom: std.Thread.ResetEvent = .{},
+oom: std.atomic.Value(bool) = .init(false),
 
 pub fn init(core: *Core) !void {
     const allocator = std.heap.c_allocator;
@@ -313,7 +313,7 @@ pub inline fn nextEvent(core: *@This()) ?Event {
 pub inline fn pushEvent(core: *@This(), event: Event) void {
     // Write event
     core.events.writeItem(event) catch {
-        core.oom.set();
+        core.oom.store(true, .release);
         return;
     };
 
@@ -337,8 +337,8 @@ pub inline fn pushEvent(core: *@This(), event: Event) void {
 ///
 /// Once called, the OOM flag is reset and mach.Core will continue operating normally.
 pub fn outOfMemory(core: *@This()) bool {
-    if (!core.oom.isSet()) return false;
-    core.oom.reset();
+    if (!core.oom.load(.acquire)) return false;
+    core.oom.store(false, .release);
     return true;
 }
 
