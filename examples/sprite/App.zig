@@ -262,7 +262,7 @@ pub fn deinit(
 fn loadTexture(device: *gpu.Device, queue: *gpu.Queue, allocator: std.mem.Allocator) !*gpu.Texture {
     // Load the image from memory
     var img = try zigimg.Image.fromMemory(allocator, assets.sprites_sheet_png);
-    defer img.deinit();
+    defer img.deinit(allocator);
     const img_size = gpu.Extent3D{ .width = @as(u32, @intCast(img.width)), .height = @as(u32, @intCast(img.height)) };
 
     // Create a GPU texture

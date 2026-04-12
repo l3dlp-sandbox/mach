@@ -192,7 +192,7 @@ pub fn render(app: *App, core: *mach.Core) void {
         app.title_timer.reset();
         // TODO(object): window-title
 
-        core.windows.set(app.window, .title, std.fmt.allocPrintZ(core.allocator, "core-transparent-window [ {d}fps ] [ Input {d}hz ]", .{ core.frame.rate, core.input.rate }) catch unreachable);
+        core.windows.set(app.window, .title, std.fmt.allocPrintSentinel(core.allocator, "core-transparent-window [ {d}fps ] [ Input {d}hz ]", .{ core.frame.rate, core.input.rate }, 0) catch unreachable);
     }
 }
 

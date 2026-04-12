@@ -138,9 +138,7 @@ fn setupPipeline(
     const window = core.windows.getValue(window_id);
 
     // Load sfx
-    const sfx_fbs = std.io.fixedBufferStream(assets.sfx.scifi_gun);
-    const sfx_sound_stream = std.io.StreamSource{ .const_buffer = sfx_fbs };
-    app.sfx = try mach.Audio.Opus.decodeStream(app.allocator, sfx_sound_stream);
+    app.sfx = try mach.Audio.Opus.decodeStream(app.allocator, .{ .data = assets.sfx.scifi_gun });
 
     // Create a sprite rendering pipeline
     app.sprite_pipeline_id = try sprite.pipelines.new(.{
@@ -292,7 +290,7 @@ pub fn tick(
             sprite.objects.delete(sprite_id);
 
             // Play a new sound
-            const samples = try app.allocator.alignedAlloc(f32, mach.Audio.alignment, app.sfx.samples.len);
+            const samples = try app.allocator.alignedAlloc(f32, std.mem.Alignment.fromByteUnits(mach.Audio.alignment), app.sfx.samples.len);
             @memcpy(samples, app.sfx.samples);
             audio.buffers.lock();
             defer audio.buffers.unlock();
@@ -373,7 +371,7 @@ pub fn render(
 fn loadTexture(device: *gpu.Device, queue: *gpu.Queue, allocator: std.mem.Allocator) !*gpu.Texture {
     // Load the image from memory
     var img = try zigimg.Image.fromMemory(allocator, assets.sprites_sheet_png);
-    defer img.deinit();
+    defer img.deinit(allocator);
     const img_size = gpu.Extent3D{ .width = @as(u32, @intCast(img.width)), .height = @as(u32, @intCast(img.height)) };
 
     // Create a GPU texture

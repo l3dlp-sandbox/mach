@@ -70,15 +70,11 @@ pub fn init(
     // finishes playing.
     audio.on_state_change = app_mod.id.audioStateChange;
 
-    const bgm_fbs = std.io.fixedBufferStream(assets.bgm.bit_bit_loop);
-    const bgm_sound_stream = std.io.StreamSource{ .const_buffer = bgm_fbs };
-    const bgm = try mach.Audio.Opus.decodeStream(allocator, bgm_sound_stream);
+    const bgm = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.bgm.bit_bit_loop });
     // TODO(object): bgm here is not freed inside of deinit(), if we had object-scoped allocators we
     // could do this more nicely in real applications
 
-    const sfx_fbs = std.io.fixedBufferStream(assets.sfx.sword1);
-    const sfx_sound_stream = std.io.StreamSource{ .const_buffer = sfx_fbs };
-    const sfx = try mach.Audio.Opus.decodeStream(allocator, sfx_sound_stream);
+    const sfx = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.sfx.sword1 });
 
     // Initialize module state
     app.* = .{ .sfx = sfx, .bgm = app.bgm, .window = window };
