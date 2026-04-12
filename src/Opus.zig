@@ -15,6 +15,50 @@ pub const simd_vector_length = std.simd.suggestVectorLength(f32) orelse 1;
 
 pub const alignment = simd_vector_length * @sizeOf(f32);
 
+// TODO(audio): writergate removed std.io.StreamSource ('reader/writer to a [file, buffer]') so we have this
+// replacement for now. However, our implementation here doesn't accept a file. We should eventually support
+// encode/decode of file/socket-backed streams in Opus.zig
+pub const StreamSource = struct {
+    data: []const u8,
+    pos: usize = 0,
+
+    pub const ReadError = error{};
+
+    pub fn read(self: *StreamSource, dest: []u8) ReadError!usize {
+        const end = @min(self.pos + dest.len, self.data.len);
+        const n = end - self.pos;
+        @memcpy(dest[0..n], self.data[self.pos..end]);
+        self.pos = end;
+        return n;
+    }
+
+    pub fn write(self: *StreamSource, _: []const u8) error{}!usize {
+        _ = self;
+        return 0;
+    }
+
+    pub fn seekTo(self: *StreamSource, pos: u64) error{}!void {
+        self.pos = @min(@as(usize, @intCast(pos)), self.data.len);
+    }
+
+    pub fn seekBy(self: *StreamSource, offset: i64) error{}!void {
+        if (offset >= 0) {
+            self.pos = @min(self.pos + @as(usize, @intCast(offset)), self.data.len);
+        } else {
+            const abs: usize = @intCast(-offset);
+            self.pos = if (abs > self.pos) 0 else self.pos - abs;
+        }
+    }
+
+    pub fn getPos(self: *StreamSource) error{}!u64 {
+        return @intCast(self.pos);
+    }
+
+    pub fn getEndPos(self: *StreamSource) error{}!u64 {
+        return @intCast(self.data.len);
+    }
+};
+
 pub const DecodeError = error{
     OutOfMemory,
     InvalidData,
@@ -26,8 +70,8 @@ pub const DecodeError = error{
 
 pub fn decodeStream(
     allocator: std.mem.Allocator,
-    stream: std.io.StreamSource,
-) (DecodeError || std.io.StreamSource.ReadError)!Opus {
+    stream: StreamSource,
+) DecodeError!Opus {
     var decoder = Decoder{ .allocator = allocator, .stream = stream };
     var err: c_int = 0;
     const opus_file = c.op_open_callbacks(
@@ -70,7 +114,7 @@ pub fn decodeStream(
     const channels: u8 = @intCast(header.*.channel_count);
     const sample_rate: u24 = @intCast(header.*.input_sample_rate);
     const total_samples: usize = @intCast(c.op_pcm_total(opus_file, -1));
-    var samples = try allocator.alignedAlloc(f32, alignment, total_samples * channels);
+    var samples = try allocator.alignedAlloc(f32, .fromByteUnits(alignment), total_samples * channels);
     errdefer allocator.free(samples);
 
     var i: usize = 0;
@@ -89,7 +133,7 @@ pub fn decodeStream(
 
 const Decoder = struct {
     allocator: std.mem.Allocator,
-    stream: std.io.StreamSource,
+    stream: StreamSource,
     samples: []f32 = &.{},
     sample_index: usize = 0,
 
@@ -201,13 +245,13 @@ pub const ChannelMapping = enum(u1) {
 };
 
 pub fn encodeStream(
-    stream: std.io.StreamSource,
+    stream: StreamSource,
     comments: Comments,
     sample_rate: u24,
     channels: u24,
     channel_mapping: ChannelMapping,
     samples: []const f32,
-) (EncodeError || std.io.StreamSource.ReadError)!void {
+) EncodeError!void {
     var encoder = Encoder{ .stream = stream };
     var err: c_int = 0;
     const ope_encoder = c.ope_encoder_create_callbacks(
@@ -231,7 +275,7 @@ pub fn encodeStream(
 }
 
 const Encoder = struct {
-    stream: std.io.StreamSource,
+    stream: StreamSource,
 
     fn writeCallback(encoder_opaque: ?*anyopaque, ptr: [*c]const u8, len: i32) callconv(.c) c_int {
         const encoder: *Encoder = @ptrCast(@alignCast(encoder_opaque));
