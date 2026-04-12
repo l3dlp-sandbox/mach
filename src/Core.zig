@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const build_options = @import("build-options");
 
 const mach = @import("main.zig");
 const gpu = mach.gpu;
@@ -401,14 +400,7 @@ pub fn detectBackendType(allocator: std.mem.Allocator) !gpu.BackendType {
     // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
     // env around
     const backend_ptr = std.c.getenv("MACH_FORCE_GPU_BACKEND") orelse {
-        return switch (build_options.sysgpu_backend) {
-            .default => if (builtin.target.isDarwin()) .metal else if (builtin.target.os.tag == .windows) .d3d12 else .vulkan,
-            .d3d12 => .d3d12,
-            .metal => .metal,
-            .vulkan => .vulkan,
-            .opengl => .opengl,
-            .webgpu => .null,
-        };
+        return if (builtin.target.isDarwin()) .metal else if (builtin.target.os.tag == .windows) .d3d12 else .vulkan;
     };
     const backend = std.mem.sliceTo(backend_ptr, 0);
 
