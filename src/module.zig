@@ -27,13 +27,18 @@ pub const ObjectsOptions = struct {
 };
 
 pub fn Objects(options: ObjectsOptions, comptime T: type) type {
+    // MultiArrayList doesn't support zero-field structs, so add a dummy field to make it work.
+    // TODO(object): avoid constructing MultiArrayList entirely in this case?
+    const has_fields = @typeInfo(T).@"struct".fields.len > 0;
+    const StorageT = if (has_fields) T else struct { _padding: u0 = 0 };
+
     return struct {
         internal: struct {
             allocator: std.mem.Allocator,
+            io: std.Io,
 
             /// Mutex to be held when operating on these objects.
             /// TODO(object): replace with RwLock and update website docs to indicate this
-            io: std.Io,
             mu: std.Io.Mutex = .init,
 
             /// A registered ID indicating the type of objects being represented. This can be
@@ -42,7 +47,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             type_id: ObjectTypeID,
 
             /// The actual object data
-            data: std.MultiArrayList(T) = .empty,
+            data: std.MultiArrayList(StorageT) = .empty,
 
             /// Whether a given slot in data[i] is dead or not
             dead: std.bit_set.DynamicBitSetUnmanaged = .{},
@@ -70,6 +75,14 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         },
 
         pub const IsMachObjects = void;
+
+        fn toStorage(value: T) StorageT {
+            if (has_fields) return value else return .{};
+        }
+
+        fn fromStorage(value: StorageT) T {
+            if (has_fields) return value else return .{};
+        }
 
         const Generation = u16;
         const Index = u32;
@@ -157,12 +170,12 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
                 objs.internal.thrown_on_the_floor = 0;
             }
 
-            if (recycling_bin.popOrNull()) |index| {
+            if (recycling_bin.pop()) |index| {
                 // Reuse a free slot from the recycling bin.
                 dead.unset(index);
                 const gen = generation.items[index] + 1;
                 generation.items[index] = gen;
-                data.set(index, value);
+                data.set(index, toStorage(value));
                 return @bitCast(PackedID{
                     .type_id = objs.internal.type_id,
                     .generation = gen,
@@ -181,7 +194,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             }
 
             const index = data.len;
-            data.appendAssumeCapacity(value);
+            data.appendAssumeCapacity(toStorage(value));
             dead.unset(index);
             generation.appendAssumeCapacity(0);
 
@@ -200,7 +213,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const data = &objs.internal.data;
 
             const unpacked = objs.validateAndUnpack(id, "setValueRaw");
-            data.set(unpacked.index, value);
+            data.set(unpacked.index, toStorage(value));
         }
 
         /// Sets all fields of the given object to the given value.
@@ -211,7 +224,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const data = &objs.internal.data;
 
             const unpacked = objs.validateAndUnpack(id, "setValue");
-            data.set(unpacked.index, value);
+            data.set(unpacked.index, toStorage(value));
 
             if (objs.internal.updated) |*updated_fields| {
                 const updated_start = unpacked.index * @typeInfo(T).@"struct".fields.len;
@@ -224,7 +237,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         ///
         /// Unlike set(), this method does not respect any mach.Objects tracking
         /// options, so changes made to an object through this method will not be tracked.
-        pub fn setRaw(objs: *@This(), id: ObjectID, comptime field_name: std.meta.FieldEnum(T), value: std.meta.FieldType(T, field_name)) void {
+        pub fn setRaw(objs: *@This(), id: ObjectID, comptime field_name: std.meta.FieldEnum(T), value: @FieldType(T, @tagName(field_name))) void {
             const data = &objs.internal.data;
             const unpacked = objs.validateAndUnpack(id, "setRaw");
 
@@ -235,7 +248,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         ///
         /// Unlike setAllRaw, this method respects mach.Objects tracking
         /// and changes made to an object through this method will be tracked.
-        pub fn set(objs: *@This(), id: ObjectID, comptime field_name: std.meta.FieldEnum(T), value: std.meta.FieldType(T, field_name)) void {
+        pub fn set(objs: *@This(), id: ObjectID, comptime field_name: std.meta.FieldEnum(T), value: @FieldType(T, @tagName(field_name))) void {
             const data = &objs.internal.data;
             const unpacked = objs.validateAndUnpack(id, "set");
 
@@ -248,7 +261,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         }
 
         /// Get a single field.
-        pub fn get(objs: *@This(), id: ObjectID, comptime field_name: std.meta.FieldEnum(T)) std.meta.FieldType(T, field_name) {
+        pub fn get(objs: *@This(), id: ObjectID, comptime field_name: std.meta.FieldEnum(T)) @FieldType(T, @tagName(field_name)) {
             const data = &objs.internal.data;
 
             const unpacked = objs.validateAndUnpack(id, "get");
@@ -260,7 +273,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const data = &objs.internal.data;
 
             const unpacked = objs.validateAndUnpack(id, "getValue");
-            return data.get(unpacked.index);
+            return fromStorage(data.get(unpacked.index));
         }
 
         pub fn delete(objs: *@This(), id: ObjectID) void {
@@ -274,7 +287,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             } else objs.internal.thrown_on_the_floor += 1;
 
             dead.set(unpacked.index);
-            if (mach.is_debug) data.set(unpacked.index, undefined);
+            if (mach.is_debug) {
+                const undef: StorageT = undefined;
+                data.set(unpacked.index, undef);
+            }
         }
 
         // TODO(objects): evaluate whether tag operations should ever return an error
@@ -516,7 +532,7 @@ pub fn ModFunctionIDs(comptime Module: type) type {
             .@"align" = null,
         }};
     }
-    return @Struct(.auto, null, field_names, field_types, field_attrs);
+    return @Struct(.auto, null, field_names[0..field_names.len], field_types[0..field_types.len], field_attrs[0..field_attrs.len]);
 }
 
 /// Enum describing all declarations for a given comptime-known module.
@@ -531,7 +547,7 @@ fn ModuleFunctionName2(comptime M: type) type {
         enum_names = enum_names ++ [_][]const u8{@tagName(fn_tag)};
         enum_values = enum_values ++ [_]TagInt{@intCast(i)};
     }
-    return @Enum(TagInt, .exhaustive, enum_names, enum_values);
+    return @Enum(TagInt, .exhaustive, enum_names[0..enum_names.len], enum_values[0..enum_values.len]);
 }
 
 /// Enum describing all mach_tags for a given comptime-known module.
@@ -805,55 +821,34 @@ fn NameEnum(comptime mods: anytype) type {
 ///
 /// .{ Baz, Bar, Foo, Fam, Bar, Bam }
 ///
-fn moduleTuple(comptime tuple: anytype) ModuleTuple(tuple) {
-    return ModuleTuple(tuple){};
+fn moduleTuple(comptime tuple: anytype) []const type {
+    return moduleTupleCollect(tuple);
 }
 
-/// Type-returning variant of merge()
-fn ModuleTuple(comptime tuple: anytype) type {
+fn moduleTupleCollect(comptime tuple: anytype) []const type {
     if (@typeInfo(@TypeOf(tuple)) != .@"struct" or !@typeInfo(@TypeOf(tuple)).@"struct".is_tuple) {
         @compileError("Expected to find a tuple, found: " ++ @typeName(@TypeOf(tuple)));
     }
 
-    var field_names: []const []const u8 = &.{};
-    var field_types: []const type = &.{};
-    var field_attrs: []const std.builtin.Type.StructField.Attributes = &.{};
-    loop: inline for (tuple) |elem| {
+    var types: []const type = &.{};
+    for (tuple) |elem| {
         if (@typeInfo(@TypeOf(elem)) == .type and @typeInfo(elem) == .@"struct") {
             // Struct type
             validate(elem);
-            for (field_attrs) |attr| if (@as(*const type, @ptrCast(attr.default_value_ptr.?)).* == elem)
-                continue :loop;
-
-            var num_buf: [128]u8 = undefined;
-            field_names = field_names ++ [_][]const u8{std.fmt.bufPrintZ(&num_buf, "{d}", .{field_names.len}) catch unreachable};
-            field_types = field_types ++ [_]type{type};
-            field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
-                .default_value_ptr = @ptrCast(&elem),
-                .@"comptime" = true,
-                .@"align" = null,
-            }};
+            for (types) |t| if (t == elem) continue;
+            types = types ++ [_]type{elem};
         } else if (@typeInfo(@TypeOf(elem)) == .@"struct" and @typeInfo(@TypeOf(elem)).@"struct".is_tuple) {
             // Nested tuple
-            inline for (moduleTuple(elem)) |nested| {
+            for (moduleTupleCollect(elem)) |nested| {
                 validate(nested);
-                for (field_attrs) |attr| if (@as(*const type, @ptrCast(attr.default_value_ptr.?)).* == nested)
-                    continue :loop;
-
-                var num_buf: [128]u8 = undefined;
-                field_names = field_names ++ [_][]const u8{std.fmt.bufPrintZ(&num_buf, "{d}", .{field_names.len}) catch unreachable};
-                field_types = field_types ++ [_]type{type};
-                field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
-                    .default_value_ptr = @ptrCast(&nested),
-                    .@"comptime" = true,
-                    .@"align" = null,
-                }};
+                for (types) |t| if (t == nested) continue;
+                types = types ++ [_]type{nested};
             }
         } else {
             @compileError("Expected to find a tuple or struct type, found: " ++ @typeName(@TypeOf(elem)));
         }
     }
-    return @Struct(.auto, null, field_names, field_types, field_attrs);
+    return types;
 }
 
 /// Given .{Foo, Bar, Baz} Mach modules, returns .{.foo = Foo, .bar = Bar, .baz = Baz} with field
@@ -871,7 +866,7 @@ fn ModuleTypesByName(comptime modules: anytype) type {
             .@"align" = null,
         }};
     }
-    return @Struct(.auto, null, field_names, field_types, field_attrs);
+    return @Struct(.auto, null, field_names[0..field_names.len], field_types[0..field_types.len], field_attrs[0..field_attrs.len]);
 }
 
 /// Given .{Foo, Bar, Baz} Mach modules, returns .{.foo: Foo = undefined, .bar: Bar = undefined, .baz: Baz = undefined}
@@ -889,7 +884,7 @@ fn ModulesByName(comptime modules: anytype) type {
             .@"align" = null,
         }};
     }
-    return @Struct(.auto, null, field_names, field_types, field_attrs);
+    return @Struct(.auto, null, field_names[0..field_names.len], field_types[0..field_types.len], field_attrs[0..field_attrs.len]);
 }
 
 test "Long field name" {

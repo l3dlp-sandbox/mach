@@ -181,7 +181,7 @@ pub const Graph = struct {
         for (0..preallocate.num_result_lists) |_| {
             var list = try allocator.create(std.ArrayListUnmanaged(u64));
             errdefer allocator.destroy(list);
-            list.* = .{};
+            list.* = .empty;
             try list.ensureTotalCapacity(allocator, preallocate.result_list_size);
             try graph.result_lists.available.append(allocator, list);
         }
@@ -400,7 +400,7 @@ pub const Graph = struct {
     fn acquireResultList(graph: *Graph, allocator: std.mem.Allocator, min_capacity: usize) !*std.ArrayListUnmanaged(u64) {
         // Try to get an existing list first
         graph.result_lists.lock.lockUncancelable(graph.io);
-        const list = graph.result_lists.available.popOrNull();
+        const list = graph.result_lists.available.pop();
         graph.result_lists.lock.unlock(graph.io);
 
         if (list) |l| {
@@ -416,7 +416,7 @@ pub const Graph = struct {
         // Create new result list if needed
         var new_list = try allocator.create(std.ArrayListUnmanaged(u64));
         errdefer allocator.destroy(new_list);
-        new_list.* = .{};
+        new_list.* = .empty;
         try new_list.ensureTotalCapacity(allocator, graph.preallocate_result_list_size);
         return new_list;
     }
@@ -449,8 +449,9 @@ pub const Graph = struct {
 
 test "basic child addition and querying" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    try graph.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
     defer graph.deinit(allocator);
 
     try graph.addChild(allocator, 1, 2);
@@ -463,8 +464,9 @@ test "basic child addition and querying" {
 
 test "basic parent querying" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    try graph.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
     defer graph.deinit(allocator);
 
     try graph.addChild(allocator, 1, 2);
@@ -474,8 +476,9 @@ test "basic parent querying" {
 
 test "child removal" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    try graph.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
     defer graph.deinit(allocator);
 
     try graph.addChild(allocator, 1, 2);
@@ -488,8 +491,9 @@ test "child removal" {
 
 test "parent setting" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    try graph.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
     defer graph.deinit(allocator);
 
     try graph.addChild(allocator, 1, 2);
@@ -501,8 +505,9 @@ test "parent setting" {
 
 test "parent removal" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    try graph.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
     defer graph.deinit(allocator);
 
     try graph.addChild(allocator, 1, 2);
@@ -514,8 +519,9 @@ test "parent removal" {
 
 test "graph - idempotent child addition" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{
+    try graph.init(allocator, io, .{
         .queue_size = 256,
         .nodes_size = 64,
         .num_result_lists = 32,
@@ -533,8 +539,9 @@ test "graph - idempotent child addition" {
 
 test "graph - deep hierarchy and chain operations" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{
+    try graph.init(allocator, io, .{
         .queue_size = 256,
         .nodes_size = 64,
         .num_result_lists = 32,
@@ -565,8 +572,9 @@ test "graph - deep hierarchy and chain operations" {
 
 test "graph - cleanup of isolated nodes" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{
+    try graph.init(allocator, io, .{
         .queue_size = 256,
         .nodes_size = 64,
         .num_result_lists = 32,
@@ -609,8 +617,9 @@ test "graph - cleanup of isolated nodes" {
 
 test "graph - edge cases with non-existent nodes" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{
+    try graph.init(allocator, io, .{
         .queue_size = 256,
         .nodes_size = 64,
         .num_result_lists = 32,
@@ -639,8 +648,9 @@ test "graph - edge cases with non-existent nodes" {
 
 test "graph - multiple operations consistency" {
     const allocator = testing.allocator;
+    const io = std.Options.debug_io;
     var graph: Graph = undefined;
-    try graph.init(allocator, .{
+    try graph.init(allocator, io, .{
         .queue_size = 256,
         .nodes_size = 64,
         .num_result_lists = 32,

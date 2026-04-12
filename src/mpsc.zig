@@ -312,9 +312,10 @@ pub fn Queue(comptime Value: type) type {
 
 test "basic" {
     const allocator = std.testing.allocator;
+    const io = std.Options.debug_io;
 
     var queue: Queue(u32) = undefined;
-    try queue.init(allocator, 32);
+    try queue.init(allocator, io, 32);
     defer queue.deinit(allocator);
 
     // Push values
@@ -331,9 +332,10 @@ test "basic" {
 
 test "concurrent producers" {
     const allocator = std.testing.allocator;
+    const io = std.Options.debug_io;
 
     var queue: Queue(u32) = undefined;
-    try queue.init(allocator, 32);
+    try queue.init(allocator, io, 32);
     defer queue.deinit(allocator);
 
     const n_jobs = 100;
