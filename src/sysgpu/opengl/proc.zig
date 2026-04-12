@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const c = @import("c.zig");
+const c = @import("c.zig").c;
 const mach = @import("../../main.zig");
 
 pub var libgl: std.DynLib = undefined;

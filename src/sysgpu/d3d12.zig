@@ -1,10 +1,11 @@
 const std = @import("std");
+
 const builtin = @import("builtin");
 const sysgpu = @import("sysgpu/main.zig");
 const limits = @import("limits.zig");
 const shader = @import("shader.zig");
 const utils = @import("utils.zig");
-const c = @import("d3d12/c.zig");
+const c = @import("d3d12/c.zig").c;
 const conv = @import("d3d12/conv.zig");
 const gpu_allocator = @import("gpu_allocator.zig");
 
@@ -821,7 +822,7 @@ pub const MemoryAllocator = struct {
                 .memory_location = memory_location,
                 .heap_category = category,
                 .heap_properties = properties,
-                .heaps = .{},
+                .heaps = .empty,
             };
         }
 
@@ -907,7 +908,7 @@ pub const MemoryAllocator = struct {
                     break :blk self.heaps.items.len - 1;
                 }
             };
-            errdefer _ = self.heaps.popOrNull();
+            errdefer _ = self.heaps.pop();
 
             const heap = &self.heaps.items[heap_index].?;
             heap.* = try MemoryHeap.init(
@@ -982,34 +983,14 @@ pub const MemoryAllocator = struct {
         self.memory_groups_len = 0;
         inline for (heap_types) |heap_type| {
             if (tier_one_heap) {
-                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
-                    self,
-                    heap_type.location,
-                    .buffer,
-                    heap_type.properties,
-                );
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(self, heap_type.location, .buffer, heap_type.properties);
                 self.memory_groups_len += 1;
-                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
-                    self,
-                    heap_type.location,
-                    .rtv_dsv_texture,
-                    heap_type.properties,
-                );
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(self, heap_type.location, .rtv_dsv_texture, heap_type.properties);
                 self.memory_groups_len += 1;
-                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
-                    self,
-                    heap_type.location,
-                    .other_texture,
-                    heap_type.properties,
-                );
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(self, heap_type.location, .other_texture, heap_type.properties);
                 self.memory_groups_len += 1;
             } else {
-                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(
-                    self,
-                    heap_type.location,
-                    .all,
-                    heap_type.properties,
-                );
+                self.memory_groups_buf[self.memory_groups_len] = MemoryGroup.init(self, heap_type.location, .all, heap_type.properties);
                 self.memory_groups_len += 1;
             }
         }
@@ -1225,7 +1206,7 @@ const DescriptorHeap = struct {
         }
 
         // Result
-        return heap.free_blocks.pop();
+        return heap.free_blocks.pop().?;
     }
 
     pub fn free(heap: *DescriptorHeap, allocation: DescriptorAllocation) void {
@@ -1292,7 +1273,7 @@ const CommandManager = struct {
         }
 
         // Reset
-        const command_allocator = manager.free_allocators.pop();
+        const command_allocator = manager.free_allocators.pop().?;
         hr = command_allocator.lpVtbl.*.Reset.?(command_allocator);
         if (hr != c.S_OK) {
             return error.ResetCommandAllocatorFailed;
@@ -1331,7 +1312,7 @@ const CommandManager = struct {
             return command_list;
         }
 
-        const command_list = manager.free_command_lists.pop();
+        const command_list = manager.free_command_lists.pop().?;
         hr = command_list.lpVtbl.*.Reset.?(
             command_list,
             command_allocator,
@@ -1384,7 +1365,7 @@ pub const StreamingManager = struct {
         }
 
         // Result
-        return manager.free_buffers.pop();
+        return manager.free_buffers.pop().?;
     }
 
     pub fn release(manager: *StreamingManager, resource: Resource) void {

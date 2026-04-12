@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const ca = @import("objc").quartz_core;
 const cg = @import("objc").core_graphics;
 const mtl = @import("objc").metal;
@@ -360,7 +361,7 @@ pub const StreamingManager = struct {
         }
 
         // Result
-        return manager.free_buffers.pop();
+        return manager.free_buffers.pop().?;
     }
 
     pub fn release(manager: *StreamingManager, mtl_buffer: *mtl.Buffer) void {
@@ -384,7 +385,7 @@ pub const LengthsBuffer = struct {
 
         var mtl_buffer: *mtl.Buffer = undefined;
         if (device.free_lengths_buffers.items.len > 0) {
-            mtl_buffer = device.free_lengths_buffers.pop();
+            mtl_buffer = device.free_lengths_buffers.pop().?;
         } else {
             mtl_buffer = mtl_device.newBufferWithLength_options(max_buffers_per_stage * @sizeOf(u32), 0) orelse {
                 return error.NewBufferFailed;
@@ -957,7 +958,7 @@ pub const PipelineLayout = struct {
     }
 
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
-        const groups = default_pipeline_layout.groups;
+        const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
         var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
         var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
@@ -967,7 +968,7 @@ pub const PipelineLayout = struct {
             }
         }
 
-        for (groups.items) |entries| {
+        for (groups) |entries| {
             const bind_group_layout = try device.createBindGroupLayout(
                 &sysgpu.BindGroupLayout.Descriptor.init(.{ .entries = entries.items }),
             );

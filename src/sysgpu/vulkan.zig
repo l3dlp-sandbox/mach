@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 const sysgpu = @import("sysgpu/main.zig");
@@ -834,7 +835,7 @@ pub const Device = struct {
             });
 
             break :blk &vk.AttachmentReference{
-                .attachment = @intCast(attachments.len - 1),
+                .attachment = @intCast(attachments.items.len - 1),
                 .layout = layout,
             };
         } else null;
@@ -967,7 +968,7 @@ pub const StreamingManager = struct {
         }
 
         // Result
-        return manager.free_buffers.pop();
+        return manager.free_buffers.pop().?;
     }
 
     pub fn release(manager: *StreamingManager, buffer: *Buffer) void {

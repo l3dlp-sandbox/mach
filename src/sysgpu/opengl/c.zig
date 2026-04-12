@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
 
-pub usingnamespace @cImport({
+pub const c = @cImport({
     if (builtin.target.os.tag == .windows) {
         @cInclude("windows.h");
         @cInclude("GL/glcorearb.h");

@@ -200,7 +200,7 @@ fn emitStruct(hlsl: *Hlsl, inst_idx: InstIndex, kind: StructKind) !void {
     hlsl.enterScope();
     defer hlsl.exitScope();
 
-    var sorted_members = std.ArrayListUnmanaged(InstIndex){};
+    var sorted_members = std.ArrayListUnmanaged(InstIndex).empty;
     defer sorted_members.deinit(hlsl.allocator);
 
     const struct_members = hlsl.air.refToList(inst.members);
@@ -497,7 +497,7 @@ fn emitFn(hlsl: *Hlsl, inst_idx: InstIndex) !void {
         defer hlsl.exitScope();
 
         if (inst.params != .none) {
-            var fn_params = std.ArrayListUnmanaged(InstIndex){};
+            var fn_params = std.ArrayListUnmanaged(InstIndex).empty;
             defer fn_params.deinit(hlsl.allocator);
             for (hlsl.air.refToList(inst.params)) |param_index| {
                 try fn_params.append(hlsl.allocator, param_index);

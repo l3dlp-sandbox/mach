@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const builtin = @import("builtin");
 const sysgpu = @import("sysgpu/main.zig");
 const limits = @import("limits.zig");
@@ -639,7 +640,7 @@ pub const StreamingManager = struct {
         }
 
         // Result
-        return manager.free_buffers.pop();
+        return manager.free_buffers.pop().?;
     }
 
     pub fn release(manager: *StreamingManager, buffer: *Buffer) void {
@@ -1801,6 +1802,7 @@ const Command = union(enum) {
         color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined,
         color_attachments_len: usize = 0,
         depth_stencil_attachment: ?sysgpu.RenderPassDepthStencilAttachment,
+
     },
     end_render_pass,
     copy_buffer_to_buffer: struct {
@@ -1985,7 +1987,7 @@ pub const CommandBuffer = struct {
                         var draw_buffers_buf: [limits.max_color_attachments]c.GLenum = undefined;
                         var draw_buffers = std.ArrayListUnmanaged(c.GLenum).initBuffer(&draw_buffers_buf);
 
-                        for (cmd.color_attachments_buf, 0..) |attach, i| {
+                        for (cmd.color_attachments_buf[0..cmd.color_attachments_len], 0..) |attach, i| {
                             if (attach.view) |view_raw| {
                                 const view: *TextureView = @ptrCast(@alignCast(view_raw));
                                 width = view.width();
@@ -2055,7 +2057,7 @@ pub const CommandBuffer = struct {
                     gl.stencilMask(0xff);
 
                     // Clear color targets
-                    for (cmd.color_attachments_buf, 0..) |attach, i| {
+                    for (cmd.color_attachments_buf[0..cmd.color_attachments_len], 0..) |attach, i| {
                         if (attach.view) |view_raw| {
                             const view: *TextureView = @ptrCast(@alignCast(view_raw));
 
@@ -2124,7 +2126,7 @@ pub const CommandBuffer = struct {
                     }
 
                     // Release references
-                    for (cmd.color_attachments_buf) |attach| {
+                    for (cmd.color_attachments_buf[0..cmd.color_attachments_len]) |attach| {
                         if (attach.view) |view_raw| {
                             const view: *TextureView = @ptrCast(@alignCast(view_raw));
                             view.manager.release();
@@ -2228,7 +2230,7 @@ pub const CommandBuffer = struct {
                         const key = BindingPoint{ .group = cmd.group_index, .binding = entry.binding };
 
                         if (compute_pipeline.?.layout.bindings.get(key)) |slot| {
-                            bindEntry(gl, entry, slot, cmd);
+                            bindEntry(gl, entry, slot, &cmd);
                         }
                     }
 
@@ -2243,7 +2245,7 @@ pub const CommandBuffer = struct {
                         const key = BindingPoint{ .group = cmd.group_index, .binding = entry.binding };
 
                         if (render_pipeline.?.layout.bindings.get(key)) |slot| {
-                            bindEntry(gl, entry, slot, cmd);
+                            bindEntry(gl, entry, slot, &cmd);
                         }
                     }
                     group.manager.release();
@@ -2633,15 +2635,14 @@ pub const RenderPassEncoder = struct {
         };
 
         var color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined;
-        var color_attachments_len: usize = 0;
+
         for (0..desc.color_attachment_count) |i| {
             const attach = &desc.color_attachments.?[i];
             if (attach.view) |view_raw| {
                 const view: *TextureView = @ptrCast(@alignCast(view_raw));
                 view.manager.reference();
             }
-            color_attachments_buf[color_attachments_len] = attach.*;
-            color_attachments_len += 1;
+            color_attachments_buf[i] = attach.*;
         }
 
         if (desc.depth_stencil_attachment) |attach| {
@@ -2651,7 +2652,7 @@ pub const RenderPassEncoder = struct {
 
         try encoder.commands.append(allocator, .{ .begin_render_pass = .{
             .color_attachments_buf = color_attachments_buf,
-            .color_attachments_len = color_attachments_len,
+            .color_attachments_len = desc.color_attachment_count,
             .depth_stencil_attachment = if (desc.depth_stencil_attachment) |ds| ds.* else null,
         } });
 

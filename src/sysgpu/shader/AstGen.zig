@@ -60,7 +60,7 @@ pub const Scope = struct {
 };
 
 pub fn genTranslationUnit(astgen: *AstGen) !RefIndex {
-    var root_scope = try astgen.scope_pool.create();
+    var root_scope = try astgen.scope_pool.create(astgen.allocator);
     root_scope.* = .{ .tag = .root, .parent = undefined };
 
     const global_nodes = astgen.tree.spanToList(.globals);
@@ -124,7 +124,7 @@ fn scanDecls(astgen: *AstGen, scope: *Scope, nodes: []const NodeIndex) !void {
             }
         }
 
-        try scope.decls.putNoClobber(astgen.scope_pool.arena.allocator(), decl_node, .none);
+        try scope.decls.putNoClobber(astgen.allocator, decl_node, .none);
     }
 }
 
@@ -534,7 +534,7 @@ fn genFn(astgen: *AstGen, root_scope: *Scope, node: NodeIndex, only_entry_point:
         return error.AnalysisFail;
     }
 
-    const scope = try astgen.scope_pool.create();
+    const scope = try astgen.scope_pool.create(astgen.allocator);
     scope.* = .{
         .tag = .{
             .@"fn" = .{
@@ -895,7 +895,7 @@ fn genStatement(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
         .@"switch" => try astgen.genSwitch(scope, node),
         .loop => try astgen.genLoop(scope, node),
         .block => blk: {
-            const inner_scope = try astgen.scope_pool.create();
+            const inner_scope = try astgen.scope_pool.create(astgen.allocator);
             inner_scope.* = .{ .tag = .block, .parent = scope };
             const inner_block = try astgen.genBlock(inner_scope, node);
             break :blk inner_block;
@@ -926,7 +926,7 @@ fn genStatement(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
 }
 
 fn genLoop(astgen: *AstGen, parent_scope: *Scope, node: NodeIndex) !InstIndex {
-    const scope = try astgen.scope_pool.create();
+    const scope = try astgen.scope_pool.create(astgen.allocator);
     scope.* = .{ .tag = .loop, .parent = parent_scope };
 
     const block = try astgen.genBlock(scope, astgen.tree.nodeLHS(node));
@@ -934,7 +934,7 @@ fn genLoop(astgen: *AstGen, parent_scope: *Scope, node: NodeIndex) !InstIndex {
 }
 
 fn genContinuing(astgen: *AstGen, parent_scope: *Scope, node: NodeIndex) !InstIndex {
-    const scope = try astgen.scope_pool.create();
+    const scope = try astgen.scope_pool.create(astgen.allocator);
     scope.* = .{ .tag = .continuing, .parent = parent_scope };
 
     const block = try astgen.genBlock(scope, astgen.tree.nodeLHS(node));
@@ -958,7 +958,7 @@ fn genIf(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
         return error.AnalysisFail;
     }
 
-    const body_scope = try astgen.scope_pool.create();
+    const body_scope = try astgen.scope_pool.create(astgen.allocator);
     body_scope.* = .{ .tag = .@"if", .parent = scope };
     const block = try astgen.genBlock(body_scope, node_rhs);
 
@@ -975,11 +975,11 @@ fn genIfElse(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
     const if_node = astgen.tree.nodeLHS(node);
     const cond = try astgen.genExpr(scope, astgen.tree.nodeLHS(if_node));
 
-    const if_body_scope = try astgen.scope_pool.create();
+    const if_body_scope = try astgen.scope_pool.create(astgen.allocator);
     if_body_scope.* = .{ .tag = .@"if", .parent = scope };
     const if_block = try astgen.genBlock(if_body_scope, astgen.tree.nodeRHS(if_node));
 
-    const else_body_scope = try astgen.scope_pool.create();
+    const else_body_scope = try astgen.scope_pool.create(astgen.allocator);
     else_body_scope.* = .{ .tag = .@"if", .parent = scope };
     const else_block = try astgen.genBlock(else_body_scope, astgen.tree.nodeRHS(node));
 
@@ -1033,7 +1033,7 @@ fn genFor(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
     const node_rhs = astgen.tree.nodeRHS(node);
     const extra = astgen.tree.extraData(Ast.Node.ForHeader, node_lhs);
 
-    var for_scope = try astgen.scope_pool.create();
+    var for_scope = try astgen.scope_pool.create(astgen.allocator);
     for_scope.* = .{ .tag = .@"for", .parent = scope };
 
     try astgen.scanDecls(for_scope, &.{extra.init});
@@ -1085,7 +1085,7 @@ fn genSwitch(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
     for (cases_nodes) |cases_node| {
         const cases_node_tag = astgen.tree.nodeTag(cases_node);
 
-        const cases_scope = try astgen.scope_pool.create();
+        const cases_scope = try astgen.scope_pool.create(astgen.allocator);
         cases_scope.* = .{ .tag = .switch_case, .parent = scope };
 
         var cases = RefIndex.none;

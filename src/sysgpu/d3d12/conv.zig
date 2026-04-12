@@ -1,6 +1,6 @@
 const sysgpu = @import("../sysgpu/main.zig");
 const utils = @import("../utils.zig");
-const c = @import("c.zig");
+const c = @import("c.zig").c;
 
 fn stencilEnable(stencil: sysgpu.StencilFaceState) bool {
     return stencil.compare != .always or stencil.fail_op != .keep or stencil.depth_fail_op != .keep or stencil.pass_op != .keep;
