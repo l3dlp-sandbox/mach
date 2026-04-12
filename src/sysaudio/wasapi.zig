@@ -97,7 +97,7 @@ pub const Context = struct {
         return .{ .wasapi = ctx };
     }
 
-    fn queryInterfaceCB(ctx: *const win32.IUnknown, riid: ?*const win32.Guid, ppv: ?*?*anyopaque) callconv(std.os.windows.WINAPI) win32.HRESULT {
+    fn queryInterfaceCB(ctx: *const win32.IUnknown, riid: ?*const win32.Guid, ppv: ?*?*anyopaque) callconv(.winapi) win32.HRESULT {
         if (riid.?.eql(win32.IID_IUnknown.*) or riid.?.eql(win32.IID_IMMNotificationClient.*)) {
             ppv.?.* = @as(?*anyopaque, @ptrFromInt(@intFromPtr(ctx)));
             _ = ctx.IUnknown_AddRef();
@@ -108,39 +108,39 @@ pub const Context = struct {
         }
     }
 
-    fn addRefCB(_: *const win32.IUnknown) callconv(std.os.windows.WINAPI) u32 {
+    fn addRefCB(_: *const win32.IUnknown) callconv(.winapi) u32 {
         return 1;
     }
 
-    fn releaseCB(_: *const win32.IUnknown) callconv(std.os.windows.WINAPI) u32 {
+    fn releaseCB(_: *const win32.IUnknown) callconv(.winapi) u32 {
         return 1;
     }
 
-    fn onDeviceStateChangedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16, _: u32) callconv(std.os.windows.WINAPI) win32.HRESULT {
+    fn onDeviceStateChangedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16, _: u32) callconv(.winapi) win32.HRESULT {
         var watcher: *Watcher = @constCast(@fieldParentPtr("notif_client", ctx));
         watcher.deviceChangeFn(watcher.user_data);
         return win32.S_OK;
     }
 
-    fn onDeviceAddedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16) callconv(std.os.windows.WINAPI) win32.HRESULT {
+    fn onDeviceAddedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16) callconv(.winapi) win32.HRESULT {
         var watcher: *Watcher = @constCast(@fieldParentPtr("notif_client", ctx));
         watcher.deviceChangeFn(watcher.user_data);
         return win32.S_OK;
     }
 
-    fn onDeviceRemovedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16) callconv(std.os.windows.WINAPI) win32.HRESULT {
+    fn onDeviceRemovedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16) callconv(.winapi) win32.HRESULT {
         var watcher: *Watcher = @constCast(@fieldParentPtr("notif_client", ctx));
         watcher.deviceChangeFn(watcher.user_data);
         return win32.S_OK;
     }
 
-    fn onDefaultDeviceChangedCB(ctx: *const win32.IMMNotificationClient, _: win32.DataFlow, _: win32.Role, _: ?[*:0]const u16) callconv(std.os.windows.WINAPI) win32.HRESULT {
+    fn onDefaultDeviceChangedCB(ctx: *const win32.IMMNotificationClient, _: win32.DataFlow, _: win32.Role, _: ?[*:0]const u16) callconv(.winapi) win32.HRESULT {
         var watcher: *Watcher = @constCast(@fieldParentPtr("notif_client", ctx));
         watcher.deviceChangeFn(watcher.user_data);
         return win32.S_OK;
     }
 
-    fn onPropertyValueChangedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16, _: win32.PROPERTYKEY) callconv(std.os.windows.WINAPI) win32.HRESULT {
+    fn onPropertyValueChangedCB(ctx: *const win32.IMMNotificationClient, _: ?[*:0]const u16, _: win32.PROPERTYKEY) callconv(.winapi) win32.HRESULT {
         var watcher: *Watcher = @constCast(@fieldParentPtr("notif_client", ctx));
         watcher.deviceChangeFn(watcher.user_data);
         return win32.S_OK;

@@ -11,7 +11,7 @@ pub const Context = switch (builtin.os.tag) {
         alsa: *@import("alsa.zig").Context,
         dummy: *@import("dummy.zig").Context,
     },
-    .freebsd, .netbsd, .openbsd, .solaris => union(enum) {
+    .freebsd, .netbsd, .openbsd, .illumos => union(enum) {
         pipewire: *@import("pipewire.zig").Context,
         pulseaudio: *@import("pulseaudio.zig").Context,
         jack: *@import("jack.zig").Context,
@@ -41,7 +41,7 @@ pub const Player = switch (builtin.os.tag) {
         alsa: *@import("alsa.zig").Player,
         dummy: *@import("dummy.zig").Player,
     },
-    .freebsd, .netbsd, .openbsd, .solaris => union(enum) {
+    .freebsd, .netbsd, .openbsd, .illumos => union(enum) {
         pipewire: *@import("pipewire.zig").Player,
         pulseaudio: *@import("pulseaudio.zig").Player,
         jack: *@import("jack.zig").Player,
@@ -71,7 +71,7 @@ pub const Recorder = switch (builtin.os.tag) {
         alsa: *@import("alsa.zig").Recorder,
         dummy: *@import("dummy.zig").Recorder,
     },
-    .freebsd, .netbsd, .openbsd, .solaris => union(enum) {
+    .freebsd, .netbsd, .openbsd, .illumos => union(enum) {
         pipewire: *@import("pipewire.zig").Recorder,
         pulseaudio: *@import("pulseaudio.zig").Recorder,
         jack: *@import("jack.zig").Recorder,

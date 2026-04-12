@@ -4,6 +4,10 @@ const sysaudio = @import("mach").sysaudio;
 var player: sysaudio.Player = undefined;
 
 pub fn main() !void {
+    const allocator = std.heap.c_allocator;
+    var io_threaded = std.Io.Threaded.init(allocator, .{});
+    const io = io_threaded.io();
+
     var timer = try std.time.Timer.start();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -26,12 +30,15 @@ pub fn main() !void {
     try player.setVolume(0.85);
     std.log.info("Took {} to set the volume...", .{std.fmt.fmtDuration(timer.lap())});
 
-    var buf: [16]u8 = undefined;
+    var reader_buf: [8192]u8 = undefined;
+    var reader = std.Io.File.stdin().readerStreaming(io, &reader_buf);
+
     std.log.info("player created & entering i/o loop...", .{});
     while (true) {
         std.debug.print("( paused = {}, volume = {d} )\n> ", .{ player.paused(), try player.volume() });
-        const line = (try std.io.getStdIn().reader().readUntilDelimiterOrEof(&buf, '\n')) orelse break;
-        var iter = std.mem.splitScalar(u8, line, ':');
+        const line = reader.takeDelimiterInclusive('\n') catch break;
+        const trimmed = std.mem.trimRight(u8, line, "\n");
+        var iter = std.mem.splitScalar(u8, trimmed, ':');
         const cmd = std.mem.trimRight(u8, iter.first(), &std.ascii.whitespace);
         if (std.mem.eql(u8, cmd, "vol")) {
             const vol = try std.fmt.parseFloat(f32, std.mem.trim(u8, iter.next().?, &std.ascii.whitespace));

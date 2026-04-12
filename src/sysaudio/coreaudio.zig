@@ -3,10 +3,7 @@ const builtin = @import("builtin");
 const main = @import("main.zig");
 const backends = @import("backends.zig");
 const util = @import("util.zig");
-const c = @cImport({
-    @cInclude("CoreAudio/CoreAudio.h");
-    @cInclude("AudioUnit/AudioUnit.h");
-});
+const c = @import("coreaudio_c.zig");
 const avaudio = @import("objc").avf_audio.avaudio;
 
 const native_endian = builtin.cpu.arch.endian();
@@ -21,9 +18,9 @@ pub const Context = struct {
     pub fn init(allocator: std.mem.Allocator, options: main.Context.Options) !backends.Context {
         _ = options;
 
-        if (std.fs.accessAbsolute("/usr/lib/darling", .{})) {
+        if (std.c.access("/usr/lib/darling", 0) == 0) {
             is_darling = true;
-        } else |_| {}
+        }
 
         const ctx = try allocator.create(Context);
         errdefer allocator.destroy(ctx);
@@ -212,7 +209,7 @@ pub const Context = struct {
                 ) != c.noErr) {
                     return error.OpeningDevice;
                 }
-                const id_str = try std.fmt.allocPrintZ(ctx.allocator, "{d}", .{id});
+                const id_str = try std.fmt.allocPrintSentinel(ctx.allocator, "{d}", .{id}, 0);
                 errdefer ctx.allocator.free(id_str);
 
                 const dev = main.Device{
@@ -535,8 +532,9 @@ pub const Player = struct {
 
         const player = @as(*Player, @ptrCast(@alignCast(player_opaque.?)));
 
-        const frames = buf.*.mBuffers[0].mDataByteSize;
-        player.writeFn(player.user_data, @as([*]u8, @ptrCast(buf.*.mBuffers[0].mData.?))[0..frames]);
+        const audio_buf = @as(*c.AudioBuffer, @ptrCast(&buf.*.mBuffers));
+        const frames = audio_buf.mDataByteSize;
+        player.writeFn(player.user_data, @as([*]u8, @ptrCast(audio_buf.mData.?))[0..frames]);
 
         return c.noErr;
     }
