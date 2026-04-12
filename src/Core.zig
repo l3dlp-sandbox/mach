@@ -7,7 +7,7 @@ const log = std.log.scoped(.mach);
 
 const Core = @This();
 
-const EventQueue = std.fifo.LinearFifo(Event, .Dynamic);
+const EventQueue = std.Deque(Event);
 
 pub const mach_module = .mach_core;
 
@@ -127,8 +127,8 @@ pub fn init(core: *Core) !void {
     // TODO: fix all leaks and use options.allocator
     try mach.sysgpu.Impl.init(allocator, .{});
 
-    var events = EventQueue.init(allocator);
-    try events.ensureTotalCapacity(8192);
+    var events: EventQueue = .empty;
+    try events.ensureTotalCapacity(allocator, 8192);
 
     core.* = .{
         // Note: since core.windows is initialized for us already, we just copy the pointer.
@@ -298,13 +298,13 @@ pub fn deinit(core: *Core) !void {
         core_window.instance.release();
     }
 
-    core.events.deinit();
+    core.events.deinit(core.allocator);
 }
 
 /// Returns the next event until there are no more available. You should check for events during
 /// every on_tick()
 pub inline fn nextEvent(core: *@This()) ?Event {
-    return core.events.readItem();
+    return core.events.popFront();
 }
 
 /// Push an event onto the event queue, or set OOM if no space is available.
@@ -312,7 +312,7 @@ pub inline fn nextEvent(core: *@This()) ?Event {
 /// Updates the input_state tracker.
 pub inline fn pushEvent(core: *@This(), event: Event) void {
     // Write event
-    core.events.writeItem(event) catch {
+    core.events.pushBack(core.allocator, event) catch {
         core.oom.store(true, .release);
         return;
     };
