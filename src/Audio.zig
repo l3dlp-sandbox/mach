@@ -61,12 +61,92 @@ player: sysaudio.Player,
 allocator: std.mem.Allocator,
 ctx: sysaudio.Context,
 output: SampleBuffer,
-mixing_buffer: ?std.ArrayListAlignedUnmanaged(f32, alignment) = null,
+mixing_buffer: ?std.ArrayListAlignedUnmanaged(f32, .fromByteUnits(alignment)) = null,
 shutdown: std.atomic.Value(bool) = .init(false),
 mod: mach.Mod(Audio),
+io: std.Io,
 driver_needs_num_samples: usize = 0,
 
-const SampleBuffer = std.fifo.LinearFifo(u8, .Dynamic);
+const SampleBuffer = struct {
+    buf: []u8 = &.{},
+    head: usize = 0,
+    count: usize = 0,
+    allocator: std.mem.Allocator,
+
+    fn init(allocator: std.mem.Allocator) SampleBuffer {
+        return .{ .allocator = allocator };
+    }
+
+    fn readableLength(self: *const SampleBuffer) usize {
+        return self.count;
+    }
+
+    fn readableSlice(self: *const SampleBuffer, offset: usize) []u8 {
+        if (self.count <= offset) return &.{};
+        const start = (self.head + offset) % self.buf.len;
+        const available = self.count - offset;
+        const contig = self.buf.len - start;
+        return self.buf[start..][0..@min(available, contig)];
+    }
+
+    fn discard(self: *SampleBuffer, num: usize) void {
+        std.debug.assert(num <= self.count);
+        self.head = (self.head + num) % self.buf.len;
+        self.count -= num;
+    }
+
+    fn writableWithSize(self: *SampleBuffer, size: usize) ![]u8 {
+        try self.ensureCapacity(self.count + size);
+        const tail = (self.head + self.count) % self.buf.len;
+        const contig = self.buf.len - tail;
+        if (contig >= size) {
+            return self.buf[tail..][0..contig];
+        }
+        // Linearize: move data so head is at 0
+        self.linearize();
+        const new_tail = self.count;
+        return self.buf[new_tail..];
+    }
+
+    fn update(self: *SampleBuffer, num: usize) void {
+        self.count += num;
+        std.debug.assert(self.count <= self.buf.len);
+    }
+
+    fn ensureCapacity(self: *SampleBuffer, needed: usize) !void {
+        if (self.buf.len >= needed) return;
+        var new_cap = if (self.buf.len == 0) @as(usize, 4096) else self.buf.len;
+        while (new_cap < needed) new_cap *= 2;
+        const new_buf = try self.allocator.alloc(u8, new_cap);
+        if (self.count > 0) {
+            const first_part = self.buf.len - self.head;
+            if (first_part >= self.count) {
+                @memcpy(new_buf[0..self.count], self.buf[self.head..][0..self.count]);
+            } else {
+                @memcpy(new_buf[0..first_part], self.buf[self.head..][0..first_part]);
+                @memcpy(new_buf[first_part..][0..self.count - first_part], self.buf[0..self.count - first_part]);
+            }
+        }
+        if (self.buf.len > 0) self.allocator.free(self.buf);
+        self.buf = new_buf;
+        self.head = 0;
+    }
+
+    fn linearize(self: *SampleBuffer) void {
+        if (self.head == 0 or self.count == 0) return;
+        const first_part = self.buf.len - self.head;
+        if (first_part >= self.count) {
+            std.mem.copyForwards(u8, self.buf[0..self.count], self.buf[self.head..][0..self.count]);
+        } else {
+            const tmp = self.allocator.alloc(u8, self.count) catch return;
+            defer self.allocator.free(tmp);
+            @memcpy(tmp[0..first_part], self.buf[self.head..][0..first_part]);
+            @memcpy(tmp[first_part..][0..self.count - first_part], self.buf[0..self.count - first_part]);
+            @memcpy(self.buf[0..self.count], tmp);
+        }
+        self.head = 0;
+    }
+};
 
 fn initAudioContext(allocator: std.mem.Allocator) sysaudio.Context.InitError!sysaudio.Context {
     // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
@@ -84,7 +164,7 @@ fn initAudioContext(allocator: std.mem.Allocator) sysaudio.Context.InitError!sys
     return sysaudio.Context.init(null, allocator, .{});
 }
 
-pub fn init(audio: *Audio, audio_mod: mach.Mod(Audio)) !void {
+pub fn init(audio: *Audio, audio_mod: mach.Mod(Audio), io: std.Io) !void {
     // TODO(allocator): find a better way for modules to get allocators
     const allocator = std.heap.c_allocator;
 
@@ -112,6 +192,7 @@ pub fn init(audio: *Audio, audio_mod: mach.Mod(Audio)) !void {
         .output = SampleBuffer.init(allocator),
         .debug = debug,
         .mod = audio_mod,
+        .io = io,
     };
 
     try player.start();
@@ -156,7 +237,7 @@ pub fn tick(audio: *Audio, audio_mod: mach.Mod(Audio)) !void {
     // Ensure our f32 mixing buffer has enough space for the samples we will render right now.
     // This will allocate to grow but never shrink.
     var mixing_buffer = if (audio.mixing_buffer) |*b| b else blk: {
-        const b = try std.ArrayListAlignedUnmanaged(f32, alignment).initCapacity(allocator, render_num_samples);
+        const b = try std.ArrayListAlignedUnmanaged(f32, .fromByteUnits(alignment)).initCapacity(allocator, render_num_samples);
         audio.mixing_buffer = b;
         break :blk &audio.mixing_buffer.?;
     };
@@ -257,7 +338,7 @@ fn writeFn(audio_opaque: ?*anyopaque, output: []u8) void {
         if (audio.debug) log.debug("resync, found {} samples but need {} (nano timestamp {})", .{
             @divExact(read_slice.len, format_size),
             @divExact(output.len, format_size),
-            std.time.nanoTimestamp(),
+            std.Io.Timestamp.now(audio.io, .awake).nanoseconds,
         });
 
         // If the other thread called deinit(), write zeros to the buffer (no sound) and return.
@@ -328,12 +409,13 @@ inline fn mixSamples(
         const src_offset = current_index + vec_index;
         const src_vec: Vec = src[src_offset..][0..simd_vector_length].*;
         const scaled_vec = src_vec * volume_vec;
+        const scaled_arr: [simd_vector_length]f32 = scaled_vec;
 
         const frame_index = (src_offset - src_index) / src_channels;
         var dst_base = frame_index * dst_channels;
         var i: usize = 0;
         while (i < simd_vector_length) : (i += 1) {
-            const sample = scaled_vec[i];
+            const sample = scaled_arr[i];
             const src_channel = (src_offset - src_index + i) % src_channels;
             var channel: u8 = 0;
 
