@@ -1178,7 +1178,7 @@ fn exitScope(hlsl: *Hlsl) void {
 }
 
 fn writeIndent(hlsl: *Hlsl) !void {
-    try hlsl.scratch.writer(hlsl.allocator).writeByteNTimes(' ', hlsl.indent);
+    try hlsl.scratch.appendNTimes(hlsl.allocator, ' ', hlsl.indent);
 }
 
 fn writeEntrypoint(hlsl: *Hlsl, name: Air.StringIndex) !void {
@@ -1193,9 +1193,9 @@ fn writeName(hlsl: *Hlsl, name: Air.StringIndex) !void {
 }
 
 fn writeAll(hlsl: *Hlsl, bytes: []const u8) !void {
-    try hlsl.scratch.writer(hlsl.allocator).writeAll(bytes);
+    try hlsl.scratch.appendSlice(hlsl.allocator, bytes);
 }
 
 fn print(hlsl: *Hlsl, comptime format: []const u8, args: anytype) !void {
-    try hlsl.scratch.writer(hlsl.allocator).print(format, args);
+    try hlsl.scratch.print(hlsl.allocator, format, args);
 }

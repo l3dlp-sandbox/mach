@@ -15,8 +15,7 @@ const slot_buffer_lengths = 28;
 
 air: *const Air,
 allocator: std.mem.Allocator,
-storage: std.ArrayListUnmanaged(u8),
-writer: std.ArrayListUnmanaged(u8).Writer,
+storage: *std.ArrayListUnmanaged(u8),
 fn_emit_list: std.AutoArrayHashMapUnmanaged(InstIndex, bool) = .{},
 bindings: *const BindingTable,
 indent: u32 = 0,
@@ -35,12 +34,11 @@ pub fn gen(
 ) ![]const u8 {
     _ = debug_info;
 
-    var storage = std.ArrayListUnmanaged(u8){};
+    var storage = std.ArrayListUnmanaged(u8).empty;
     var msl = Msl{
         .air = air,
         .allocator = allocator,
-        .storage = storage,
-        .writer = storage.writer(allocator),
+        .storage = &storage,
         .bindings = bindings orelse &.{},
         .label = label,
     };
@@ -1119,7 +1117,7 @@ fn exitScope(msl: *Msl) void {
 }
 
 fn writeIndent(msl: *Msl) !void {
-    try msl.writer.writeByteNTimes(' ', msl.indent);
+    try msl.storage.appendNTimes(msl.allocator, ' ', msl.indent);
 }
 
 fn writeEntrypoint(msl: *Msl, name: Air.StringIndex) !void {
@@ -1230,9 +1228,9 @@ fn writeName(msl: *Msl, name: Air.StringIndex) !void {
 }
 
 fn writeAll(msl: *Msl, bytes: []const u8) !void {
-    try msl.writer.writeAll(bytes);
+    try msl.storage.appendSlice(msl.allocator, bytes);
 }
 
 fn print(msl: *Msl, comptime format: []const u8, args: anytype) !void {
-    return std.fmt.format(msl.writer, format, args);
+    try msl.storage.print(msl.allocator, format, args);
 }

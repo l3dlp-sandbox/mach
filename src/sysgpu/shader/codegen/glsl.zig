@@ -12,8 +12,7 @@ const Glsl = @This();
 
 air: *const Air,
 allocator: std.mem.Allocator,
-storage: std.ArrayListUnmanaged(u8),
-writer: std.ArrayListUnmanaged(u8).Writer,
+storage: *std.ArrayListUnmanaged(u8),
 bindings: *const BindingTable,
 entrypoint_inst: ?Inst.Fn = null,
 indent: u32 = 0,
@@ -27,12 +26,11 @@ pub fn gen(
 ) ![]const u8 {
     _ = debug_info;
 
-    var storage = std.ArrayListUnmanaged(u8){};
+    var storage = std.ArrayListUnmanaged(u8).empty;
     var glsl = Glsl{
         .air = air,
         .allocator = allocator,
-        .storage = storage,
-        .writer = storage.writer(allocator),
+        .storage = &storage,
         .bindings = bindings orelse &.{},
     };
     defer {
@@ -973,7 +971,7 @@ fn emitTextureStore(glsl: *Glsl, inst: Inst.TextureStore) !void {
 }
 
 fn writeIndent(glsl: *Glsl) !void {
-    try glsl.writer.writeByteNTimes(' ', glsl.indent);
+    try glsl.storage.appendNTimes(glsl.allocator, ' ', glsl.indent);
 }
 
 fn writeEntrypoint(glsl: *Glsl) !void {
@@ -987,9 +985,9 @@ fn writeName(glsl: *Glsl, name: Air.StringIndex) !void {
 }
 
 fn writeAll(glsl: *Glsl, bytes: []const u8) !void {
-    try glsl.writer.writeAll(bytes);
+    try glsl.storage.appendSlice(glsl.allocator, bytes);
 }
 
 fn print(glsl: *Glsl, comptime format: []const u8, args: anytype) !void {
-    return std.fmt.format(glsl.writer, format, args);
+    try glsl.storage.print(glsl.allocator, format, args);
 }
