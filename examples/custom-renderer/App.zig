@@ -1,3 +1,4 @@
+const std = @import("std");
 const mach = @import("mach");
 const math = mach.math;
 const Renderer = @import("Renderer.zig");
@@ -48,6 +49,7 @@ pub fn init(
     app: *App,
     app_mod: mach.Mod(App),
     renderer: *Renderer,
+    io: std.Io,
 ) !void {
     core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
@@ -65,8 +67,8 @@ pub fn init(
     });
 
     app.* = .{
-        .tick_timer = try mach.time.Timer.start(),
-        .spawn_timer = try mach.time.Timer.start(),
+        .tick_timer = mach.time.Timer.start(io),
+        .spawn_timer = mach.time.Timer.start(io),
         .player = player,
     };
 }

@@ -121,7 +121,7 @@ events: EventQueue,
 input_state: InputState,
 oom: std.atomic.Value(bool) = .init(false),
 
-pub fn init(core: *Core) !void {
+pub fn init(core: *Core, io: std.Io) !void {
     const allocator = std.heap.c_allocator;
 
     // TODO: fix all leaks and use options.allocator
@@ -142,8 +142,8 @@ pub fn init(core: *Core) !void {
         .frame = .{ .target = 1 },
     };
 
-    try core.frame.start();
-    try core.input.start();
+    core.frame.start(io);
+    core.input.start(io);
 }
 
 pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {

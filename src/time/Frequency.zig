@@ -1,3 +1,4 @@
+const std = @import("std");
 const mach = @import("../main.zig");
 const Timer = @import("Timer.zig");
 
@@ -24,10 +25,10 @@ internal: struct {
 } = undefined,
 
 /// Starts the timer used for frequency calculation. Must be called once before anything else.
-pub fn start(f: *Frequency) !void {
+pub fn start(f: *Frequency, io: std.Io) void {
     f.internal = .{
         .count = 0,
-        .timer = try Timer.start(),
+        .timer = Timer.start(io),
         .last_time = 0,
     };
 }

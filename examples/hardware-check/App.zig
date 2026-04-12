@@ -75,6 +75,7 @@ pub fn init(
     audio: *mach.Audio,
     app: *App,
     app_mod: mach.Mod(App),
+    io: std.Io,
 ) !void {
     core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
@@ -95,9 +96,9 @@ pub fn init(
     app.* = .{
         .allocator = allocator,
         .window = window,
-        .tick_timer = try mach.time.Timer.start(),
-        .spawn_timer = try mach.time.Timer.start(),
-        .fps_timer = try mach.time.Timer.start(),
+        .tick_timer = mach.time.Timer.start(io),
+        .spawn_timer = mach.time.Timer.start(io),
+        .fps_timer = mach.time.Timer.start(io),
         .rand = std.Random.DefaultPrng.init(1337),
     };
 }

@@ -1,3 +1,4 @@
+const std = @import("std");
 const mach = @import("mach");
 const gpu = mach.gpu;
 
@@ -37,6 +38,7 @@ pub fn init(
     app: *App,
     core: *mach.Core,
     app_mod: mach.Mod(App),
+    io: std.Io,
 ) !void {
     core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
@@ -49,7 +51,7 @@ pub fn init(
     // Store our render pipeline in our module's state, so we can access it later on.
     app.* = .{
         .window = window,
-        .title_timer = try mach.time.Timer.start(),
+        .title_timer = mach.time.Timer.start(io),
         .pipeline = undefined,
     };
 
