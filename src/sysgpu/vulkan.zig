@@ -28,7 +28,7 @@ pub const InitOptions = struct {
 pub fn init(alloc: std.mem.Allocator, options: InitOptions) !void {
     allocator = alloc;
     if (options.baseLoader) |baseLoader| {
-        vkb = try proc.loadBase(baseLoader);
+        vkb = proc.loadBase(baseLoader);
     } else {
         libvulkan = try mach.dynLibOpen(switch (builtin.target.os.tag) {
             .windows => .{"vulkan-1.dll"},
@@ -36,7 +36,7 @@ pub fn init(alloc: std.mem.Allocator, options: InitOptions) !void {
             .macos => .{"libvulkan.1.dylib"},
             else => @compileError("Unknown OS!"),
         });
-        vkb = try proc.loadBase(libVulkanBaseLoader);
+        vkb = proc.loadBase(libVulkanBaseLoader);
     }
 }
 
@@ -110,8 +110,8 @@ pub const Instance = struct {
         const application_info = vk.ApplicationInfo{
             .p_engine_name = "Banana",
             .application_version = 0,
-            .engine_version = vk.makeApiVersion(0, 0, 1, 0), // TODO: get this from build.zig.zon
-            .api_version = api_version,
+            .engine_version = @bitCast(vk.makeApiVersion(0, 0, 1, 0)), // TODO: get this from build.zig.zon
+            .api_version = @bitCast(api_version),
         };
         const instance_info = vk.InstanceCreateInfo{
             .p_application_info = &application_info,
@@ -123,7 +123,7 @@ pub const Instance = struct {
         const vk_instance = try vkb.createInstance(&instance_info, null);
 
         // Load instance functions
-        vki = try proc.loadInstance(vk_instance, vkb.dispatch.vkGetInstanceProcAddr);
+        vki = proc.loadInstance(vk_instance, vkb.dispatch.vkGetInstanceProcAddr.?);
 
         const instance = try allocator.create(Instance);
         instance.* = .{ .vk_instance = vk_instance };
@@ -236,14 +236,16 @@ pub const Adapter = struct {
             errdefer allocator.free(extensions);
             _ = try vki.enumerateDeviceExtensionProperties(info.physical_device, null, &count, extensions.ptr);
 
-            const driver_desc = try std.fmt.allocPrintZ(
+            const driver_version: vk.Version = @bitCast(info.props.driver_version);
+            const driver_desc = try std.fmt.allocPrintSentinel(
                 allocator,
                 "Vulkan driver version {}.{}.{}",
                 .{
-                    vk.apiVersionMajor(info.props.driver_version),
-                    vk.apiVersionMinor(info.props.driver_version),
-                    vk.apiVersionPatch(info.props.driver_version),
+                    driver_version.major,
+                    driver_version.minor,
+                    driver_version.patch,
                 },
+                0,
             );
 
             const adapter = try allocator.create(Adapter);
@@ -296,18 +298,18 @@ pub const Adapter = struct {
     }
 
     fn isDeviceSuitable(props: vk.PhysicalDeviceProperties, features: vk.PhysicalDeviceFeatures) bool {
-        return props.api_version >= api_version and
+        return props.api_version >= @as(u32, @bitCast(api_version)) and
             // WebGPU features
-            features.depth_bias_clamp == vk.TRUE and
-            features.fragment_stores_and_atomics == vk.TRUE and
-            features.full_draw_index_uint_32 == vk.TRUE and
-            features.image_cube_array == vk.TRUE and
-            features.independent_blend == vk.TRUE and
-            features.sample_rate_shading == vk.TRUE and
+            features.depth_bias_clamp == .true and
+            features.fragment_stores_and_atomics == .true and
+            features.full_draw_index_uint_32 == .true and
+            features.image_cube_array == .true and
+            features.independent_blend == .true and
+            features.sample_rate_shading == .true and
             // At least one of the following texture compression forms
-            (features.texture_compression_bc == vk.TRUE or
-                features.texture_compression_etc2 == vk.TRUE or
-                features.texture_compression_astc_ldr == vk.TRUE);
+            (features.texture_compression_bc == .true or
+                features.texture_compression_etc2 == .true or
+                features.texture_compression_astc_ldr == .true);
     }
 
     fn rateDevice(
@@ -485,17 +487,17 @@ pub const Device = struct {
                 for (required_features[0..desc.required_features_count]) |req_feature| {
                     switch (req_feature) {
                         .undefined => break,
-                        .depth_clip_control => features.features.depth_clamp = vk.TRUE,
-                        .pipeline_statistics_query => features.features.pipeline_statistics_query = vk.TRUE,
-                        .texture_compression_bc => features.features.texture_compression_bc = vk.TRUE,
-                        .texture_compression_etc2 => features.features.texture_compression_etc2 = vk.TRUE,
-                        .texture_compression_astc => features.features.texture_compression_astc_ldr = vk.TRUE,
-                        .indirect_first_instance => features.features.draw_indirect_first_instance = vk.TRUE,
+                        .depth_clip_control => features.features.depth_clamp = .true,
+                        .pipeline_statistics_query => features.features.pipeline_statistics_query = .true,
+                        .texture_compression_bc => features.features.texture_compression_bc = .true,
+                        .texture_compression_etc2 => features.features.texture_compression_etc2 = .true,
+                        .texture_compression_astc => features.features.texture_compression_astc_ldr = .true,
+                        .indirect_first_instance => features.features.draw_indirect_first_instance = .true,
                         .shader_f16 => {
                             var feature = vk.PhysicalDeviceShaderFloat16Int8FeaturesKHR{
                                 // physical_device_shader_float16_int8_features_khr
                                 .s_type = vk.StructureType.physical_device_shader_float16_int8_features_khr,
-                                .shader_float_16 = vk.TRUE,
+                                .shader_float_16 = .true,
                             };
                             features.p_next = @ptrCast(&feature);
                         },
@@ -567,7 +569,7 @@ pub const Device = struct {
         }
 
         const vk_device = try vki.createDevice(adapter.physical_device, &create_info, null);
-        vkd = try proc.loadDevice(vk_device, vki.dispatch.vkGetDeviceProcAddr);
+        vkd = proc.loadDevice(vk_device, vki.dispatch.vkGetDeviceProcAddr.?);
 
         var supported_ds_formats = std.AutoHashMapUnmanaged(vk.Format, void){};
         for ([_]vk.Format{ .d24_unorm_s8_uint, .s8_uint }) |format| {
@@ -924,7 +926,7 @@ pub const SubmitObject = struct {
     pub fn wait(object: *SubmitObject) !void {
         const vk_device = object.device.vk_device;
 
-        _ = try vkd.waitForFences(vk_device, 1, &[_]vk.Fence{object.fence}, vk.TRUE, std.math.maxInt(u64));
+        _ = try vkd.waitForFences(vk_device, &[_]vk.Fence{object.fence}, .true, std.math.maxInt(u64));
     }
 };
 
@@ -1053,7 +1055,7 @@ pub const SwapChain = struct {
             .pre_transform = .{ .identity_bit_khr = true },
             .composite_alpha = composite_alpha,
             .present_mode = present_mode,
-            .clipped = vk.FALSE,
+            .clipped = .false,
             .old_swapchain = old_vk_swapchain,
         }, null);
 
@@ -1148,8 +1150,8 @@ pub const SwapChain = struct {
         // Wait on the CPU so that GPU does not stall later during present.
         // This should be similar to using DXGI Waitable Object.
         if (!use_semaphore_wait) {
-            _ = try vkd.waitForFences(vk_device, 1, &[_]vk.Fence{sc.fence}, vk.TRUE, std.math.maxInt(u64));
-            try vkd.resetFences(vk_device, 1, &[_]vk.Fence{sc.fence});
+            _ = try vkd.waitForFences(vk_device, &[_]vk.Fence{sc.fence}, .true, std.math.maxInt(u64));
+            try vkd.resetFences(vk_device, &[_]vk.Fence{sc.fence});
         }
 
         sc.texture_index = result.?.image_index;
@@ -1577,14 +1579,14 @@ pub const Sampler = struct {
             .address_mode_v = conv.vulkanSamplerAddressMode(desc.address_mode_v),
             .address_mode_w = conv.vulkanSamplerAddressMode(desc.address_mode_w),
             .mip_lod_bias = 0,
-            .anisotropy_enable = @intFromBool(desc.max_anisotropy > 1),
+            .anisotropy_enable = if (desc.max_anisotropy > 1) .true else .false,
             .max_anisotropy = @floatFromInt(desc.max_anisotropy),
-            .compare_enable = @intFromBool(desc.compare != .undefined),
+            .compare_enable = if (desc.compare != .undefined) .true else .false,
             .compare_op = if (desc.compare != .undefined) conv.vulkanCompareOp(desc.compare) else .never,
             .min_lod = desc.lod_min_clamp,
             .max_lod = desc.lod_max_clamp,
             .border_color = .float_transparent_black,
-            .unnormalized_coordinates = vk.FALSE,
+            .unnormalized_coordinates = .false,
         }, null);
 
         // Result
@@ -1710,7 +1712,7 @@ pub const BindGroup = struct {
         const max_sets: u32 = @intCast(256 / @max(desc.entry_count, 1));
 
         var pool_sizes = try std.ArrayList(vk.DescriptorPoolSize).initCapacity(allocator, layout.desc_types.count());
-        defer pool_sizes.deinit();
+        defer pool_sizes.deinit(allocator);
 
         var desc_types_iter = layout.desc_types.iterator();
         while (desc_types_iter.next()) |entry| {
@@ -1796,7 +1798,7 @@ pub const BindGroup = struct {
             }
         }
 
-        vkd.updateDescriptorSets(device.vk_device, @intCast(writes.len), writes.ptr, 0, undefined);
+        vkd.updateDescriptorSets(device.vk_device, writes, null);
 
         // Resource tracking
         var buffers = std.ArrayListUnmanaged(BufferAccess).empty;
@@ -2013,12 +2015,13 @@ pub const ComputePipeline = struct {
             .p_name = desc.compute.entry_point,
         };
 
-        var vk_pipeline: vk.Pipeline = undefined;
-        _ = try vkd.createComputePipelines(vk_device, .null_handle, 1, &[_]vk.ComputePipelineCreateInfo{.{
+        var vk_pipelines: [1]vk.Pipeline = undefined;
+        _ = try vkd.createComputePipelines(vk_device, .null_handle, &[_]vk.ComputePipelineCreateInfo{.{
             .base_pipeline_index = -1,
             .layout = layout.vk_layout,
             .stage = stage,
-        }}, null, @ptrCast(&vk_pipeline));
+        }}, null, &vk_pipelines);
+        const vk_pipeline = vk_pipelines[0];
 
         // Result
         const pipeline = try allocator.create(ComputePipeline);
@@ -2076,8 +2079,8 @@ pub const RenderPipeline = struct {
         var vertex_bindings = try std.ArrayList(vk.VertexInputBindingDescription).initCapacity(allocator, desc.vertex.buffer_count);
         var vertex_attrs = try std.ArrayList(vk.VertexInputAttributeDescription).initCapacity(allocator, desc.vertex.buffer_count);
         defer {
-            vertex_bindings.deinit();
-            vertex_attrs.deinit();
+            vertex_bindings.deinit(allocator);
+            vertex_attrs.deinit(allocator);
         }
 
         for (0..desc.vertex.buffer_count) |i| {
@@ -2092,7 +2095,7 @@ pub const RenderPipeline = struct {
 
             for (0..buf.attribute_count) |j| {
                 const attr = buf.attributes.?[j];
-                try vertex_attrs.append(.{
+                try vertex_attrs.append(allocator, .{
                     .location = attr.shader_location,
                     .binding = @intCast(i),
                     .format = conv.vulkanVertexFormat(attr.format),
@@ -2110,7 +2113,7 @@ pub const RenderPipeline = struct {
 
         const input_assembly = vk.PipelineInputAssemblyStateCreateInfo{
             .topology = conv.vulkanPrimitiveTopology(desc.primitive.topology),
-            .primitive_restart_enable = @intFromBool(desc.primitive.strip_index_format != .undefined),
+            .primitive_restart_enable = if (desc.primitive.strip_index_format != .undefined) .true else .false,
         };
 
         const viewport = vk.PipelineViewportStateCreateInfo{
@@ -2121,8 +2124,8 @@ pub const RenderPipeline = struct {
         };
 
         const rasterization = vk.PipelineRasterizationStateCreateInfo{
-            .depth_clamp_enable = vk.FALSE,
-            .rasterizer_discard_enable = vk.FALSE,
+            .depth_clamp_enable = .false,
+            .rasterizer_discard_enable = .false,
             .polygon_mode = .fill,
             .cull_mode = conv.vulkanCullMode(desc.primitive.cull_mode),
             .front_face = conv.vulkanFrontFace(desc.primitive.front_face),
@@ -2136,11 +2139,11 @@ pub const RenderPipeline = struct {
         const sample_count = conv.vulkanSampleCount(desc.multisample.count);
         const multisample = vk.PipelineMultisampleStateCreateInfo{
             .rasterization_samples = sample_count,
-            .sample_shading_enable = vk.FALSE,
+            .sample_shading_enable = .false,
             .min_sample_shading = 0,
             .p_sample_mask = &[_]u32{desc.multisample.mask},
-            .alpha_to_coverage_enable = @intFromEnum(desc.multisample.alpha_to_coverage_enabled),
-            .alpha_to_one_enable = vk.FALSE,
+            .alpha_to_coverage_enable = if (desc.multisample.alpha_to_coverage_enabled == .true) .true else .false,
+            .alpha_to_one_enable = .false,
         };
 
         var layout: *PipelineLayout = undefined;
@@ -2185,7 +2188,7 @@ pub const RenderPipeline = struct {
                 const target = frag.targets.?[i];
                 const blend = target.blend orelse &sysgpu.BlendState{};
                 blend_attachments[i] = .{
-                    .blend_enable = if (target.blend != null) vk.TRUE else vk.FALSE,
+                    .blend_enable = if (target.blend != null) .true else .false,
                     .src_color_blend_factor = conv.vulkanBlendFactor(blend.color.src_factor, true),
                     .dst_color_blend_factor = conv.vulkanBlendFactor(blend.color.dst_factor, true),
                     .color_blend_op = conv.vulkanBlendOp(blend.color.operation),
@@ -2212,11 +2215,11 @@ pub const RenderPipeline = struct {
         }
 
         var depth_stencil_state = vk.PipelineDepthStencilStateCreateInfo{
-            .depth_test_enable = vk.FALSE,
-            .depth_write_enable = vk.FALSE,
+            .depth_test_enable = .false,
+            .depth_write_enable = .false,
             .depth_compare_op = .never,
-            .depth_bounds_test_enable = vk.FALSE,
-            .stencil_test_enable = vk.FALSE,
+            .depth_bounds_test_enable = .false,
+            .stencil_test_enable = .false,
             .front = .{
                 .fail_op = .keep,
                 .depth_fail_op = .keep,
@@ -2240,10 +2243,10 @@ pub const RenderPipeline = struct {
         };
 
         if (desc.depth_stencil) |ds| {
-            depth_stencil_state.depth_test_enable = @intFromBool(ds.depth_compare != .always or ds.depth_write_enabled == .true);
-            depth_stencil_state.depth_write_enable = @intFromBool(ds.depth_write_enabled == .true);
+            depth_stencil_state.depth_test_enable = if (ds.depth_compare != .always or ds.depth_write_enabled == .true) .true else .false;
+            depth_stencil_state.depth_write_enable = if (ds.depth_write_enabled == .true) .true else .false;
             depth_stencil_state.depth_compare_op = conv.vulkanCompareOp(ds.depth_compare);
-            depth_stencil_state.stencil_test_enable = @intFromBool(conv.stencilEnable(ds.stencil_front) or conv.stencilEnable(ds.stencil_back));
+            depth_stencil_state.stencil_test_enable = if (conv.stencilEnable(ds.stencil_front) or conv.stencilEnable(ds.stencil_back)) .true else .false;
             depth_stencil_state.front = .{
                 .fail_op = conv.vulkanStencilOp(ds.stencil_front.fail_op),
                 .depth_fail_op = conv.vulkanStencilOp(ds.stencil_front.depth_fail_op),
@@ -2276,7 +2279,7 @@ pub const RenderPipeline = struct {
         }
 
         const color_blend = vk.PipelineColorBlendStateCreateInfo{
-            .logic_op_enable = vk.FALSE,
+            .logic_op_enable = .false,
             .logic_op = .clear,
             .attachment_count = @intCast(blend_attachments.len),
             .p_attachments = blend_attachments.ptr,
@@ -2294,8 +2297,8 @@ pub const RenderPipeline = struct {
 
         const render_pass = try device.createRenderPass(rp_key);
 
-        var vk_pipeline: vk.Pipeline = undefined;
-        _ = try vkd.createGraphicsPipelines(vk_device, .null_handle, 1, &[_]vk.GraphicsPipelineCreateInfo{.{
+        var vk_pipelines: [1]vk.Pipeline = undefined;
+        _ = try vkd.createGraphicsPipelines(vk_device, .null_handle, &[_]vk.GraphicsPipelineCreateInfo{.{
             .stage_count = @intCast(stages.items.len),
             .p_stages = stages.items.ptr,
             .p_vertex_input_state = &vertex_input,
@@ -2310,7 +2313,8 @@ pub const RenderPipeline = struct {
             .render_pass = render_pass,
             .subpass = 0,
             .base_pipeline_index = -1,
-        }}, null, @ptrCast(&vk_pipeline));
+        }}, null, &vk_pipelines);
+        const vk_pipeline = vk_pipelines[0];
 
         const pipeline = try allocator.create(RenderPipeline);
         pipeline.* = .{
@@ -2335,8 +2339,8 @@ pub const RenderPipeline = struct {
     }
 
     fn isDepthBiasEnabled(ds: ?*const sysgpu.DepthStencilState) vk.Bool32 {
-        if (ds == null) return vk.FALSE;
-        return @intFromBool(ds.?.depth_bias != 0 or ds.?.depth_bias_slope_scale != 0);
+        if (ds == null) return .false;
+        return if (ds.?.depth_bias != 0 or ds.?.depth_bias_slope_scale != 0) .true else .false;
     }
 };
 
@@ -2437,7 +2441,7 @@ pub const ReferenceTracker = struct {
         const device = tracker.device;
         const vk_device = tracker.device.vk_device;
 
-        vkd.freeCommandBuffers(vk_device, device.cmd_pool, 1, @ptrCast(&tracker.vk_command_buffer));
+        vkd.freeCommandBuffers(vk_device, device.cmd_pool, &[_]vk.CommandBuffer{tracker.vk_command_buffer});
 
         for (tracker.buffers.items) |buffer| {
             buffer.gpu_count -= 1;
@@ -2584,7 +2588,7 @@ pub const CommandEncoder = struct {
             .dst_offset = destination_offset,
             .size = size,
         };
-        vkd.cmdCopyBuffer(vk_command_buffer, source.vk_buffer, destination.vk_buffer, 1, @ptrCast(&region));
+        vkd.cmdCopyBuffer(vk_command_buffer, source.vk_buffer, destination.vk_buffer, &[_]vk.BufferCopy{region});
     }
 
     pub fn copyBufferToTexture(
@@ -2634,8 +2638,7 @@ pub const CommandEncoder = struct {
             source_buffer.vk_buffer,
             destination_texture.image,
             .transfer_dst_optimal,
-            1,
-            @ptrCast(&region),
+            &[_]vk.BufferImageCopy{region},
         );
     }
 
@@ -2696,8 +2699,7 @@ pub const CommandEncoder = struct {
             .transfer_src_optimal,
             destination_texture.image,
             .transfer_dst_optimal,
-            1,
-            @ptrCast(&region),
+            &[_]vk.ImageCopy{region},
         );
     }
 
@@ -2945,7 +2947,7 @@ pub const StateTracker = struct {
     }
 
     pub fn initTexture(tracker: *StateTracker, texture: *Texture) !void {
-        const src_access_mask = .{};
+        const src_access_mask: vk.AccessFlags = .{};
         const old_layout = .undefined;
         const access_mask = texture.read_access_mask;
         const image_layout = texture.read_image_layout;
@@ -2979,12 +2981,9 @@ pub const StateTracker = struct {
             src_stage_mask,
             tracker.dst_stage_mask,
             .{},
-            @intCast(memory_barriers.items.len),
-            memory_barriers.items.ptr,
-            0,
+            if (memory_barriers.items.len > 0) memory_barriers.items else null,
             null,
-            @intCast(tracker.image_barriers.items.len),
-            tracker.image_barriers.items.ptr,
+            if (tracker.image_barriers.items.len > 0) tracker.image_barriers.items else null,
         );
 
         tracker.src_stage_mask = .{};
@@ -3151,10 +3150,8 @@ pub const ComputePassEncoder = struct {
             .compute,
             encoder.pipeline.?.layout.vk_layout,
             group_index,
-            1,
-            @ptrCast(&group.desc_set),
-            @intCast(dynamic_offset_count),
-            if (dynamic_offsets) |offsets| offsets else &[_]u32{},
+            &[_]vk.DescriptorSet{group.desc_set},
+            if (dynamic_offsets) |offsets| offsets[0..dynamic_offset_count] else null,
         );
     }
 
@@ -3193,10 +3190,10 @@ pub const RenderPassEncoder = struct {
         const max_attachment_count = 2 * (desc.color_attachment_count + depth_stencil_attachment_count);
 
         var image_views = try std.ArrayList(vk.ImageView).initCapacity(allocator, max_attachment_count);
-        defer image_views.deinit();
+        defer image_views.deinit(allocator);
 
-        var clear_values = std.ArrayList(vk.ClearValue).init(allocator);
-        defer clear_values.deinit();
+        var clear_values: std.ArrayList(vk.ClearValue) = .empty;
+        defer clear_values.deinit(allocator);
 
         var rp_key = Device.RenderPassKey.init();
         var extent: vk.Extent2D = .{ .width = 0, .height = 0 };
@@ -3235,7 +3232,7 @@ pub const RenderPassEncoder = struct {
                 };
                 rp_key.colors_len += 1;
 
-                try clear_values.append(.{
+                try clear_values.append(allocator, .{
                     .color = .{
                         .float_32 = [4]f32{
                             @floatCast(attach.clear_value.r),
@@ -3246,7 +3243,7 @@ pub const RenderPassEncoder = struct {
                     },
                 });
                 if (resolve_view != null) {
-                    try clear_values.append(.{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } });
+                    try clear_values.append(allocator, .{ .color = .{ .float_32 = .{ 0, 0, 0, 0 } } });
                 }
 
                 if (view.texture.swapchain) |sc| {
@@ -3275,7 +3272,7 @@ pub const RenderPassEncoder = struct {
                 .read_only = attach.depth_read_only == .true or attach.stencil_read_only == .true,
             };
 
-            try clear_values.append(.{
+            try clear_values.append(allocator, .{
                 .depth_stencil = .{
                     .depth = attach.depth_clear_value,
                     .stencil = attach.stencil_clear_value,
@@ -3315,16 +3312,16 @@ pub const RenderPassEncoder = struct {
             .p_clear_values = clear_values.items.ptr,
         }, .@"inline");
 
-        vkd.cmdSetViewport(vk_command_buffer, 0, 1, @as(*const [1]vk.Viewport, &vk.Viewport{
+        vkd.cmdSetViewport(vk_command_buffer, 0, &[_]vk.Viewport{.{
             .x = 0,
             .y = @as(f32, @floatFromInt(extent.height)),
             .width = @as(f32, @floatFromInt(extent.width)),
             .height = -@as(f32, @floatFromInt(extent.height)),
             .min_depth = 0,
             .max_depth = 1,
-        }));
+        }});
 
-        vkd.cmdSetScissor(vk_command_buffer, 0, 1, @as(*const [1]vk.Rect2D, &rect));
+        vkd.cmdSetScissor(vk_command_buffer, 0, &[_]vk.Rect2D{rect});
         vkd.cmdSetStencilReference(vk_command_buffer, .{ .front_bit = true, .back_bit = true }, 0);
 
         // Result
@@ -3388,10 +3385,8 @@ pub const RenderPassEncoder = struct {
             .graphics,
             encoder.pipeline.?.layout.vk_layout,
             group_index,
-            1,
-            @ptrCast(&group.desc_set),
-            @intCast(dynamic_offset_count),
-            if (dynamic_offsets) |offsets| offsets else &[_]u32{},
+            &[_]vk.DescriptorSet{group.desc_set},
+            if (dynamic_offsets) |offsets| offsets[0..dynamic_offset_count] else null,
         );
     }
 
@@ -3434,7 +3429,7 @@ pub const RenderPassEncoder = struct {
             .extent = .{ .width = width, .height = height },
         };
 
-        vkd.cmdSetScissor(vk_command_buffer, 0, 1, @as(*const [1]vk.Rect2D, &rect));
+        vkd.cmdSetScissor(vk_command_buffer, 0, &[_]vk.Rect2D{rect});
     }
 
     pub fn setVertexBuffer(encoder: *RenderPassEncoder, slot: u32, buffer: *Buffer, offset: u64, size: u64) !void {
@@ -3443,7 +3438,7 @@ pub const RenderPassEncoder = struct {
 
         try encoder.reference_tracker.referenceBuffer(buffer);
 
-        vkd.cmdBindVertexBuffers(vk_command_buffer, slot, 1, @ptrCast(&.{buffer.vk_buffer}), @ptrCast(&offset));
+        vkd.cmdBindVertexBuffers(vk_command_buffer, slot, &[_]vk.Buffer{buffer.vk_buffer}, &[_]vk.DeviceSize{offset});
     }
 
     pub fn setViewport(
@@ -3457,14 +3452,14 @@ pub const RenderPassEncoder = struct {
     ) !void {
         const vk_command_buffer = encoder.vk_command_buffer;
 
-        vkd.cmdSetViewport(vk_command_buffer, 0, 1, @as(*const [1]vk.Viewport, &vk.Viewport{
+        vkd.cmdSetViewport(vk_command_buffer, 0, &[_]vk.Viewport{.{
             .x = x,
             .y = @as(f32, @floatFromInt(encoder.extent.height)) - y,
             .width = width,
             .height = -height,
             .min_depth = min_depth,
             .max_depth = max_depth,
-        }));
+        }});
     }
 };
 
@@ -3552,7 +3547,7 @@ pub const Queue = struct {
             .p_signal_semaphores = queue.signal_semaphores.items.ptr,
         };
 
-        try vkd.queueSubmit(vk_queue, 1, @ptrCast(&submitInfo), submit_object.fence);
+        try vkd.queueSubmit(vk_queue, &[_]vk.SubmitInfo{submitInfo}, submit_object.fence);
 
         queue.wait_semaphores.clearRetainingCapacity();
         queue.wait_dst_stage_masks.clearRetainingCapacity();
