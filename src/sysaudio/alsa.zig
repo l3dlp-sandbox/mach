@@ -10,6 +10,14 @@ const is_little = @import("builtin").cpu.arch.endian() == .little;
 
 const default_sample_rate = 44_100; // Hz
 
+fn milliTimestamp() i64 {
+    var ts: std.os.linux.timespec = undefined;
+    _ = std.os.linux.clock_gettime(.MONOTONIC, &ts);
+    const s: i64 = @intCast(ts.sec);
+    const ns: i64 = @intCast(ts.nsec);
+    return s * std.time.ms_per_s + @divFloor(ns, std.time.ns_per_ms);
+}
+
 var lib: Lib = undefined;
 const Lib = struct {
     handle: std.DynLib,
@@ -108,42 +116,34 @@ pub const Context = struct {
             .devices_info = util.DevicesInfo.init(),
             .watcher = blk: {
                 if (options.deviceChangeFn) |deviceChangeFn| {
-                    const notify_fd = std.posix.inotify_init1(std.os.linux.IN.NONBLOCK) catch |err| switch (err) {
-                        error.ProcessFdQuotaExceeded,
-                        error.SystemFdQuotaExceeded,
-                        error.SystemResources,
-                        => return error.SystemResources,
-                        error.Unexpected => unreachable,
+                    const rc = std.os.linux.inotify_init1(std.os.linux.IN.NONBLOCK);
+                    const notify_fd: std.posix.fd_t = switch (std.posix.errno(rc)) {
+                        .SUCCESS => @intCast(rc),
+                        .MFILE => return error.SystemResources,
+                        .NFILE => return error.SystemResources,
+                        .NOMEM => return error.SystemResources,
+                        else => unreachable,
                     };
-                    errdefer std.posix.close(notify_fd);
+                    errdefer std.Io.Threaded.closeFd(notify_fd);
 
-                    const notify_wd = std.posix.inotify_add_watch(
-                        notify_fd,
-                        "/dev/snd",
-                        std.os.linux.IN.CREATE | std.os.linux.IN.DELETE,
-                    ) catch |err| switch (err) {
-                        error.AccessDenied => return error.AccessDenied,
-                        error.UserResourceLimitReached,
-                        error.NotDir,
-                        error.FileNotFound,
-                        error.SystemResources,
-                        => return error.SystemResources,
-                        error.NameTooLong,
-                        error.WatchAlreadyExists,
-                        error.Unexpected,
-                        => unreachable,
+                    const wd_rc = std.os.linux.inotify_add_watch(notify_fd, "/dev/snd", std.os.linux.IN.CREATE | std.os.linux.IN.DELETE);
+                    const notify_wd: i32 = switch (std.posix.errno(wd_rc)) {
+                        .SUCCESS => @intCast(wd_rc),
+                        .ACCES => return error.AccessDenied,
+                        .NOSPC, .NOMEM => return error.SystemResources,
+                        else => unreachable,
                     };
-                    errdefer std.posix.inotify_rm_watch(notify_fd, notify_wd);
+                    errdefer _ = std.os.linux.inotify_rm_watch(notify_fd, notify_wd);
 
-                    const notify_pipe_fd = std.posix.pipe2(.{ .NONBLOCK = true }) catch |err| switch (err) {
+                    const notify_pipe_fd = std.Io.Threaded.pipe2(.{ .NONBLOCK = true }) catch |err| switch (err) {
                         error.ProcessFdQuotaExceeded,
                         error.SystemFdQuotaExceeded,
                         => return error.SystemResources,
                         error.Unexpected => unreachable,
                     };
                     errdefer {
-                        std.posix.close(notify_pipe_fd[0]);
-                        std.posix.close(notify_pipe_fd[1]);
+                        std.Io.Threaded.closeFd(notify_pipe_fd[0]);
+                        std.Io.Threaded.closeFd(notify_pipe_fd[1]);
                     }
 
                     break :blk .{
@@ -174,13 +174,13 @@ pub const Context = struct {
     pub fn deinit(ctx: *Context) void {
         if (ctx.watcher) |*watcher| {
             watcher.aborted.store(true, .unordered);
-            _ = std.posix.write(watcher.notify_pipe_fd[1], "a") catch {};
+            _ = std.os.linux.write(watcher.notify_pipe_fd[1], "a", 1);
             watcher.thread.join();
 
-            std.posix.close(watcher.notify_pipe_fd[0]);
-            std.posix.close(watcher.notify_pipe_fd[1]);
-            std.posix.inotify_rm_watch(watcher.notify_fd, watcher.notify_wd);
-            std.posix.close(watcher.notify_fd);
+            std.Io.Threaded.closeFd(watcher.notify_pipe_fd[0]);
+            std.Io.Threaded.closeFd(watcher.notify_pipe_fd[1]);
+            _ = std.os.linux.inotify_rm_watch(watcher.notify_fd, watcher.notify_wd);
+            std.Io.Threaded.closeFd(watcher.notify_fd);
         }
 
         for (ctx.devices_info.list.items) |d|
@@ -210,10 +210,10 @@ pub const Context = struct {
 
         while (!watcher.aborted.load(.unordered)) {
             _ = std.posix.poll(&fds, -1) catch |err| switch (err) {
-                error.NetworkSubsystemFailed,
+                error.NetworkDown,
                 error.SystemResources,
                 => {
-                    const ts = std.time.milliTimestamp();
+                    const ts = milliTimestamp();
                     if (last_crash) |lc| {
                         if (ts - lc < 500) return;
                     }
@@ -226,7 +226,7 @@ pub const Context = struct {
                 while (true) {
                     const len = std.posix.read(watcher.notify_fd, &buf) catch |err| {
                         if (err == error.WouldBlock) break;
-                        const ts = std.time.milliTimestamp();
+                        const ts = milliTimestamp();
                         if (last_crash) |lc| {
                             if (ts - lc < 500) return;
                         }
@@ -319,14 +319,14 @@ pub const Context = struct {
                     lib.snd_pcm_format_mask_set(fmt_mask, c.SND_PCM_FORMAT_FLOAT64_BE);
                     lib.snd_pcm_hw_params_get_format_mask(params, fmt_mask);
 
-                    var fmt_arr = std.ArrayList(main.Format).init(ctx.allocator);
+                    var fmt_arr: std.ArrayList(main.Format) = .empty;
                     inline for (std.meta.tags(main.Format)) |format| {
                         if (lib.snd_pcm_format_mask_test(fmt_mask, toAlsaFormat(format)) != 0) {
-                            try fmt_arr.append(format);
+                            try fmt_arr.append(ctx.allocator, format);
                         }
                     }
 
-                    break :blk try fmt_arr.toOwnedSlice();
+                    break :blk try fmt_arr.toOwnedSlice(ctx.allocator);
                 },
                 .sample_rate = blk: {
                     var rate_min: c_uint = 0;
@@ -452,14 +452,14 @@ pub const Context = struct {
                         lib.snd_pcm_format_mask_set(fmt_mask, c.SND_PCM_FORMAT_FLOAT64_BE);
                         lib.snd_pcm_hw_params_get_format_mask(params, fmt_mask);
 
-                        var fmt_arr = std.ArrayList(main.Format).init(ctx.allocator);
+                        var fmt_arr: std.ArrayList(main.Format) = .empty;
                         inline for (std.meta.tags(main.Format)) |format| {
                             if (lib.snd_pcm_format_mask_test(fmt_mask, toAlsaFormat(format)) != 0) {
-                                try fmt_arr.append(format);
+                                try fmt_arr.append(ctx.allocator, format);
                             }
                         }
 
-                        break :blk try fmt_arr.toOwnedSlice();
+                        break :blk try fmt_arr.toOwnedSlice(ctx.allocator);
                     },
                     .sample_rate = blk: {
                         var rate_min: c_uint = 0;
