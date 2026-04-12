@@ -15,27 +15,27 @@ var file: std.fs.File = undefined;
 // a separate Info.plist file.
 export var __info_plist: [663:0]u8 linksection("__TEXT,__info_plist") =
     (
-    \\ <?xml version="1.0" encoding="UTF-8"?>
-    \\ <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    \\ <plist version="1.0">
-    \\ <dict>
-    \\   <key>CFBundleDevelopmentRegion</key>
-    \\   <string>English</string>
-    \\   <key>CFBundleIdentifier</key>
-    \\   <string>com.my.app</string>
-    \\   <key>CFBundleInfoDictionaryVersion</key>
-    \\   <string>6.0</string>
-    \\   <key>CFBundleName</key>
-    \\   <string>myapp</string>
-    \\   <key>CFBundleDisplayName</key>
-    \\   <string>My App</string>
-    \\   <key>CFBundleVersion</key>
-    \\   <string>1.0.0</string>
-    \\   <key>NSMicrophoneUsageDescription</key>
-    \\   <string>To record audio from your microphone</string>
-    \\ </dict>
-    \\ </plist>
-).*;
+        \\ <?xml version="1.0" encoding="UTF-8"?>
+        \\ <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        \\ <plist version="1.0">
+        \\ <dict>
+        \\   <key>CFBundleDevelopmentRegion</key>
+        \\   <string>English</string>
+        \\   <key>CFBundleIdentifier</key>
+        \\   <string>com.my.app</string>
+        \\   <key>CFBundleInfoDictionaryVersion</key>
+        \\   <string>6.0</string>
+        \\   <key>CFBundleName</key>
+        \\   <string>myapp</string>
+        \\   <key>CFBundleDisplayName</key>
+        \\   <string>My App</string>
+        \\   <key>CFBundleVersion</key>
+        \\   <string>1.0.0</string>
+        \\   <key>NSMicrophoneUsageDescription</key>
+        \\   <string>To record audio from your microphone</string>
+        \\ </dict>
+        \\ </plist>
+    ).*;
 
 pub fn main() !void {
     _ = __info_plist;

@@ -2172,18 +2172,18 @@ fn genCall(astgen: *AstGen, scope: *Scope, node: NodeIndex) !InstIndex {
                                 args[i + component_i] =
                                     astgen.resolveVectorValue(arg, @intCast(component_i)) orelse
                                     try astgen.addInst(.{
-                                    .swizzle_access = .{
-                                        .base = arg,
-                                        .type = astgen.getInst(arg_res).vector.elem_type,
-                                        .size = .one,
-                                        .pattern = [_]Inst.SwizzleAccess.Component{
-                                            @enumFromInt(component_i),
-                                            undefined,
-                                            undefined,
-                                            undefined,
+                                        .swizzle_access = .{
+                                            .base = arg,
+                                            .type = astgen.getInst(arg_res).vector.elem_type,
+                                            .size = .one,
+                                            .pattern = [_]Inst.SwizzleAccess.Component{
+                                                @enumFromInt(component_i),
+                                                undefined,
+                                                undefined,
+                                                undefined,
+                                            },
                                         },
-                                    },
-                                });
+                                    });
                             }
                             capacity -= @intFromEnum(arg_vec.size);
                         } else {
@@ -3056,7 +3056,7 @@ fn genGenericFloatTripleBuiltin(
 
     if (astgen.getInst(a1_res) == .float or
         (astgen.getInst(a1_res) == .vector and
-        astgen.getInst(astgen.getInst(a1_res).vector.elem_type) == .float))
+            astgen.getInst(astgen.getInst(a1_res).vector.elem_type) == .float))
     {
         return astgen.addInst(.{
             .triple_intrinsic = .{

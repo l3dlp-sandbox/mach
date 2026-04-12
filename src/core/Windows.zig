@@ -231,7 +231,7 @@ fn initWindow(
         null,
         null,
         hInstance,
-        @constCast(@ptrCast(&create_args)),
+        @ptrCast(@constCast(&create_args)),
     ) orelse return error.Unexpected;
 
     const dpi = w.dpiFromHwnd(hwnd);
@@ -324,7 +324,7 @@ fn wndProc(hwnd: w.HWND, msg: u32, wParam: w.WPARAM, lParam: w.LPARAM) callconv(
     switch (msg) {
         w.WM_CREATE => {
             const create_struct: *w.CREATESTRUCTW = @ptrFromInt(@as(usize, @bitCast(lParam)));
-            const create_args: *CreateWindowArgs = @alignCast(@ptrCast(create_struct.lpCreateParams));
+            const create_args: *CreateWindowArgs = @ptrCast(@alignCast(create_struct.lpCreateParams));
             const window_id = create_args.window_id;
 
             core.windows.setRaw(window_id, .native, .{ .hwnd = hwnd });

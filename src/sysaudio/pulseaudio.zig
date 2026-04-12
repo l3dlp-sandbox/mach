@@ -220,8 +220,8 @@ pub const Context = struct {
                 std.mem.eql(u8, device.id, ctx.default_sink.?)) or
                 //
                 (device.mode == .capture and
-                ctx.default_source != null and
-                std.mem.eql(u8, device.id, ctx.default_source.?)))
+                    ctx.default_source != null and
+                    std.mem.eql(u8, device.id, ctx.default_source.?)))
             {
                 ctx.devices_info.setDefault(device.mode, i);
                 break;

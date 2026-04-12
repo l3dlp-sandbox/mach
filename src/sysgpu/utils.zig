@@ -299,35 +299,35 @@ pub const DefaultPipelineLayoutDescriptor = struct {
                                 // sample_type
                                 entry.texture.sample_type =
                                     switch (texture.kind) {
-                                    .depth_2d,
-                                    .depth_2d_array,
-                                    .depth_cube,
-                                    .depth_cube_array,
-                                    => .depth,
-                                    else => switch (texture.texel_format) {
-                                        .none => .float, // TODO - is this right?
-                                        .rgba8unorm,
-                                        .rgba8snorm,
-                                        .bgra8unorm,
-                                        .rgba16float,
-                                        .r32float,
-                                        .rg32float,
-                                        .rgba32float,
-                                        => .float, // TODO - unfilterable
-                                        .rgba8uint,
-                                        .rgba16uint,
-                                        .r32uint,
-                                        .rg32uint,
-                                        .rgba32uint,
-                                        => .uint,
-                                        .rgba8sint,
-                                        .rgba16sint,
-                                        .r32sint,
-                                        .rg32sint,
-                                        .rgba32sint,
-                                        => .sint,
-                                    },
-                                };
+                                        .depth_2d,
+                                        .depth_2d_array,
+                                        .depth_cube,
+                                        .depth_cube_array,
+                                        => .depth,
+                                        else => switch (texture.texel_format) {
+                                            .none => .float, // TODO - is this right?
+                                            .rgba8unorm,
+                                            .rgba8snorm,
+                                            .bgra8unorm,
+                                            .rgba16float,
+                                            .r32float,
+                                            .rg32float,
+                                            .rgba32float,
+                                            => .float, // TODO - unfilterable
+                                            .rgba8uint,
+                                            .rgba16uint,
+                                            .r32uint,
+                                            .rg32uint,
+                                            .rgba32uint,
+                                            => .uint,
+                                            .rgba8sint,
+                                            .rgba16sint,
+                                            .r32sint,
+                                            .rg32sint,
+                                            .rgba32sint,
+                                            => .sint,
+                                        },
+                                    };
                                 entry.texture.view_dimension = switch (texture.kind) {
                                     .sampled_1d,
                                     .storage_1d,

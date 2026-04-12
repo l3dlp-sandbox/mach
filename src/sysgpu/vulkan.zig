@@ -305,8 +305,8 @@ pub const Adapter = struct {
             features.sample_rate_shading == vk.TRUE and
             // At least one of the following texture compression forms
             (features.texture_compression_bc == vk.TRUE or
-            features.texture_compression_etc2 == vk.TRUE or
-            features.texture_compression_astc_ldr == vk.TRUE);
+                features.texture_compression_etc2 == vk.TRUE or
+                features.texture_compression_astc_ldr == vk.TRUE);
     }
 
     fn rateDevice(
