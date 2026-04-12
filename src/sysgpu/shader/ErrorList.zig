@@ -14,7 +14,7 @@ pub const ErrorMsg = struct {
 };
 
 arena: std.heap.ArenaAllocator,
-list: std.ArrayListUnmanaged(ErrorMsg) = .{},
+list: std.ArrayListUnmanaged(ErrorMsg) = .empty,
 
 pub fn init(allocator: std.mem.Allocator) !ErrorList {
     return .{

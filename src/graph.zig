@@ -124,7 +124,7 @@ pub const Graph = struct {
 
     /// Pool of ArrayLists for query results
     result_lists: struct {
-        available: std.ArrayListUnmanaged(*std.ArrayListUnmanaged(u64)) = .{},
+        available: std.ArrayListUnmanaged(*std.ArrayListUnmanaged(u64)) = .empty,
         lock: std.Thread.RwLock = .{},
     } = .{},
 

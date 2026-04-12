@@ -10,7 +10,7 @@ const std = @import("std");
 
 const StringTable = @This();
 
-string_bytes: std.ArrayListUnmanaged(u8) = .{},
+string_bytes: std.ArrayListUnmanaged(u8) = .empty,
 
 /// Key is string_bytes index.
 string_table: std.HashMapUnmanaged(u32, void, IndexContext, std.hash_map.default_max_load_percentage) = .{},

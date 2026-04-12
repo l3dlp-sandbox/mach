@@ -13,8 +13,8 @@ air: *const Air,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 emitted_decls: std.AutoArrayHashMapUnmanaged(InstIndex, []const u8) = .{},
-scratch: std.ArrayListUnmanaged(u8) = .{},
-output: std.ArrayListUnmanaged(u8) = .{},
+scratch: std.ArrayListUnmanaged(u8) = .empty,
+output: std.ArrayListUnmanaged(u8) = .empty,
 indent: u32 = 0,
 
 pub fn gen(allocator: std.mem.Allocator, air: *const Air, debug_info: DebugInfo) ![]const u8 {

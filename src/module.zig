@@ -41,17 +41,17 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             type_id: ObjectTypeID,
 
             /// The actual object data
-            data: std.MultiArrayList(T) = .{},
+            data: std.MultiArrayList(T) = .empty,
 
             /// Whether a given slot in data[i] is dead or not
             dead: std.bit_set.DynamicBitSetUnmanaged = .{},
 
             /// The current generation number of data[i], when data[i] becomes dead and then alive
             /// again, this number is incremented by one.
-            generation: std.ArrayListUnmanaged(Generation) = .{},
+            generation: std.ArrayListUnmanaged(Generation) = .empty,
 
             /// The recycling bin which tells which data indices are dead and can be reused.
-            recycling_bin: std.ArrayListUnmanaged(Index) = .{},
+            recycling_bin: std.ArrayListUnmanaged(Index) = .empty,
 
             /// The number of objects that could not fit in the recycling bin and hence were thrown
             /// on the floor and forgotten about. This means there are dead items recorded by dead.set(index)

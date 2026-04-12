@@ -395,8 +395,8 @@ pub const Device = struct {
     pixel_format: if (builtin.target.os.tag == .windows) c_int else void,
     gl: proc.DeviceGL,
     streaming_manager: StreamingManager = undefined,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .{},
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .{},
+    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
+    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
 
     lost_cb: ?sysgpu.Device.LostCallback = null,
     lost_cb_userdata: ?*anyopaque = null,
@@ -601,7 +601,7 @@ pub const Device = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(*Buffer) = .{},
+    free_buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -1884,7 +1884,7 @@ pub const CommandBuffer = struct {
 
     manager: utils.Manager(CommandBuffer) = .{},
     device: *Device,
-    commands: std.ArrayListUnmanaged(Command) = .{},
+    commands: std.ArrayListUnmanaged(Command) = .empty,
     reference_tracker: *ReferenceTracker,
 
     pub fn init(device: *Device) !*CommandBuffer {
@@ -2313,9 +2313,9 @@ pub const CommandBuffer = struct {
 pub const ReferenceTracker = struct {
     device: *Device,
     sync: c.GLsync = undefined,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .{},
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .{},
-    upload_pages: std.ArrayListUnmanaged(*Buffer) = .{},
+    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
+    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
+    upload_pages: std.ArrayListUnmanaged(*Buffer) = .empty,
 
     pub fn init(device: *Device) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);

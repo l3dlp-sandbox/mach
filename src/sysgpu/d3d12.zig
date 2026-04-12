@@ -343,12 +343,12 @@ pub const Device = struct {
     dsv_heap: DescriptorHeap = undefined,
     command_manager: CommandManager = undefined,
     streaming_manager: StreamingManager = undefined,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .{},
+    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
     mem_allocator: MemoryAllocator = undefined,
 
     mem_allocator_textures: MemoryAllocator = undefined,
 
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .{},
+    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
 
     lost_cb: ?sysgpu.Device.LostCallback = null,
     lost_cb_userdata: ?*anyopaque = null,
@@ -1133,7 +1133,7 @@ const DescriptorHeap = struct {
     descriptor_count: u32,
     block_size: u32,
     next_alloc: u32,
-    free_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .{},
+    free_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .empty,
 
     pub fn init(
         device: *Device,
@@ -1239,8 +1239,8 @@ const DescriptorHeap = struct {
 
 const CommandManager = struct {
     device: *Device,
-    free_allocators: std.ArrayListUnmanaged(*c.ID3D12CommandAllocator) = .{},
-    free_command_lists: std.ArrayListUnmanaged(*c.ID3D12GraphicsCommandList) = .{},
+    free_allocators: std.ArrayListUnmanaged(*c.ID3D12CommandAllocator) = .empty,
+    free_command_lists: std.ArrayListUnmanaged(*c.ID3D12GraphicsCommandList) = .empty,
 
     pub fn init(device: *Device) CommandManager {
         return .{
@@ -1345,7 +1345,7 @@ const CommandManager = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(Resource) = .{},
+    free_buffers: std.ArrayListUnmanaged(Resource) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -2932,14 +2932,14 @@ pub const ReferenceTracker = struct {
     device: *Device,
     command_allocator: *c.ID3D12CommandAllocator,
     fence_value: u64 = 0,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .{},
-    textures: std.ArrayListUnmanaged(*Texture) = .{},
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .{},
-    compute_pipelines: std.ArrayListUnmanaged(*ComputePipeline) = .{},
-    render_pipelines: std.ArrayListUnmanaged(*RenderPipeline) = .{},
-    rtv_descriptor_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .{},
-    dsv_descriptor_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .{},
-    upload_pages: std.ArrayListUnmanaged(Resource) = .{},
+    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
+    textures: std.ArrayListUnmanaged(*Texture) = .empty,
+    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
+    compute_pipelines: std.ArrayListUnmanaged(*ComputePipeline) = .empty,
+    render_pipelines: std.ArrayListUnmanaged(*RenderPipeline) = .empty,
+    rtv_descriptor_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .empty,
+    dsv_descriptor_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .empty,
+    upload_pages: std.ArrayListUnmanaged(Resource) = .empty,
 
     pub fn init(device: *Device, command_allocator: *c.ID3D12CommandAllocator) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);
@@ -3323,7 +3323,7 @@ pub const CommandEncoder = struct {
 pub const StateTracker = struct {
     device: *Device = undefined,
     written_set: std.AutoArrayHashMapUnmanaged(*Resource, c.D3D12_RESOURCE_STATES) = .{},
-    barriers: std.ArrayListUnmanaged(c.D3D12_RESOURCE_BARRIER) = .{},
+    barriers: std.ArrayListUnmanaged(c.D3D12_RESOURCE_BARRIER) = .empty,
 
     pub fn init(tracker: *StateTracker, device: *Device) void {
         tracker.device = device;

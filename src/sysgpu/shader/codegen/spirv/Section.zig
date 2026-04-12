@@ -15,7 +15,7 @@ const Log2Word = std.math.Log2Int(Word);
 const Section = @This();
 
 allocator: std.mem.Allocator,
-words: std.ArrayListUnmanaged(Word) = .{},
+words: std.ArrayListUnmanaged(Word) = .empty,
 
 pub fn deinit(section: *Section) void {
     section.words.deinit(section.allocator);

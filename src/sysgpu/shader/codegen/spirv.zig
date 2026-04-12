@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const Air = @import("../Air.zig");
 const DebugInfo = @import("../CodeGen.zig").DebugInfo;
 const Section = @import("spirv/Section.zig");
@@ -33,8 +34,8 @@ struct_map: std.AutoHashMapUnmanaged(InstIndex, IdRef) = .{},
 /// Map storage variables and fields with runtime array type into their parent struct pointer
 runtiem_arr_vars: std.AutoHashMapUnmanaged(IdRef, IdRef) = .{},
 decorated: std.AutoHashMapUnmanaged(IdRef, void) = .{},
-capabilities: std.ArrayListUnmanaged(spec.Capability) = .{},
-fn_stack: std.ArrayListUnmanaged(FnInfo) = .{},
+capabilities: std.ArrayListUnmanaged(spec.Capability) = .empty,
+fn_stack: std.ArrayListUnmanaged(FnInfo) = .empty,
 extended_instructions: ?IdRef = null,
 emit_debug_names: bool,
 next_result_id: Word = 1,
@@ -257,8 +258,8 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
     const name_slice = spv.air.getStr(inst.name);
     try spv.debugName(fn_id, name_slice);
 
-    var interface = std.ArrayList(IdRef).init(spv.allocator);
-    errdefer interface.deinit();
+    var interface: std.ArrayList(IdRef) = .empty;
+    errdefer interface.deinit(spv.allocator);
 
     var store_return: StoreReturn = undefined;
 
@@ -269,7 +270,7 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
             const struct_members = spv.air.refToList(spv.air.getInst(inst.return_type).@"struct".members);
 
             var store_returns = try std.ArrayList(StoreReturn.Item).initCapacity(spv.allocator, struct_members.len);
-            defer store_returns.deinit();
+            defer store_returns.deinit(spv.allocator);
 
             for (struct_members) |member_index| {
                 const return_var_id = spv.allocId();
@@ -309,12 +310,12 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
                     });
                 }
 
-                try interface.append(return_var_id);
-                try store_returns.append(.{ .ptr = return_var_id, .type = member_type_id });
+                try interface.append(spv.allocator, return_var_id);
+                try store_returns.append(spv.allocator, .{ .ptr = return_var_id, .type = member_type_id });
             }
 
             store_return = .{
-                .many = try store_returns.toOwnedSlice(),
+                .many = try store_returns.toOwnedSlice(spv.allocator),
             };
         } else {
             const return_var_id = spv.allocId();
@@ -352,7 +353,7 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
             }
 
             store_return = .{ .single = return_var_id };
-            try interface.append(return_var_id);
+            try interface.append(spv.allocator, return_var_id);
         }
     } else {
         store_return = .none;
@@ -360,12 +361,12 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
 
     try spv.fn_stack.append(spv.allocator, .{ .store_return = store_return });
 
-    var params_type = std.ArrayList(IdRef).init(spv.allocator);
-    defer params_type.deinit();
+    var params_type: std.ArrayList(IdRef) = .empty;
+    defer params_type.deinit(spv.allocator);
 
     const ParamSpill = struct { var_id: IdRef, ptr_type_id: IdRef, param_id: IdRef };
-    var param_spills = std.ArrayList(ParamSpill).init(spv.allocator);
-    defer param_spills.deinit();
+    var param_spills: std.ArrayList(ParamSpill) = .empty;
+    defer param_spills.deinit(spv.allocator);
 
     if (inst.params != .none) {
         const param_list = spv.air.refToList(inst.params);
@@ -412,7 +413,7 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
                     });
                 }
 
-                try interface.append(param_id);
+                try interface.append(spv.allocator, param_id);
                 try spv.decl_map.put(spv.allocator, param_inst_idx, .{
                     .id = param_id,
                     .type_id = elem_type_id,
@@ -426,7 +427,7 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
                     .id_result_type = param_type_id,
                     .id_result = param_id,
                 });
-                try params_type.append(param_type_id);
+                try params_type.append(spv.allocator, param_type_id);
 
                 // Spill parameter to local variable so it can be used with OpAccessChain
                 const ptr_type_id = try spv.resolve(.{ .ptr_type = .{
@@ -434,7 +435,7 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
                     .elem_type = param_type_id,
                 } });
                 const var_id = spv.allocId();
-                try param_spills.append(.{ .var_id = var_id, .ptr_type_id = ptr_type_id, .param_id = param_id });
+                try param_spills.append(spv.allocator, .{ .var_id = var_id, .ptr_type_id = ptr_type_id, .param_id = param_id });
                 try spv.decl_map.put(spv.allocator, param_inst_idx, .{
                     .id = var_id,
                     .type_id = param_type_id,
@@ -511,7 +512,7 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
         .compute => |compute| spv.compute_stage = .{
             .id = fn_id,
             .name = name_slice,
-            .interface = try interface.toOwnedSlice(),
+            .interface = try interface.toOwnedSlice(spv.allocator),
             .workgroup_size = .{
                 .x = blk: {
                     const int = spv.air.getInst(compute.x).int;
@@ -537,12 +538,12 @@ fn emitFn(spv: *SpirV, inst_idx: InstIndex) error{OutOfMemory}!IdRef {
         .vertex => spv.vertex_stage = .{
             .id = fn_id,
             .name = name_slice,
-            .interface = try interface.toOwnedSlice(),
+            .interface = try interface.toOwnedSlice(spv.allocator),
         },
         .fragment => spv.fragment_stage = .{
             .id = fn_id,
             .name = name_slice,
-            .interface = try interface.toOwnedSlice(),
+            .interface = try interface.toOwnedSlice(spv.allocator),
         },
     }
 
@@ -976,9 +977,9 @@ fn emitStruct(spv: *SpirV, inst_idx: InstIndex) !IdRef {
     const inst = spv.air.getInst(inst_idx).@"struct";
 
     const member_list = spv.air.refToList(inst.members);
-    var members = std.ArrayList(IdRef).init(spv.allocator);
-    defer members.deinit();
-    try members.ensureTotalCapacityPrecise(member_list.len);
+    var members: std.ArrayList(IdRef) = .empty;
+    defer members.deinit(spv.allocator);
+    try members.ensureTotalCapacityPrecise(spv.allocator, member_list.len);
 
     const id = spv.allocId();
 
@@ -2231,12 +2232,12 @@ fn accessPtr(spv: *SpirV, section: *Section, decl: InstIndex) error{OutOfMemory}
 }
 
 fn emitCall(spv: *SpirV, section: *Section, inst: Inst.FnCall) !IdRef {
-    var args = std.ArrayList(IdRef).init(spv.allocator);
-    defer args.deinit();
+    var args: std.ArrayList(IdRef) = .empty;
+    defer args.deinit(spv.allocator);
 
     if (inst.args != .none) {
         for (spv.air.refToList(inst.args)) |arg_inst_idx| {
-            try args.append(try spv.emitExpr(section, arg_inst_idx));
+            try args.append(spv.allocator, try spv.emitExpr(section, arg_inst_idx));
         }
     }
 
@@ -2390,10 +2391,10 @@ fn emitVector(spv: *SpirV, section: *Section, inst: Inst.Vector) !IdRef {
         return spv.resolve(.{ .null = type_id });
     }
 
-    var constituents = std.ArrayList(IdRef).init(spv.allocator);
-    defer constituents.deinit();
+    var constituents: std.ArrayList(IdRef) = .empty;
+    defer constituents.deinit(spv.allocator);
 
-    try constituents.ensureTotalCapacityPrecise(@intFromEnum(inst.size));
+    try constituents.ensureTotalCapacityPrecise(spv.allocator, @intFromEnum(inst.size));
 
     const value = spv.air.getValue(Inst.Vector.Value, inst.value.?);
     switch (value) {
@@ -2439,9 +2440,9 @@ fn emitMatrix(spv: *SpirV, section: *Section, inst: Inst.Matrix) !IdRef {
         return spv.resolve(.{ .null = type_id });
     }
 
-    var constituents = std.ArrayList(IdRef).init(spv.allocator);
-    defer constituents.deinit();
-    try constituents.ensureTotalCapacityPrecise(@intFromEnum(inst.cols));
+    var constituents: std.ArrayList(IdRef) = .empty;
+    defer constituents.deinit(spv.allocator);
+    try constituents.ensureTotalCapacityPrecise(spv.allocator, @intFromEnum(inst.cols));
 
     const value = spv.air.getValue(Inst.Matrix.Value, inst.value.?);
     for (value[0..@intFromEnum(inst.cols)]) |elem_inst| {
@@ -2473,9 +2474,9 @@ fn emitArray(spv: *SpirV, section: *Section, inst: Inst.Array) !IdRef {
 
     const value = spv.air.refToList(inst.value.?);
 
-    var constituents = std.ArrayList(IdRef).init(spv.allocator);
-    defer constituents.deinit();
-    try constituents.ensureTotalCapacityPrecise(value.len);
+    var constituents: std.ArrayList(IdRef) = .empty;
+    defer constituents.deinit(spv.allocator);
+    try constituents.ensureTotalCapacityPrecise(spv.allocator, value.len);
 
     for (value) |elem_inst| {
         const elem_id = try spv.emitExpr(section, elem_inst);

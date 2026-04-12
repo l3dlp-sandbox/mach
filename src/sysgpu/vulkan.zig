@@ -457,8 +457,8 @@ pub const Device = struct {
     memory_allocator: MemoryAllocator,
     queue: ?Queue = null,
     streaming_manager: StreamingManager = undefined,
-    submit_objects: std.ArrayListUnmanaged(SubmitObject) = .{},
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .{},
+    submit_objects: std.ArrayListUnmanaged(SubmitObject) = .empty,
+    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
     /// Supported Depth-Stencil formats
     supported_ds_formats: std.AutoHashMapUnmanaged(vk.Format, void),
 
@@ -890,7 +890,7 @@ pub const Device = struct {
 pub const SubmitObject = struct {
     device: *Device,
     fence: vk.Fence,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .{},
+    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
 
     pub fn init(device: *Device) !SubmitObject {
         const vk_device = device.vk_device;
@@ -920,7 +920,7 @@ pub const SubmitObject = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(*Buffer) = .{},
+    free_buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -2337,8 +2337,8 @@ pub const CommandBuffer = struct {
     manager: utils.Manager(CommandBuffer) = .{},
     device: *Device,
     vk_command_buffer: vk.CommandBuffer,
-    wait_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .{},
-    wait_dst_stage_masks: std.ArrayListUnmanaged(vk.PipelineStageFlags) = .{},
+    wait_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .empty,
+    wait_dst_stage_masks: std.ArrayListUnmanaged(vk.PipelineStageFlags) = .empty,
     reference_tracker: *ReferenceTracker,
     upload_buffer: ?*Buffer = null,
     upload_map: ?[*]u8 = null,
@@ -2402,14 +2402,14 @@ pub const CommandBuffer = struct {
 pub const ReferenceTracker = struct {
     device: *Device,
     vk_command_buffer: vk.CommandBuffer,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .{},
-    textures: std.ArrayListUnmanaged(*Texture) = .{},
-    texture_views: std.ArrayListUnmanaged(*TextureView) = .{},
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .{},
-    compute_pipelines: std.ArrayListUnmanaged(*ComputePipeline) = .{},
-    render_pipelines: std.ArrayListUnmanaged(*RenderPipeline) = .{},
-    upload_pages: std.ArrayListUnmanaged(*Buffer) = .{},
-    framebuffers: std.ArrayListUnmanaged(vk.Framebuffer) = .{},
+    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
+    textures: std.ArrayListUnmanaged(*Texture) = .empty,
+    texture_views: std.ArrayListUnmanaged(*TextureView) = .empty,
+    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
+    compute_pipelines: std.ArrayListUnmanaged(*ComputePipeline) = .empty,
+    render_pipelines: std.ArrayListUnmanaged(*RenderPipeline) = .empty,
+    upload_pages: std.ArrayListUnmanaged(*Buffer) = .empty,
+    framebuffers: std.ArrayListUnmanaged(vk.Framebuffer) = .empty,
 
     pub fn init(device: *Device, vk_command_buffer: vk.CommandBuffer) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);
@@ -2748,7 +2748,7 @@ pub const StateTracker = struct {
     copy_buffers: std.AutoHashMapUnmanaged(*Buffer, void) = .{},
     written_textures: std.AutoHashMapUnmanaged(*Texture, TextureState) = .{},
     copy_textures: std.AutoHashMapUnmanaged(*Texture, void) = .{},
-    image_barriers: std.ArrayListUnmanaged(vk.ImageMemoryBarrier) = .{},
+    image_barriers: std.ArrayListUnmanaged(vk.ImageMemoryBarrier) = .empty,
     src_stage_mask: vk.PipelineStageFlags = .{},
     dst_stage_mask: vk.PipelineStageFlags = .{},
     src_access_mask: vk.AccessFlags = .{},
@@ -3457,10 +3457,10 @@ pub const Queue = struct {
     manager: utils.Manager(Queue) = .{},
     device: *Device,
     vk_queue: vk.Queue,
-    command_buffers: std.ArrayListUnmanaged(*CommandBuffer) = .{},
-    wait_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .{},
-    wait_dst_stage_masks: std.ArrayListUnmanaged(vk.PipelineStageFlags) = .{},
-    signal_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .{},
+    command_buffers: std.ArrayListUnmanaged(*CommandBuffer) = .empty,
+    wait_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .empty,
+    wait_dst_stage_masks: std.ArrayListUnmanaged(vk.PipelineStageFlags) = .empty,
+    signal_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .empty,
     command_encoder: ?*CommandEncoder = null,
 
     pub fn init(device: *Device) !Queue {

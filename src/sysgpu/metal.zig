@@ -161,9 +161,9 @@ pub const Device = struct {
     err_cb: ?sysgpu.ErrorCallback = null,
     err_cb_userdata: ?*anyopaque = null,
     streaming_manager: StreamingManager = undefined,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .{},
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .{},
-    free_lengths_buffers: std.ArrayListUnmanaged(*mtl.Buffer) = .{},
+    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
+    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
+    free_lengths_buffers: std.ArrayListUnmanaged(*mtl.Buffer) = .empty,
 
     pub fn init(adapter: *Adapter, desc: ?*const sysgpu.Device.Descriptor) !*Device {
         // TODO
@@ -323,7 +323,7 @@ pub const Device = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(*mtl.Buffer) = .{},
+    free_buffers: std.ArrayListUnmanaged(*mtl.Buffer) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -1467,9 +1467,9 @@ pub const CommandBuffer = struct {
 pub const ReferenceTracker = struct {
     device: *Device,
     fence_value: u64 = 0,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .{},
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .{},
-    upload_pages: std.ArrayListUnmanaged(*mtl.Buffer) = .{},
+    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
+    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
+    upload_pages: std.ArrayListUnmanaged(*mtl.Buffer) = .empty,
 
     pub fn init(device: *Device) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);
