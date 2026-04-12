@@ -29,6 +29,7 @@ pub const FunctionID = @import("module.zig").FunctionID;
 pub const Mod = @import("module.zig").Mod;
 pub const ObjectID = @import("module.zig").ObjectID;
 pub const Objects = @import("module.zig").Objects;
+pub const Io = std.Io;
 
 // TODO(object): remove this?
 pub fn schedule(v: anytype) @TypeOf(v) {

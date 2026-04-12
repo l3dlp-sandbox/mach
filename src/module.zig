@@ -33,7 +33,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             /// Mutex to be held when operating on these objects.
             /// TODO(object): replace with RwLock and update website docs to indicate this
-            mu: std.Thread.Mutex = .{},
+            io: std.Io,
+            mu: std.Io.Mutex = .init,
 
             /// A registered ID indicating the type of objects being represented. This can be
             /// thought of as a hash of the module name + field name where this objects list is
@@ -120,13 +121,13 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// It is undefined behavior if the mutex is already held by the caller's thread.
         /// Once acquired, call `unlock()` on the Mutex to release it.
         pub fn lock(objs: *@This()) void {
-            objs.internal.mu.lock();
+            objs.internal.mu.lockUncancelable(objs.internal.io);
         }
 
         /// Releases the mutex which was previously acquired with `lock()` or `tryLock()`.
         /// It is undefined behavior if the mutex is unlocked from a different thread that it was locked from.
         pub fn unlock(objs: *@This()) void {
-            objs.internal.mu.unlock();
+            objs.internal.mu.unlock(objs.internal.io);
         }
 
         pub fn new(objs: *@This(), value: T) std.mem.Allocator.Error!ObjectID {
@@ -576,6 +577,7 @@ pub fn Modules(module_lists: anytype) type {
         pub const ModuleName = NameEnum(modules);
 
         mods: ModulesByName(modules),
+        io: std.Io,
 
         module_names: StringTable = .{},
         object_names: StringTable = .{},
@@ -599,12 +601,13 @@ pub fn Modules(module_lists: anytype) type {
             return @Enum(TagType, .exhaustive, enum_names, &std.simd.iota(TagType, enum_names.len));
         }
 
-        pub fn init(m: *@This(), allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.Thread.SpawnError)!void {
+        pub fn init(m: *@This(), allocator: std.mem.Allocator, io: std.Io) (std.mem.Allocator.Error || std.Thread.SpawnError)!void {
             m.* = .{
                 .mods = undefined,
                 .graph = undefined,
+                .io = io,
             };
-            try m.graph.init(allocator, .{
+            try m.graph.init(allocator, io, .{
                 // TODO(object): measured preallocations
                 .queue_size = 32,
                 .nodes_size = 32,
@@ -632,6 +635,7 @@ pub fn Modules(module_lists: anytype) type {
 
                         @field(mod, mod_field.name).internal = .{
                             .allocator = allocator,
+                            .io = io,
                             .type_id = @intCast(object_type_id),
                             .graph = &m.graph,
                         };

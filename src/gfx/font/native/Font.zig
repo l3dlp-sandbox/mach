@@ -9,7 +9,7 @@ const RGBA32 = @import("../main.zig").RGBA32;
 
 const Font = @This();
 
-var freetype_ready_mu: std.Thread.Mutex = .{};
+var freetype_ready_mu: std.Io.Mutex = .init;
 var freetype_ready: bool = false;
 var ft_library: ft.FT_Library = null;
 
@@ -18,8 +18,8 @@ font_bytes: []const u8,
 bitmap: std.ArrayListUnmanaged(RGBA32) = .empty,
 
 pub fn initFreetype() !void {
-    freetype_ready_mu.lock();
-    defer freetype_ready_mu.unlock();
+    freetype_ready_mu.lockUncancelable(std.Options.debug_io);
+    defer freetype_ready_mu.unlock(std.Options.debug_io);
     if (!freetype_ready) {
         if (ft.FT_Init_FreeType(&ft_library) != 0) return error.FreetypeInitFailed;
         freetype_ready = true;

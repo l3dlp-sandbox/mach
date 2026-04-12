@@ -116,16 +116,18 @@ pub const Graph = struct {
     /// Pool of nodes for allocation and recycling.
     nodes: Pool(Node),
 
+    io: std.Io,
+
     /// Maps node IDs to their struct, protected by a read-write lock
     id_to_node: struct {
         map: std.AutoHashMapUnmanaged(u64, *Node) = .{},
-        lock: std.Thread.RwLock = .{},
+        lock: std.Io.RwLock = .init,
     } = .{},
 
     /// Pool of ArrayLists for query results
     result_lists: struct {
         available: std.ArrayListUnmanaged(*std.ArrayListUnmanaged(u64)) = .empty,
-        lock: std.Thread.RwLock = .{},
+        lock: std.Io.Mutex = .init,
     } = .{},
 
     preallocate_result_list_size: u32,
@@ -142,6 +144,7 @@ pub const Graph = struct {
     pub fn init(
         graph: *Graph,
         allocator: std.mem.Allocator,
+        io: std.Io,
         preallocate: struct {
             queue_size: u32,
             nodes_size: u32,
@@ -152,16 +155,17 @@ pub const Graph = struct {
         graph.* = .{
             .queue = undefined,
             .nodes = undefined,
+            .io = io,
             .preallocate_result_list_size = preallocate.result_list_size,
         };
 
-        try graph.queue.init(allocator, preallocate.queue_size);
+        try graph.queue.init(allocator, io, preallocate.queue_size);
         errdefer graph.queue.deinit(allocator);
 
         try graph.id_to_node.map.ensureTotalCapacity(allocator, preallocate.nodes_size);
         errdefer graph.id_to_node.map.deinit(allocator);
 
-        graph.nodes = try Pool(Node).init(allocator, preallocate.nodes_size);
+        graph.nodes = try Pool(Node).init(allocator, io, preallocate.nodes_size);
         errdefer graph.nodes.deinit(allocator);
 
         // Pre-allocate result lists
@@ -200,8 +204,8 @@ pub const Graph = struct {
 
     /// Get an existing Node for the given ID, or null if not found
     fn getNode(graph: *Graph, id: u64) ?*Node {
-        graph.id_to_node.lock.lockShared();
-        defer graph.id_to_node.lock.unlockShared();
+        graph.id_to_node.lock.lockSharedUncancelable(graph.io);
+        defer graph.id_to_node.lock.unlockShared(graph.io);
         return graph.id_to_node.map.get(id);
     }
 
@@ -217,8 +221,8 @@ pub const Graph = struct {
     /// Checks if a node has any relationships and if not, removes it from the graph
     inline fn cleanupIsolatedNode(graph: *Graph, node: *Node) void {
         if (node.parent != null or node.first_child != null) return;
-        graph.id_to_node.lock.lock();
-        defer graph.id_to_node.lock.unlock();
+        graph.id_to_node.lock.lockUncancelable(graph.io);
+        defer graph.id_to_node.lock.unlock(graph.io);
         _ = graph.id_to_node.map.remove(node.id);
         graph.nodes.release(node);
     }
@@ -301,8 +305,8 @@ pub const Graph = struct {
 
     /// preallocateNodes2 ensures graph.id_to_node contains an entry for the two given IDs.
     fn preallocateNodes2(graph: *Graph, allocator: std.mem.Allocator, id1: u64, id2: u64) !void {
-        graph.id_to_node.lock.lock();
-        defer graph.id_to_node.lock.unlock();
+        graph.id_to_node.lock.lockUncancelable(graph.io);
+        defer graph.id_to_node.lock.unlock(graph.io);
 
         // Preallocate first node
         const result1 = try graph.id_to_node.map.getOrPut(allocator, id1);
@@ -395,14 +399,14 @@ pub const Graph = struct {
 
     fn acquireResultList(graph: *Graph, allocator: std.mem.Allocator, min_capacity: usize) !*std.ArrayListUnmanaged(u64) {
         // Try to get an existing list first
-        graph.result_lists.lock.lock();
+        graph.result_lists.lock.lockUncancelable(graph.io);
         const list = graph.result_lists.available.popOrNull();
-        graph.result_lists.lock.unlock();
+        graph.result_lists.lock.unlock(graph.io);
 
         if (list) |l| {
             errdefer {
-                graph.result_lists.lock.lock();
-                defer graph.result_lists.lock.unlock();
+                graph.result_lists.lock.lockUncancelable(graph.io);
+                defer graph.result_lists.lock.unlock(graph.io);
                 graph.result_lists.available.appendAssumeCapacity(l);
             }
             try l.ensureTotalCapacity(allocator, min_capacity);
@@ -420,8 +424,8 @@ pub const Graph = struct {
     fn releaseResultList(graph: *Graph, list: *std.ArrayListUnmanaged(u64)) void {
         list.clearRetainingCapacity();
 
-        graph.result_lists.lock.lock();
-        defer graph.result_lists.lock.unlock();
+        graph.result_lists.lock.lockUncancelable(graph.io);
+        defer graph.result_lists.lock.unlock(graph.io);
         graph.result_lists.available.appendAssumeCapacity(list);
     }
 

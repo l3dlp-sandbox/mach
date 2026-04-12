@@ -24,7 +24,8 @@ pub fn Pool(comptime Node: type) type {
         head: ?*Node = null,
 
         // Tracks chunks of allocated nodes, used for freeing them at deinit() time.
-        cleanup_mu: std.Thread.Mutex = .{},
+        io: std.Io,
+        cleanup_mu: std.Io.Mutex = .init,
         cleanup: std.ArrayListUnmanaged([*]Node) = .empty,
 
         // How many nodes to allocate at once for each chunk in the pool.
@@ -32,10 +33,10 @@ pub fn Pool(comptime Node: type) type {
         chunk_size: usize,
 
         /// Initialize the pool with a pre-allocated chunk of the given size
-        pub fn init(allocator: std.mem.Allocator, chunk_size: usize) !@This() {
+        pub fn init(allocator: std.mem.Allocator, io: std.Io, chunk_size: usize) !@This() {
             std.debug.assert(chunk_size >= 2); // Need at least 2 for the linking strategy
 
-            var pool = @This(){ .chunk_size = chunk_size };
+            var pool = @This(){ .io = io, .chunk_size = chunk_size };
             errdefer pool.cleanup.deinit(allocator);
 
             // Allocate initial chunk of nodes
@@ -76,14 +77,14 @@ pub fn Pool(comptime Node: type) type {
             // Pool is empty, we need to allocate new nodes
             // This is the rare path where we need a lock to ensure thread safety only for the
             // pool.cleanup tracking list.
-            pool.cleanup_mu.lock();
+            pool.cleanup_mu.lockUncancelable(pool.io);
 
             // Check the pool again after acquiring the lock
             // Another thread might have already allocated nodes while we were waiting
             const head2 = @atomicLoad(?*Node, &pool.head, .acquire);
             if (head2) |_| {
                 // Pool is no longer empty, release the lock and try to acquire a node again
-                pool.cleanup_mu.unlock();
+                pool.cleanup_mu.unlock(pool.io);
                 return pool.acquire(allocator);
             }
 
@@ -91,7 +92,7 @@ pub fn Pool(comptime Node: type) type {
             const new_nodes = try allocator.alloc(Node, pool.chunk_size);
             errdefer allocator.free(new_nodes);
             try pool.cleanup.append(allocator, @ptrCast(new_nodes.ptr));
-            pool.cleanup_mu.unlock();
+            pool.cleanup_mu.unlock(pool.io);
 
             // Link all our new nodes (except the first one acquired by the caller) into a chain
             // with eachother.
@@ -187,11 +188,11 @@ pub fn Queue(comptime Value: type) type {
         ///
         /// If the queue runs out of space and needs to allocate, another chunk of elements of the
         /// given size will be allocated.
-        pub fn init(q: *@This(), allocator: std.mem.Allocator, size: usize) !void {
+        pub fn init(q: *@This(), allocator: std.mem.Allocator, io: std.Io, size: usize) !void {
             q.empty = Node{ .next = null, .value = undefined };
             q.head = &q.empty;
             q.tail = &q.empty;
-            q.pool = try Pool(Node).init(allocator, size);
+            q.pool = try Pool(Node).init(allocator, io, size);
         }
 
         /// Push node to head of queue.
