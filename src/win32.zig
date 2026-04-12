@@ -3,42 +3,50 @@ const builtin = @import("builtin");
 pub const L = std.unicode.utf8ToUtf16LeStringLiteral;
 
 const w = std.os.windows;
-pub const BOOL = w.BOOL;
+pub const BOOL = i32;
 pub const HWND = w.HWND;
-pub const HRESULT = w.HRESULT;
+pub const HRESULT = i32;
 pub const HINSTANCE = w.HINSTANCE;
 pub const CHAR = w.CHAR;
-pub const RECT = w.RECT;
+pub const RECT = extern struct {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+};
 pub const FILETIME = w.FILETIME;
-pub const POINT = w.POINT;
+pub const POINT = extern struct {
+    x: i32,
+    y: i32,
+};
 pub const HANDLE = w.HANDLE;
 pub const PWSTR = w.PWSTR;
 pub const GUID = std.os.windows.GUID;
-pub const WPARAM = w.WPARAM;
-pub const LPARAM = w.LPARAM;
-pub const LRESULT = w.LRESULT;
+pub const WPARAM = usize;
+pub const LPARAM = isize;
+pub const LRESULT = isize;
 pub const HICON = w.HICON;
 pub const HCURSOR = w.HCURSOR;
 pub const HBRUSH = w.HBRUSH;
 pub const HMENU = w.HMENU;
 pub const HMONITOR = *opaque {};
 pub const HDC = w.HDC;
-pub const WINAPI = w.WINAPI;
-pub const TRUE = w.TRUE;
-pub const FALSE = w.FALSE;
+pub const WINAPI = std.builtin.CallingConvention.winapi;
+pub const TRUE: BOOL = 1;
+pub const FALSE: BOOL = 0;
 
 pub const SIZE = extern struct {
     cx: i32,
     cy: i32,
 };
 
-pub extern "kernel32" fn GetLastError() callconv(w.WINAPI) u32;
+pub extern "kernel32" fn GetLastError() callconv(WINAPI) u32;
 
 //pub const GetModuleHandleW = w.kernel32.GetModuleHandleW;
 // TODO: this type is limited to platform 'windows5.1.2600'
 pub extern "kernel32" fn GetModuleHandleW(
     lpModuleName: ?[*:0]const u16,
-) callconv(@import("std").os.windows.WINAPI) ?HINSTANCE;
+) callconv(WINAPI) ?HINSTANCE;
 
 pub const KF_REPEAT = @as(u32, 16384);
 pub const CW_USEDEFAULT = @as(i32, -2147483648);
@@ -58,7 +66,7 @@ pub extern "dinput8" fn DirectInput8Create(
     riidltf: ?*const Guid,
     ppvOut: ?*?*anyopaque,
     punkOuter: ?*IUnknown,
-) callconv(@import("std").os.windows.WINAPI) HRESULT;
+) callconv(WINAPI) HRESULT;
 
 pub const MOUSEHOOKSTRUCTEX_MOUSE_DATA = packed struct(u32) {
     @"1": u1 = 0,
@@ -99,12 +107,12 @@ pub const XBUTTON2 = MOUSEHOOKSTRUCTEX_MOUSE_DATA{ .@"2" = 1 };
 pub extern "user32" fn GetClientRect(
     hWnd: ?HWND,
     lpRect: ?*RECT,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetWindowRect(
     hWnd: ?HWND,
     lpRect: ?*RECT,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub extern "user32" fn AdjustWindowRectExForDpi(
     lpRect: ?*RECT,
@@ -112,10 +120,10 @@ pub extern "user32" fn AdjustWindowRectExForDpi(
     bMenu: BOOL,
     dwExStyle: WINDOW_EX_STYLE,
     dpi: u32,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 // TODO: this type is limited to platform 'windows5.0'
-pub extern "user32" fn GetMessageTime() callconv(@import("std").os.windows.WINAPI) i32;
+pub extern "user32" fn GetMessageTime() callconv(WINAPI) i32;
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn TranslateMessage(lpMsg: [*c]const MSG) callconv(WINAPI) BOOL;
 pub extern "user32" fn DispatchMessageW(lpMsg: [*c]const MSG) callconv(WINAPI) LRESULT;
@@ -126,7 +134,7 @@ pub extern "user32" fn PeekMessageW(
     wMsgFilterMin: u32,
     wMsgFilterMax: u32,
     wRemoveMsg: PEEK_MESSAGE_REMOVE_TYPE,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 pub const PEEK_MESSAGE_REMOVE_TYPE = packed struct(u32) {
     REMOVE: u1 = 0,
     NOYIELD: u1 = 0,
@@ -223,61 +231,55 @@ pub const arch: Arch = switch (builtin.target.cpu.arch) {
     else => @compileError("unhandled arch " ++ @tagName(builtin.target.cpu.arch)),
 };
 
-//pub usingnamespace switch (@import("../zig.zig").arch) {
-pub usingnamespace switch (arch) {
-    .X64, .Arm64 => struct {
-
-        // TODO: this type is limited to platform 'windows5.0'
+pub const GetWindowLongPtrW = switch (arch) {
+    .X64, .Arm64 => (struct {
         pub extern "user32" fn GetWindowLongPtrW(
             hWnd: ?HWND,
             nIndex: WINDOW_LONG_PTR_INDEX,
-        ) callconv(@import("std").os.windows.WINAPI) isize;
-    },
-    else => struct {},
+        ) callconv(WINAPI) isize;
+    }).GetWindowLongPtrW,
+    else => |a| if (@import("builtin").is_test) void else @compileError("function 'GetWindowLongPtrW' is not supported on architecture " ++ @tagName(a)),
 };
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn SetCursor(
     hCursor: ?HCURSOR,
-) callconv(@import("std").os.windows.WINAPI) ?HCURSOR;
+) callconv(WINAPI) ?HCURSOR;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetCursorPos(
     lpPoint: ?*POINT,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub extern "user32" fn SetCursorPos(
     X: i32,
     Y: i32,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
-//pub usingnamespace switch (@import("../zig.zig").arch) {
-pub usingnamespace switch (arch) {
-    .X64, .Arm64 => struct {
-
-        // TODO: this type is limited to platform 'windows5.0'
+pub const SetWindowLongPtrW = switch (arch) {
+    .X64, .Arm64 => (struct {
         pub extern "user32" fn SetWindowLongPtrW(
             hWnd: ?HWND,
             nIndex: WINDOW_LONG_PTR_INDEX,
             dwNewLong: isize,
-        ) callconv(@import("std").os.windows.WINAPI) isize;
-    },
-    else => struct {},
+        ) callconv(WINAPI) isize;
+    }).SetWindowLongPtrW,
+    else => |a| if (@import("builtin").is_test) void else @compileError("function 'SetWindowLongPtrW' is not supported on architecture " ++ @tagName(a)),
 };
 
 pub extern "user32" fn SetWindowLongW(
     hWnd: ?HWND,
     nIndex: WINDOW_LONG_PTR_INDEX,
     dwNewLong: i32,
-) callconv(@import("std").os.windows.WINAPI) i32;
+) callconv(WINAPI) i32;
 
 pub extern "user32" fn BringWindowToTop(
     hWnd: ?HWND,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub extern "user32" fn SetForegroundWindow(
     hWnd: ?HWND,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 //pub extern "user32" fn SetWindowPos(hWnd: HWND, hWndInsertAfter: HWND, X: i32, Y: i32, cx: i32, cy: i32, uFlags: u32) callconv(WINAPI) BOOL;
 pub extern "user32" fn SetWindowPos(
@@ -288,7 +290,7 @@ pub extern "user32" fn SetWindowPos(
     cx: i32,
     cy: i32,
     uFlags: SET_WINDOW_POS_FLAGS,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub const SET_WINDOW_POS_FLAGS = packed struct(u32) {
     NOSIZE: u1 = 0,
@@ -346,7 +348,7 @@ pub const SWP_SHOWWINDOW = SET_WINDOW_POS_FLAGS{ .SHOWWINDOW = 1 };
 pub extern "user32" fn SetWindowTextW(
     hWnd: ?HWND,
     lpString: ?[*:0]const u16,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 fn hexVal(c: u8) u4 {
     if (c <= '9') return @as(u4, @intCast(c - '0'));
@@ -426,260 +428,142 @@ pub const DIDEVICEINSTANCEW = extern struct {
     wUsage: u16,
 };
 
-pub const LPDIENUMDEVICESCALLBACKA = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*DIDEVICEINSTANCEA,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*DIDEVICEINSTANCEA,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMDEVICESCALLBACKA = *const fn (
+    param0: ?*DIDEVICEINSTANCEA,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
-pub const LPDIENUMDEVICESCALLBACKW = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*DIDEVICEINSTANCEW,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*DIDEVICEINSTANCEW,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMDEVICESCALLBACKW = *const fn (
+    param0: ?*DIDEVICEINSTANCEW,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
-pub const LPDICONFIGUREDEVICESCALLBACK = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*IUnknown,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*IUnknown,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDICONFIGUREDEVICESCALLBACK = *const fn (
+    param0: ?*IUnknown,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
 const IID_IUnknown_Value = Guid.initString("00000000-0000-0000-c000-000000000046");
 pub const IID_IUnknown = &IID_IUnknown_Value;
-pub const IUnknown = extern struct {
+pub const IUnknown = extern union {
     pub const VTable = extern struct {
-        QueryInterface: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IUnknown,
-                riid: ?*const Guid,
-                ppvObject: ?*?*anyopaque,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IUnknown,
-                riid: ?*const Guid,
-                ppvObject: ?*?*anyopaque,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        AddRef: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IUnknown,
-            ) callconv(@import("std").os.windows.WINAPI) u32,
-            else => *const fn (
-                self: *const IUnknown,
-            ) callconv(@import("std").os.windows.WINAPI) u32,
-        },
-        Release: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IUnknown,
-            ) callconv(@import("std").os.windows.WINAPI) u32,
-            else => *const fn (
-                self: *const IUnknown,
-            ) callconv(@import("std").os.windows.WINAPI) u32,
-        },
+        QueryInterface: *const fn (
+            self: *const IUnknown,
+            riid: ?*const Guid,
+            ppvObject: ?*?*anyopaque,
+        ) callconv(WINAPI) HRESULT,
+        AddRef: *const fn (
+            self: *const IUnknown,
+        ) callconv(WINAPI) u32,
+        Release: *const fn (
+            self: *const IUnknown,
+        ) callconv(WINAPI) u32,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IUnknown_QueryInterface(self: *const T, riid: ?*const Guid, ppvObject: ?*?*anyopaque) HRESULT {
-                return @as(*const IUnknown.VTable, @ptrCast(self.vtable)).QueryInterface(@as(*const IUnknown, @ptrCast(self)), riid, ppvObject);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IUnknown_AddRef(self: *const T) u32 {
-                return @as(*const IUnknown.VTable, @ptrCast(self.vtable)).AddRef(@as(*const IUnknown, @ptrCast(self)));
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IUnknown_Release(self: *const T) u32 {
-                return @as(*const IUnknown.VTable, @ptrCast(self.vtable)).Release(@as(*const IUnknown, @ptrCast(self)));
-            }
-        };
+    pub fn QueryInterface(self: *const IUnknown, riid: ?*const Guid, ppvObject: ?*?*anyopaque) callconv(.@"inline") HRESULT {
+        return self.vtable.QueryInterface(self, riid, ppvObject);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn AddRef(self: *const IUnknown) callconv(.@"inline") u32 {
+        return self.vtable.AddRef(self);
+    }
+    pub fn Release(self: *const IUnknown) callconv(.@"inline") u32 {
+        return self.vtable.Release(self);
+    }
 };
 
 const IID_IDirectInput8W_Value = Guid.initString("bf798031-483a-4da2-aa99-5d64ed369700");
 pub const IID_IDirectInput8W = &IID_IDirectInput8W_Value;
-pub const IDirectInput8W = extern struct {
+pub const IDirectInput8W = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
-        CreateDevice: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?*const Guid,
-                param1: ?*?*IDirectInputDevice8W,
-                param2: ?*IUnknown,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?*const Guid,
-                param1: ?*?*IDirectInputDevice8W,
-                param2: ?*IUnknown,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        EnumDevices: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: u32,
-                param1: ?LPDIENUMDEVICESCALLBACKW,
-                param2: ?*anyopaque,
-                param3: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: u32,
-                param1: ?LPDIENUMDEVICESCALLBACKW,
-                param2: ?*anyopaque,
-                param3: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        GetDeviceStatus: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?*const Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?*const Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        RunControlPanel: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?HWND,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?HWND,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        Initialize: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?HINSTANCE,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?HINSTANCE,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        FindDevice: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?*const Guid,
-                param1: ?[*:0]const u16,
-                param2: ?*Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?*const Guid,
-                param1: ?[*:0]const u16,
-                param2: ?*Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        EnumDevicesBySemantics: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?[*:0]const u16,
-                param1: ?*DIACTIONFORMATW,
-                param2: ?LPDIENUMDEVICESBYSEMANTICSCBW,
-                param3: ?*anyopaque,
-                param4: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?[*:0]const u16,
-                param1: ?*DIACTIONFORMATW,
-                param2: ?LPDIENUMDEVICESBYSEMANTICSCBW,
-                param3: ?*anyopaque,
-                param4: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        ConfigureDevices: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInput8W,
-                param0: ?LPDICONFIGUREDEVICESCALLBACK,
-                param1: ?*DICONFIGUREDEVICESPARAMSW,
-                param2: u32,
-                param3: ?*anyopaque,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInput8W,
-                param0: ?LPDICONFIGUREDEVICESCALLBACK,
-                param1: ?*DICONFIGUREDEVICESPARAMSW,
-                param2: u32,
-                param3: ?*anyopaque,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
+        CreateDevice: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?*const Guid,
+            param1: ?*?*IDirectInputDevice8W,
+            param2: ?*IUnknown,
+        ) callconv(WINAPI) HRESULT,
+        EnumDevices: *const fn (
+            self: *const IDirectInput8W,
+            param0: u32,
+            param1: ?LPDIENUMDEVICESCALLBACKW,
+            param2: ?*anyopaque,
+            param3: u32,
+        ) callconv(WINAPI) HRESULT,
+        GetDeviceStatus: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?*const Guid,
+        ) callconv(WINAPI) HRESULT,
+        RunControlPanel: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?HWND,
+            param1: u32,
+        ) callconv(WINAPI) HRESULT,
+        Initialize: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?HINSTANCE,
+            param1: u32,
+        ) callconv(WINAPI) HRESULT,
+        FindDevice: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?*const Guid,
+            param1: ?[*:0]const u16,
+            param2: ?*Guid,
+        ) callconv(WINAPI) HRESULT,
+        EnumDevicesBySemantics: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?[*:0]const u16,
+            param1: ?*DIACTIONFORMATW,
+            param2: ?LPDIENUMDEVICESBYSEMANTICSCBW,
+            param3: ?*anyopaque,
+            param4: u32,
+        ) callconv(WINAPI) HRESULT,
+        ConfigureDevices: *const fn (
+            self: *const IDirectInput8W,
+            param0: ?LPDICONFIGUREDEVICESCALLBACK,
+            param1: ?*DICONFIGUREDEVICESPARAMSW,
+            param2: u32,
+            param3: ?*anyopaque,
+        ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_CreateDevice(self: *const T, param0: ?*const Guid, param1: ?*?*IDirectInputDevice8W, param2: ?*IUnknown) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).CreateDevice(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1, param2);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_EnumDevices(self: *const T, param0: u32, param1: ?LPDIENUMDEVICESCALLBACKW, param2: ?*anyopaque, param3: u32) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).EnumDevices(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1, param2, param3);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_GetDeviceStatus(self: *const T, param0: ?*const Guid) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).GetDeviceStatus(@as(*const IDirectInput8W, @ptrCast(self)), param0);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_RunControlPanel(self: *const T, param0: ?HWND, param1: u32) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).RunControlPanel(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_Initialize(self: *const T, param0: ?HINSTANCE, param1: u32) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).Initialize(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_FindDevice(self: *const T, param0: ?*const Guid, param1: ?[*:0]const u16, param2: ?*Guid) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).FindDevice(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1, param2);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_EnumDevicesBySemantics(self: *const T, param0: ?[*:0]const u16, param1: ?*DIACTIONFORMATW, param2: ?LPDIENUMDEVICESBYSEMANTICSCBW, param3: ?*anyopaque, param4: u32) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).EnumDevicesBySemantics(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1, param2, param3, param4);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInput8W_ConfigureDevices(self: *const T, param0: ?LPDICONFIGUREDEVICESCALLBACK, param1: ?*DICONFIGUREDEVICESPARAMSW, param2: u32, param3: ?*anyopaque) HRESULT {
-                return @as(*const IDirectInput8W.VTable, @ptrCast(self.vtable)).ConfigureDevices(@as(*const IDirectInput8W, @ptrCast(self)), param0, param1, param2, param3);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn CreateDevice(self: *const IDirectInput8W, param0: ?*const Guid, param1: ?*?*IDirectInputDevice8W, param2: ?*IUnknown) callconv(.@"inline") HRESULT {
+        return self.vtable.CreateDevice(self, param0, param1, param2);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn EnumDevices(self: *const IDirectInput8W, param0: u32, param1: ?LPDIENUMDEVICESCALLBACKW, param2: ?*anyopaque, param3: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.EnumDevices(self, param0, param1, param2, param3);
+    }
+    pub fn GetDeviceStatus(self: *const IDirectInput8W, param0: ?*const Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.GetDeviceStatus(self, param0);
+    }
+    pub fn RunControlPanel(self: *const IDirectInput8W, param0: ?HWND, param1: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.RunControlPanel(self, param0, param1);
+    }
+    pub fn Initialize(self: *const IDirectInput8W, param0: ?HINSTANCE, param1: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.Initialize(self, param0, param1);
+    }
+    pub fn FindDevice(self: *const IDirectInput8W, param0: ?*const Guid, param1: ?[*:0]const u16, param2: ?*Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.FindDevice(self, param0, param1, param2);
+    }
+    pub fn EnumDevicesBySemantics(self: *const IDirectInput8W, param0: ?[*:0]const u16, param1: ?*DIACTIONFORMATW, param2: ?LPDIENUMDEVICESBYSEMANTICSCBW, param3: ?*anyopaque, param4: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.EnumDevicesBySemantics(self, param0, param1, param2, param3, param4);
+    }
+    pub fn ConfigureDevices(self: *const IDirectInput8W, param0: ?LPDICONFIGUREDEVICESCALLBACK, param1: ?*DICONFIGUREDEVICESPARAMSW, param2: u32, param3: ?*anyopaque) callconv(.@"inline") HRESULT {
+        return self.vtable.ConfigureDevices(self, param0, param1, param2, param3);
+    }
 };
 
-pub const IID_IDirectInputDevice8W = GUID{ .Data1 = 1423184001, .Data2 = 56341, .Data3 = 18483, .Data4 = .{ 164, 27, 116, 143, 115, 163, 129, 121 } };
-pub const IDirectInputDevice8W = extern struct {
-    lpVtbl: *VTable,
-    const VTable = extern struct {
+const IID_IDirectInputDevice8W_Value = Guid.initString("54d41081-dc15-4833-a41b-748f73a38179");
+pub const IID_IDirectInputDevice8W = &IID_IDirectInputDevice8W_Value;
+pub const IDirectInputDevice8W = extern union {
+    vtable: *const VTable,
+    IUnknown: IUnknown,
+    pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetCapabilities: *const fn (self: *const anyopaque, param0: [*c]DIDEVCAPS) callconv(WINAPI) HRESULT,
         EnumObjects: *const fn (self: *const anyopaque, param0: LPDIENUMDEVICEOBJECTSCALLBACKW, param1: ?*anyopaque, param2: u32) callconv(WINAPI) HRESULT,
-        GetProperty: *const fn (self: *const anyopaque, param0: [*c]const GUID, param1: [*c]DIPROPHEADER) callconv(WINAPI) HRESULT,
-        SetProperty: *const fn (self: *const anyopaque, param0: [*c]const GUID, param1: [*c]DIPROPHEADER) callconv(WINAPI) HRESULT,
+        GetProperty: *const fn (self: *const anyopaque, param0: [*c]const Guid, param1: [*c]DIPROPHEADER) callconv(WINAPI) HRESULT,
+        SetProperty: *const fn (self: *const anyopaque, param0: [*c]const Guid, param1: [*c]DIPROPHEADER) callconv(WINAPI) HRESULT,
         Acquire: *const fn (self: *const anyopaque) callconv(WINAPI) HRESULT,
         Unacquire: *const fn (self: *const anyopaque) callconv(WINAPI) HRESULT,
         GetDeviceState: *const fn (self: *const anyopaque, param0: u32, param1: ?*anyopaque) callconv(WINAPI) HRESULT,
@@ -690,10 +574,10 @@ pub const IDirectInputDevice8W = extern struct {
         GetObjectInfo: *const fn (self: *const anyopaque, param0: [*c]DIDEVICEOBJECTINSTANCEW, param1: u32, param2: u32) callconv(WINAPI) HRESULT,
         GetDeviceInfo: *const fn (self: *const anyopaque, param0: [*c]DIDEVICEINSTANCEW) callconv(WINAPI) HRESULT,
         RunControlPanel: *const fn (self: *const anyopaque, param0: HWND, param1: u32) callconv(WINAPI) HRESULT,
-        Initialize: *const fn (self: *const anyopaque, param0: HINSTANCE, param1: u32, param2: [*c]const GUID) callconv(WINAPI) HRESULT,
-        CreateEffect: *const fn (self: *const anyopaque, param0: [*c]const GUID, param1: [*c]DIEFFECT, param2: [*c][*c]IDirectInputEffect, param3: [*c]IUnknown) callconv(WINAPI) HRESULT,
+        Initialize: *const fn (self: *const anyopaque, param0: HINSTANCE, param1: u32, param2: [*c]const Guid) callconv(WINAPI) HRESULT,
+        CreateEffect: *const fn (self: *const anyopaque, param0: [*c]const Guid, param1: [*c]DIEFFECT, param2: [*c][*c]IDirectInputEffect, param3: [*c]IUnknown) callconv(WINAPI) HRESULT,
         EnumEffects: *const fn (self: *const anyopaque, param0: LPDIENUMEFFECTSCALLBACKW, param1: ?*anyopaque, param2: u32) callconv(WINAPI) HRESULT,
-        GetEffectInfo: *const fn (self: *const anyopaque, param0: [*c]DIEFFECTINFOW, param1: [*c]const GUID) callconv(WINAPI) HRESULT,
+        GetEffectInfo: *const fn (self: *const anyopaque, param0: [*c]DIEFFECTINFOW, param1: [*c]const Guid) callconv(WINAPI) HRESULT,
         GetForceFeedbackState: *const fn (self: *const anyopaque, param0: [*c]u32) callconv(WINAPI) HRESULT,
         SendForceFeedbackCommand: *const fn (self: *const anyopaque, param0: u32) callconv(WINAPI) HRESULT,
         EnumCreatedEffectObjects: *const fn (self: *const anyopaque, param0: LPDIENUMCREATEDEFFECTOBJECTSCALLBACK, param1: ?*anyopaque, param2: u32) callconv(WINAPI) HRESULT,
@@ -707,100 +591,100 @@ pub const IDirectInputDevice8W = extern struct {
         GetImageInfo: *const fn (self: *const anyopaque, param0: [*c]DIDEVICEIMAGEINFOHEADERW) callconv(WINAPI) HRESULT,
     };
     pub fn GetCapabilities(self: *const IDirectInputDevice8W, param0: [*c]DIDEVCAPS) HRESULT {
-        return self.lpVtbl.GetCapabilities(self, param0);
+        return self.vtable.GetCapabilities(self, param0);
     }
     pub fn EnumObjects(self: *const IDirectInputDevice8W, param0: LPDIENUMDEVICEOBJECTSCALLBACKW, param1: ?*anyopaque, param2: u32) HRESULT {
-        return self.lpVtbl.EnumObjects(self, param0, param1, param2);
+        return self.vtable.EnumObjects(self, param0, param1, param2);
     }
-    pub fn GetProperty(self: *const IDirectInputDevice8W, param0: [*c]const GUID, param1: [*c]DIPROPHEADER) HRESULT {
-        return self.lpVtbl.GetProperty(self, param0, param1);
+    pub fn GetProperty(self: *const IDirectInputDevice8W, param0: [*c]const Guid, param1: [*c]DIPROPHEADER) HRESULT {
+        return self.vtable.GetProperty(self, param0, param1);
     }
-    pub fn SetProperty(self: *const IDirectInputDevice8W, param0: [*c]const GUID, param1: [*c]DIPROPHEADER) HRESULT {
-        return self.lpVtbl.SetProperty(self, param0, param1);
+    pub fn SetProperty(self: *const IDirectInputDevice8W, param0: [*c]const Guid, param1: [*c]DIPROPHEADER) HRESULT {
+        return self.vtable.SetProperty(self, param0, param1);
     }
     pub fn Acquire(self: *const IDirectInputDevice8W) HRESULT {
-        return self.lpVtbl.Acquire(self);
+        return self.vtable.Acquire(self);
     }
     pub fn Unacquire(self: *const IDirectInputDevice8W) HRESULT {
-        return self.lpVtbl.Unacquire(self);
+        return self.vtable.Unacquire(self);
     }
     pub fn GetDeviceState(self: *const IDirectInputDevice8W, param0: u32, param1: ?*anyopaque) HRESULT {
-        return self.lpVtbl.GetDeviceState(self, param0, param1);
+        return self.vtable.GetDeviceState(self, param0, param1);
     }
     pub fn GetDeviceData(self: *const IDirectInputDevice8W, param0: u32, param1: [*c]DIDEVICEOBJECTDATA, param2: [*c]u32, param3: u32) HRESULT {
-        return self.lpVtbl.GetDeviceData(self, param0, param1, param2, param3);
+        return self.vtable.GetDeviceData(self, param0, param1, param2, param3);
     }
     pub fn SetDataFormat(self: *const IDirectInputDevice8W, param0: [*c]DIDATAFORMAT) HRESULT {
-        return self.lpVtbl.SetDataFormat(self, param0);
+        return self.vtable.SetDataFormat(self, param0);
     }
     pub fn SetEventNotification(self: *const IDirectInputDevice8W, param0: HANDLE) HRESULT {
-        return self.lpVtbl.SetEventNotification(self, param0);
+        return self.vtable.SetEventNotification(self, param0);
     }
     pub fn SetCooperativeLevel(self: *const IDirectInputDevice8W, param0: HWND, param1: u32) HRESULT {
-        return self.lpVtbl.SetCooperativeLevel(self, param0, param1);
+        return self.vtable.SetCooperativeLevel(self, param0, param1);
     }
     pub fn GetObjectInfo(self: *const IDirectInputDevice8W, param0: [*c]DIDEVICEOBJECTINSTANCEW, param1: u32, param2: u32) HRESULT {
-        return self.lpVtbl.GetObjectInfo(self, param0, param1, param2);
+        return self.vtable.GetObjectInfo(self, param0, param1, param2);
     }
     pub fn GetDeviceInfo(self: *const IDirectInputDevice8W, param0: [*c]DIDEVICEINSTANCEW) HRESULT {
-        return self.lpVtbl.GetDeviceInfo(self, param0);
+        return self.vtable.GetDeviceInfo(self, param0);
     }
     pub fn RunControlPanel(self: *const IDirectInputDevice8W, param0: HWND, param1: u32) HRESULT {
-        return self.lpVtbl.RunControlPanel(self, param0, param1);
+        return self.vtable.RunControlPanel(self, param0, param1);
     }
-    pub fn Initialize(self: *const IDirectInputDevice8W, param0: HINSTANCE, param1: u32, param2: [*c]const GUID) HRESULT {
-        return self.lpVtbl.Initialize(self, param0, param1, param2);
+    pub fn Initialize(self: *const IDirectInputDevice8W, param0: HINSTANCE, param1: u32, param2: [*c]const Guid) HRESULT {
+        return self.vtable.Initialize(self, param0, param1, param2);
     }
-    pub fn CreateEffect(self: *const IDirectInputDevice8W, param0: [*c]const GUID, param1: [*c]DIEFFECT, param2: [*c][*c]IDirectInputEffect, param3: [*c]IUnknown) HRESULT {
-        return self.lpVtbl.CreateEffect(self, param0, param1, param2, param3);
+    pub fn CreateEffect(self: *const IDirectInputDevice8W, param0: [*c]const Guid, param1: [*c]DIEFFECT, param2: [*c][*c]IDirectInputEffect, param3: [*c]IUnknown) HRESULT {
+        return self.vtable.CreateEffect(self, param0, param1, param2, param3);
     }
     pub fn EnumEffects(self: *const IDirectInputDevice8W, param0: LPDIENUMEFFECTSCALLBACKW, param1: ?*anyopaque, param2: u32) HRESULT {
-        return self.lpVtbl.EnumEffects(self, param0, param1, param2);
+        return self.vtable.EnumEffects(self, param0, param1, param2);
     }
-    pub fn GetEffectInfo(self: *const IDirectInputDevice8W, param0: [*c]DIEFFECTINFOW, param1: [*c]const GUID) HRESULT {
-        return self.lpVtbl.GetEffectInfo(self, param0, param1);
+    pub fn GetEffectInfo(self: *const IDirectInputDevice8W, param0: [*c]DIEFFECTINFOW, param1: [*c]const Guid) HRESULT {
+        return self.vtable.GetEffectInfo(self, param0, param1);
     }
     pub fn GetForceFeedbackState(self: *const IDirectInputDevice8W, param0: [*c]u32) HRESULT {
-        return self.lpVtbl.GetForceFeedbackState(self, param0);
+        return self.vtable.GetForceFeedbackState(self, param0);
     }
     pub fn SendForceFeedbackCommand(self: *const IDirectInputDevice8W, param0: u32) HRESULT {
-        return self.lpVtbl.SendForceFeedbackCommand(self, param0);
+        return self.vtable.SendForceFeedbackCommand(self, param0);
     }
     pub fn EnumCreatedEffectObjects(self: *const IDirectInputDevice8W, param0: LPDIENUMCREATEDEFFECTOBJECTSCALLBACK, param1: ?*anyopaque, param2: u32) HRESULT {
-        return self.lpVtbl.EnumCreatedEffectObjects(self, param0, param1, param2);
+        return self.vtable.EnumCreatedEffectObjects(self, param0, param1, param2);
     }
     pub fn Escape(self: *const IDirectInputDevice8W, param0: [*c]DIEFFESCAPE) HRESULT {
-        return self.lpVtbl.Escape(self, param0);
+        return self.vtable.Escape(self, param0);
     }
     pub fn Poll(self: *const IDirectInputDevice8W) HRESULT {
-        return self.lpVtbl.Poll(self);
+        return self.vtable.Poll(self);
     }
     pub fn SendDeviceData(self: *const IDirectInputDevice8W, param0: u32, param1: [*c]DIDEVICEOBJECTDATA, param2: [*c]u32, param3: u32) HRESULT {
-        return self.lpVtbl.SendDeviceData(self, param0, param1, param2, param3);
+        return self.vtable.SendDeviceData(self, param0, param1, param2, param3);
     }
     pub fn EnumEffectsInFile(self: *const IDirectInputDevice8W, param0: [*c]const u16, param1: LPDIENUMEFFECTSINFILECALLBACK, param2: ?*anyopaque, param3: u32) HRESULT {
-        return self.lpVtbl.EnumEffectsInFile(self, param0, param1, param2, param3);
+        return self.vtable.EnumEffectsInFile(self, param0, param1, param2, param3);
     }
     pub fn WriteEffectToFile(self: *const IDirectInputDevice8W, param0: [*c]const u16, param1: u32, param2: [*c]DIFILEEFFECT, param3: u32) HRESULT {
-        return self.lpVtbl.WriteEffectToFile(self, param0, param1, param2, param3);
+        return self.vtable.WriteEffectToFile(self, param0, param1, param2, param3);
     }
     pub fn BuildActionMap(self: *const IDirectInputDevice8W, param0: [*c]DIACTIONFORMATW, param1: [*c]const u16, param2: u32) HRESULT {
-        return self.lpVtbl.BuildActionMap(self, param0, param1, param2);
+        return self.vtable.BuildActionMap(self, param0, param1, param2);
     }
     pub fn SetActionMap(self: *const IDirectInputDevice8W, param0: [*c]DIACTIONFORMATW, param1: [*c]const u16, param2: u32) HRESULT {
-        return self.lpVtbl.SetActionMap(self, param0, param1, param2);
+        return self.vtable.SetActionMap(self, param0, param1, param2);
     }
     pub fn GetImageInfo(self: *const IDirectInputDevice8W, param0: [*c]DIDEVICEIMAGEINFOHEADERW) HRESULT {
-        return self.lpVtbl.GetImageInfo(self, param0);
+        return self.vtable.GetImageInfo(self, param0);
     }
-    pub fn QueryInterface(self: *const IDirectInputDevice8W, riid: [*c]const GUID, ppvObject: [*c]?*anyopaque) HRESULT {
-        return self.lpVtbl.base.QueryInterface(self, riid, ppvObject);
+    pub fn QueryInterface(self: *const IDirectInputDevice8W, riid: [*c]const Guid, ppvObject: [*c]?*anyopaque) HRESULT {
+        return self.vtable.base.QueryInterface(self, riid, ppvObject);
     }
     pub fn AddRef(self: *const IDirectInputDevice8W) u32 {
-        return self.lpVtbl.base.IUnknown_AddRef(self);
+        return self.vtable.base.AddRef(self);
     }
     pub fn Release(self: *const IDirectInputDevice8W) u32 {
-        return self.lpVtbl.base.IUnknown_Release(self);
+        return self.vtable.base.Release(self);
     }
 };
 
@@ -858,22 +742,13 @@ pub const DIDEVICEIMAGEINFOW = extern struct {
     dwTextAlign: u32,
 };
 
-pub const LPDIENUMDEVICESBYSEMANTICSCBW = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*DIDEVICEINSTANCEW,
-        param1: ?*IDirectInputDevice8W,
-        param2: u32,
-        param3: u32,
-        param4: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*DIDEVICEINSTANCEW,
-        param1: ?*IDirectInputDevice8W,
-        param2: u32,
-        param3: u32,
-        param4: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMDEVICESBYSEMANTICSCBW = *const fn (
+    param0: ?*DIDEVICEINSTANCEW,
+    param1: ?*IDirectInputDevice8W,
+    param2: u32,
+    param3: u32,
+    param4: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
 pub const DIFILEEFFECT = extern struct {
     dwSize: u32,
@@ -916,16 +791,10 @@ pub const DIENVELOPE = extern struct {
     dwFadeTime: u32,
 };
 
-pub const LPDIENUMEFFECTSCALLBACKW = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*DIEFFECTINFOW,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*DIEFFECTINFOW,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMEFFECTSCALLBACKW = *const fn (
+    param0: ?*DIEFFECTINFOW,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
 pub const DIEFFECTINFOW = extern struct {
     dwSize: u32,
@@ -936,16 +805,10 @@ pub const DIEFFECTINFOW = extern struct {
     tszName: [260]u16,
 };
 
-pub const LPDIENUMEFFECTSINFILECALLBACK = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*DIFILEEFFECT,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*DIFILEEFFECT,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMEFFECTSINFILECALLBACK = *const fn (
+    param0: ?*DIFILEEFFECT,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
 pub const DIDEVICEOBJECTDATA = extern struct {
     dwOfs: u32,
@@ -955,174 +818,91 @@ pub const DIDEVICEOBJECTDATA = extern struct {
     uAppData: usize,
 };
 
-pub const LPDIENUMCREATEDEFFECTOBJECTSCALLBACK = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*IDirectInputEffect,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*IDirectInputEffect,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMCREATEDEFFECTOBJECTSCALLBACK = *const fn (
+    param0: ?*IDirectInputEffect,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
 const IID_IDirectInputEffect_Value = Guid.initString("e7e1f7c0-88d2-11d0-9ad0-00a0c9a06e35");
 pub const IID_IDirectInputEffect = &IID_IDirectInputEffect_Value;
-pub const IDirectInputEffect = extern struct {
+pub const IDirectInputEffect = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
-        Initialize: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: ?HINSTANCE,
-                param1: u32,
-                param2: ?*const Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: ?HINSTANCE,
-                param1: u32,
-                param2: ?*const Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        GetEffectGuid: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: ?*Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: ?*Guid,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        GetParameters: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: ?*DIEFFECT,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: ?*DIEFFECT,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        SetParameters: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: ?*DIEFFECT,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: ?*DIEFFECT,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        Start: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: u32,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: u32,
-                param1: u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        Stop: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        GetEffectStatus: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: ?*u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: ?*u32,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        Download: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        Unload: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
-        Escape: switch (@import("builtin").zig_backend) {
-            .stage1 => fn (
-                self: *const IDirectInputEffect,
-                param0: ?*DIEFFESCAPE,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-            else => *const fn (
-                self: *const IDirectInputEffect,
-                param0: ?*DIEFFESCAPE,
-            ) callconv(@import("std").os.windows.WINAPI) HRESULT,
-        },
+        Initialize: *const fn (
+            self: *const IDirectInputEffect,
+            param0: ?HINSTANCE,
+            param1: u32,
+            param2: ?*const Guid,
+        ) callconv(WINAPI) HRESULT,
+        GetEffectGuid: *const fn (
+            self: *const IDirectInputEffect,
+            param0: ?*Guid,
+        ) callconv(WINAPI) HRESULT,
+        GetParameters: *const fn (
+            self: *const IDirectInputEffect,
+            param0: ?*DIEFFECT,
+            param1: u32,
+        ) callconv(WINAPI) HRESULT,
+        SetParameters: *const fn (
+            self: *const IDirectInputEffect,
+            param0: ?*DIEFFECT,
+            param1: u32,
+        ) callconv(WINAPI) HRESULT,
+        Start: *const fn (
+            self: *const IDirectInputEffect,
+            param0: u32,
+            param1: u32,
+        ) callconv(WINAPI) HRESULT,
+        Stop: *const fn (
+            self: *const IDirectInputEffect,
+        ) callconv(WINAPI) HRESULT,
+        GetEffectStatus: *const fn (
+            self: *const IDirectInputEffect,
+            param0: ?*u32,
+        ) callconv(WINAPI) HRESULT,
+        Download: *const fn (
+            self: *const IDirectInputEffect,
+        ) callconv(WINAPI) HRESULT,
+        Unload: *const fn (
+            self: *const IDirectInputEffect,
+        ) callconv(WINAPI) HRESULT,
+        Escape: *const fn (
+            self: *const IDirectInputEffect,
+            param0: ?*DIEFFESCAPE,
+        ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_Initialize(self: *const T, param0: ?HINSTANCE, param1: u32, param2: ?*const Guid) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).Initialize(@as(*const IDirectInputEffect, @ptrCast(self)), param0, param1, param2);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_GetEffectGuid(self: *const T, param0: ?*Guid) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).GetEffectGuid(@as(*const IDirectInputEffect, @ptrCast(self)), param0);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_GetParameters(self: *const T, param0: ?*DIEFFECT, param1: u32) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).GetParameters(@as(*const IDirectInputEffect, @ptrCast(self)), param0, param1);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_SetParameters(self: *const T, param0: ?*DIEFFECT, param1: u32) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).SetParameters(@as(*const IDirectInputEffect, @ptrCast(self)), param0, param1);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_Start(self: *const T, param0: u32, param1: u32) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).Start(@as(*const IDirectInputEffect, @ptrCast(self)), param0, param1);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_Stop(self: *const T) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).Stop(@as(*const IDirectInputEffect, @ptrCast(self)));
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_GetEffectStatus(self: *const T, param0: ?*u32) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).GetEffectStatus(@as(*const IDirectInputEffect, @ptrCast(self)), param0);
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_Download(self: *const T) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).Download(@as(*const IDirectInputEffect, @ptrCast(self)));
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_Unload(self: *const T) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).Unload(@as(*const IDirectInputEffect, @ptrCast(self)));
-            }
-            // NOTE: method is namespaced with interface name to avoid conflicts for now
-            pub inline fn IDirectInputEffect_Escape(self: *const T, param0: ?*DIEFFESCAPE) HRESULT {
-                return @as(*const IDirectInputEffect.VTable, @ptrCast(self.vtable)).Escape(@as(*const IDirectInputEffect, @ptrCast(self)), param0);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn Initialize(self: *const IDirectInputEffect, param0: ?HINSTANCE, param1: u32, param2: ?*const Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.Initialize(self, param0, param1, param2);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn GetEffectGuid(self: *const IDirectInputEffect, param0: ?*Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.GetEffectGuid(self, param0);
+    }
+    pub fn GetParameters(self: *const IDirectInputEffect, param0: ?*DIEFFECT, param1: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetParameters(self, param0, param1);
+    }
+    pub fn SetParameters(self: *const IDirectInputEffect, param0: ?*DIEFFECT, param1: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.SetParameters(self, param0, param1);
+    }
+    pub fn Start(self: *const IDirectInputEffect, param0: u32, param1: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.Start(self, param0, param1);
+    }
+    pub fn Stop(self: *const IDirectInputEffect) callconv(.@"inline") HRESULT {
+        return self.vtable.Stop(self);
+    }
+    pub fn GetEffectStatus(self: *const IDirectInputEffect, param0: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetEffectStatus(self, param0);
+    }
+    pub fn Download(self: *const IDirectInputEffect) callconv(.@"inline") HRESULT {
+        return self.vtable.Download(self);
+    }
+    pub fn Unload(self: *const IDirectInputEffect) callconv(.@"inline") HRESULT {
+        return self.vtable.Unload(self);
+    }
+    pub fn Escape(self: *const IDirectInputEffect, param0: ?*DIEFFESCAPE) callconv(.@"inline") HRESULT {
+        return self.vtable.Escape(self, param0);
+    }
 };
 
 pub const DIDATAFORMAT = extern struct {
@@ -1203,22 +983,16 @@ pub const DICOLORSET = extern struct {
     cAreaFill: u32,
 };
 
-pub const LPDIENUMDEVICEOBJECTSCALLBACKW = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: ?*DIDEVICEOBJECTINSTANCEW,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-    else => *const fn (
-        param0: ?*DIDEVICEOBJECTINSTANCEW,
-        param1: ?*anyopaque,
-    ) callconv(@import("std").os.windows.WINAPI) BOOL,
-};
+pub const LPDIENUMDEVICEOBJECTSCALLBACKW = *const fn (
+    param0: ?*DIDEVICEOBJECTINSTANCEW,
+    param1: ?*anyopaque,
+) callconv(WINAPI) BOOL;
 
 pub const IDI_APPLICATION: [*:0]align(1) const u16 = @ptrFromInt(32512);
 pub extern "user32" fn LoadIconW(
     hInstance: ?HINSTANCE,
     lpIconName: ?[*:0]align(1) const u16,
-) callconv(@import("std").os.windows.WINAPI) ?HICON;
+) callconv(WINAPI) ?HICON;
 
 pub const IDC_ARROW: [*:0]align(1) const u16 = @ptrFromInt(32512);
 pub const IDC_HAND = 32649;
@@ -1237,7 +1011,7 @@ pub const IDC_NO = 32648;
 pub extern "user32" fn LoadCursorW(
     hInstance: ?HINSTANCE,
     lpCursorName: ?[*:0]align(1) const u16,
-) callconv(@import("std").os.windows.WINAPI) ?HCURSOR;
+) callconv(WINAPI) ?HCURSOR;
 
 pub const WNDCLASSW = extern struct {
     style: WNDCLASS_STYLES,
@@ -1303,25 +1077,17 @@ pub const CS_GLOBALCLASS = WNDCLASS_STYLES{ .GLOBALCLASS = 1 };
 pub const CS_IME = WNDCLASS_STYLES{ .IME = 1 };
 pub const CS_DROPSHADOW = WNDCLASS_STYLES{ .DROPSHADOW = 1 };
 
-pub const WNDPROC = switch (@import("builtin").zig_backend) {
-    .stage1 => fn (
-        param0: HWND,
-        param1: u32,
-        param2: WPARAM,
-        param3: LPARAM,
-    ) callconv(@import("std").os.windows.WINAPI) LRESULT,
-    else => *const fn (
-        param0: HWND,
-        param1: u32,
-        param2: WPARAM,
-        param3: LPARAM,
-    ) callconv(@import("std").os.windows.WINAPI) LRESULT,
-};
+pub const WNDPROC = *const fn (
+    param0: HWND,
+    param1: u32,
+    param2: WPARAM,
+    param3: LPARAM,
+) callconv(WINAPI) LRESULT;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn RegisterClassW(
     lpWndClass: ?*const WNDCLASSW,
-) callconv(@import("std").os.windows.WINAPI) u16;
+) callconv(WINAPI) u16;
 
 pub const WINDOW_EX_STYLE = packed struct(u32) {
     DLGMODALFRAME: u1 = 0,
@@ -1406,17 +1172,17 @@ pub extern "user32" fn CreateWindowExW(
     hMenu: ?HMENU,
     hInstance: ?HINSTANCE,
     lpParam: ?*anyopaque,
-) callconv(@import("std").os.windows.WINAPI) ?HWND;
+) callconv(WINAPI) ?HWND;
 
 pub extern "user32" fn ShowCursor(
     bShow: BOOL,
-) callconv(@import("std").os.windows.WINAPI) i32;
+) callconv(WINAPI) i32;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn ShowWindow(
     hWnd: ?HWND,
     nCmdShow: SHOW_WINDOW_CMD,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub const WINDOW_STYLE = packed struct(u32) {
     ACTIVECAPTION: u1 = 0,
@@ -1611,7 +1377,7 @@ pub extern "user32" fn DefWindowProcW(
     Msg: u32,
     wParam: WPARAM,
     lParam: LPARAM,
-) callconv(@import("std").os.windows.WINAPI) LRESULT;
+) callconv(WINAPI) LRESULT;
 
 pub const MINMAXINFO = extern struct {
     ptReserved: POINT,
@@ -2327,35 +2093,35 @@ pub const VK_OEM_CLEAR = VIRTUAL_KEY.OEM_CLEAR;
 // Keyboard and mouse
 // ---------------------------
 // TODO: this type is limited to platform 'windows5.0'
-pub extern "user32" fn GetFocus() callconv(@import("std").os.windows.WINAPI) ?HWND;
+pub extern "user32" fn GetFocus() callconv(WINAPI) ?HWND;
 
 // TODO: this type is limited to platform 'windows5.0'
-pub extern "user32" fn GetKBCodePage() callconv(@import("std").os.windows.WINAPI) u32;
+pub extern "user32" fn GetKBCodePage() callconv(WINAPI) u32;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetKeyState(
     nVirtKey: i32,
-) callconv(@import("std").os.windows.WINAPI) i16;
+) callconv(WINAPI) i16;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetAsyncKeyState(
     vKey: i32,
-) callconv(@import("std").os.windows.WINAPI) i16;
+) callconv(WINAPI) i16;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetKeyboardState(
     lpKeyState: *[256]u8,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
-pub extern "user32" fn GetCapture() callconv(@import("std").os.windows.WINAPI) ?HWND;
+pub extern "user32" fn GetCapture() callconv(WINAPI) ?HWND;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn SetCapture(
     hWnd: ?HWND,
-) callconv(@import("std").os.windows.WINAPI) ?HWND;
+) callconv(WINAPI) ?HWND;
 
 // TODO: this type is limited to platform 'windows5.0'
-pub extern "user32" fn ReleaseCapture() callconv(@import("std").os.windows.WINAPI) BOOL;
+pub extern "user32" fn ReleaseCapture() callconv(WINAPI) BOOL;
 
 // --------------------------
 //  GDI
@@ -2365,7 +2131,7 @@ pub const MONITORENUMPROC = *const fn (
     param1: ?HDC,
     param2: ?*RECT,
     param3: LPARAM,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub const MONITORINFO = extern struct {
     cbSize: u32,
@@ -2387,31 +2153,31 @@ pub const MONITOR_DEFAULTTOPRIMARY = MONITOR_FROM_FLAGS.PRIMARY;
 pub extern "user32" fn MonitorFromPoint(
     pt: POINT,
     dwFlags: MONITOR_FROM_FLAGS,
-) callconv(@import("std").os.windows.WINAPI) ?HMONITOR;
+) callconv(WINAPI) ?HMONITOR;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn MonitorFromRect(
     lprc: ?*RECT,
     dwFlags: MONITOR_FROM_FLAGS,
-) callconv(@import("std").os.windows.WINAPI) ?HMONITOR;
+) callconv(WINAPI) ?HMONITOR;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn MonitorFromWindow(
     hwnd: ?HWND,
     dwFlags: MONITOR_FROM_FLAGS,
-) callconv(@import("std").os.windows.WINAPI) ?HMONITOR;
+) callconv(WINAPI) ?HMONITOR;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetMonitorInfoA(
     hMonitor: ?HMONITOR,
     lpmi: ?*MONITORINFO,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn GetMonitorInfoW(
     hMonitor: ?HMONITOR,
     lpmi: ?*MONITORINFO,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 // TODO: this type is limited to platform 'windows5.0'
 pub extern "user32" fn EnumDisplayMonitors(
@@ -2419,7 +2185,7 @@ pub extern "user32" fn EnumDisplayMonitors(
     lprcClip: ?*RECT,
     lpfnEnum: ?MONITORENUMPROC,
     dwData: LPARAM,
-) callconv(@import("std").os.windows.WINAPI) BOOL;
+) callconv(WINAPI) BOOL;
 
 pub const PROPERTYKEY = extern struct {
     fmtid: Guid,
@@ -2528,7 +2294,7 @@ pub const STATSTG = extern struct {
     grfStateBits: u32,
     reserved: u32,
 };
-pub const IStream = extern struct {
+pub const IStream = extern union {
     pub const VTable = extern struct {
         base: ISequentialStream.VTable,
         Seek: *const fn (
@@ -2578,6 +2344,7 @@ pub const IStream = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    ISequentialStream: ISequentialStream,
 };
 pub const COINIT = u32;
 pub const COINIT_MULTITHREADED = 0x0;
@@ -2616,7 +2383,7 @@ pub extern "kernel32" fn GetProcAddress(
 ) callconv(WINAPI) ?*const fn () callconv(WINAPI) isize;
 pub extern "kernel32" fn ExitProcess(
     uExitCode: u32,
-) callconv(@import("std").os.windows.WINAPI) noreturn;
+) callconv(WINAPI) noreturn;
 
 pub const INFINITE = 4294967295;
 pub const SECURITY_ATTRIBUTES = extern struct {
@@ -2624,7 +2391,7 @@ pub const SECURITY_ATTRIBUTES = extern struct {
     lpSecurityDescriptor: ?*anyopaque,
     bInheritHandle: BOOL,
 };
-pub const ISequentialStream = extern struct {
+pub const ISequentialStream = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         Read: *const fn (
@@ -2641,6 +2408,7 @@ pub const ISequentialStream = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
 pub const CY = extern union {
     anon: extern struct {
@@ -2817,7 +2585,7 @@ pub const VARIANT = extern struct {
         decVal: DECIMAL,
     },
 };
-pub const IRecordInfo = extern struct {
+pub const IRecordInfo = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         RecordInit: *const fn (
@@ -2899,6 +2667,7 @@ pub const IRecordInfo = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
 pub const PARAMDESCEX = extern struct {
     cBytes: u32,
@@ -3022,7 +2791,7 @@ pub const VARKIND = enum(i32) {
     CONST = 2,
     DISPATCH = 3,
 };
-pub const ITypeComp = extern struct {
+pub const ITypeComp = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         Bind: *const fn (
@@ -3043,6 +2812,7 @@ pub const ITypeComp = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
 pub const DISPPARAMS = extern struct {
     rgvarg: ?*VARIANT,
@@ -3064,7 +2834,7 @@ pub const EXCEPINFO = extern struct {
 pub const LPEXCEPFINO_DEFERRED_FILLIN = *const fn (
     pExcepInfo: ?*EXCEPINFO,
 ) callconv(WINAPI) HRESULT;
-pub const ITypeInfo = extern struct {
+pub const ITypeInfo = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetTypeAttr: *const fn (
@@ -3175,6 +2945,7 @@ pub const ITypeInfo = extern struct {
         ) callconv(WINAPI) void,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
 pub const SYSKIND = enum(i32) {
     WIN16 = 0,
@@ -3190,7 +2961,7 @@ pub const TLIBATTR = extern struct {
     wMinorVerNum: u16,
     wLibFlags: u16,
 };
-pub const ITypeLib = extern struct {
+pub const ITypeLib = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetTypeInfoCount: *const fn (
@@ -3247,8 +3018,9 @@ pub const ITypeLib = extern struct {
         ) callconv(WINAPI) void,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
-pub const IDispatch = extern struct {
+pub const IDispatch = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetTypeInfoCount: *const fn (
@@ -3282,8 +3054,9 @@ pub const IDispatch = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
-pub const IEnumSTATSTG = extern struct {
+pub const IEnumSTATSTG = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         Next: *const fn (
@@ -3305,8 +3078,9 @@ pub const IEnumSTATSTG = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
-pub const IStorage = extern struct {
+pub const IStorage = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         CreateStream: *const fn (
@@ -3402,6 +3176,7 @@ pub const IStorage = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
+    IUnknown: IUnknown,
 };
 pub const PROPVARIANT = extern struct {
     anon: extern union {
@@ -3529,7 +3304,7 @@ pub const AUDCLNT_SHAREMODE = enum(i32) {
     EXCLUSIVE = 1,
 };
 pub const IID_IAudioClient = &Guid.initString("1cb9ad4c-dbfa-4c32-b178-c2f568a703b2");
-pub const IAudioClient = extern struct {
+pub const IAudioClient = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         Initialize: *const fn (
@@ -3588,48 +3363,43 @@ pub const IAudioClient = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn Initialize(self: *const T, ShareMode: AUDCLNT_SHAREMODE, StreamFlags: u32, hnsBufferDuration: i64, hnsPeriodicity: i64, pFormat: ?*const WAVEFORMATEX, AudioSessionGuid: ?*const Guid) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).Initialize(@as(*const IAudioClient, @ptrCast(self)), ShareMode, StreamFlags, hnsBufferDuration, hnsPeriodicity, pFormat, AudioSessionGuid);
-            }
-            pub inline fn GetBufferSize(self: *const T, pNumBufferFrames: ?*u32) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).GetBufferSize(@as(*const IAudioClient, @ptrCast(self)), pNumBufferFrames);
-            }
-            pub inline fn GetStreamLatency(self: *const T, phnsLatency: ?*i64) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).GetStreamLatency(@as(*const IAudioClient, @ptrCast(self)), phnsLatency);
-            }
-            pub inline fn GetCurrentPadding(self: *const T, pNumPaddingFrames: ?*u32) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).GetCurrentPadding(@as(*const IAudioClient, @ptrCast(self)), pNumPaddingFrames);
-            }
-            pub inline fn IsFormatSupported(self: *const T, ShareMode: AUDCLNT_SHAREMODE, pFormat: ?*const WAVEFORMATEX, ppClosestMatch: ?*?*WAVEFORMATEX) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).IsFormatSupported(@as(*const IAudioClient, @ptrCast(self)), ShareMode, pFormat, ppClosestMatch);
-            }
-            pub inline fn GetMixFormat(self: *const T, ppDeviceFormat: ?*?*WAVEFORMATEX) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).GetMixFormat(@as(*const IAudioClient, @ptrCast(self)), ppDeviceFormat);
-            }
-            pub inline fn GetDevicePeriod(self: *const T, phnsDefaultDevicePeriod: ?*i64, phnsMinimumDevicePeriod: ?*i64) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).GetDevicePeriod(@as(*const IAudioClient, @ptrCast(self)), phnsDefaultDevicePeriod, phnsMinimumDevicePeriod);
-            }
-            pub inline fn Start(self: *const T) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).Start(@as(*const IAudioClient, @ptrCast(self)));
-            }
-            pub inline fn Stop(self: *const T) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).Stop(@as(*const IAudioClient, @ptrCast(self)));
-            }
-            pub inline fn Reset(self: *const T) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).Reset(@as(*const IAudioClient, @ptrCast(self)));
-            }
-            pub inline fn SetEventHandle(self: *const T, eventHandle: ?*anyopaque) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).SetEventHandle(@as(*const IAudioClient, @ptrCast(self)), eventHandle);
-            }
-            pub inline fn GetService(self: *const T, riid: ?*const Guid, ppv: ?*?*anyopaque) HRESULT {
-                return @as(*const IAudioClient.VTable, @ptrCast(self.vtable)).GetService(@as(*const IAudioClient, @ptrCast(self)), riid, ppv);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn Initialize(self: *const IAudioClient, ShareMode: AUDCLNT_SHAREMODE, StreamFlags: u32, hnsBufferDuration: i64, hnsPeriodicity: i64, pFormat: ?*const WAVEFORMATEX, AudioSessionGuid: ?*const Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.Initialize(self, ShareMode, StreamFlags, hnsBufferDuration, hnsPeriodicity, pFormat, AudioSessionGuid);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn GetBufferSize(self: *const IAudioClient, pNumBufferFrames: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetBufferSize(self, pNumBufferFrames);
+    }
+    pub fn GetStreamLatency(self: *const IAudioClient, phnsLatency: ?*i64) callconv(.@"inline") HRESULT {
+        return self.vtable.GetStreamLatency(self, phnsLatency);
+    }
+    pub fn GetCurrentPadding(self: *const IAudioClient, pNumPaddingFrames: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetCurrentPadding(self, pNumPaddingFrames);
+    }
+    pub fn IsFormatSupported(self: *const IAudioClient, ShareMode: AUDCLNT_SHAREMODE, pFormat: ?*const WAVEFORMATEX, ppClosestMatch: ?*?*WAVEFORMATEX) callconv(.@"inline") HRESULT {
+        return self.vtable.IsFormatSupported(self, ShareMode, pFormat, ppClosestMatch);
+    }
+    pub fn GetMixFormat(self: *const IAudioClient, ppDeviceFormat: ?*?*WAVEFORMATEX) callconv(.@"inline") HRESULT {
+        return self.vtable.GetMixFormat(self, ppDeviceFormat);
+    }
+    pub fn GetDevicePeriod(self: *const IAudioClient, phnsDefaultDevicePeriod: ?*i64, phnsMinimumDevicePeriod: ?*i64) callconv(.@"inline") HRESULT {
+        return self.vtable.GetDevicePeriod(self, phnsDefaultDevicePeriod, phnsMinimumDevicePeriod);
+    }
+    pub fn Start(self: *const IAudioClient) callconv(.@"inline") HRESULT {
+        return self.vtable.Start(self);
+    }
+    pub fn Stop(self: *const IAudioClient) callconv(.@"inline") HRESULT {
+        return self.vtable.Stop(self);
+    }
+    pub fn Reset(self: *const IAudioClient) callconv(.@"inline") HRESULT {
+        return self.vtable.Reset(self);
+    }
+    pub fn SetEventHandle(self: *const IAudioClient, eventHandle: ?*anyopaque) callconv(.@"inline") HRESULT {
+        return self.vtable.SetEventHandle(self, eventHandle);
+    }
+    pub fn GetService(self: *const IAudioClient, riid: ?*const Guid, ppv: ?*?*anyopaque) callconv(.@"inline") HRESULT {
+        return self.vtable.GetService(self, riid, ppv);
+    }
 };
 pub const AUDCLNT_STREAMOPTIONS = enum(u32) {
     NONE = 0,
@@ -3660,7 +3430,7 @@ pub const AUDIO_STREAM_CATEGORY = enum(i32) {
     VoiceTyping = 14,
 };
 const IID_IAudioClient2 = &Guid.initString("726778cd-f60a-4eda-82de-e47610cd78aa");
-pub const IAudioClient2 = extern struct {
+pub const IAudioClient2 = extern union {
     pub const VTable = extern struct {
         base: IAudioClient.VTable,
         IsOffloadCapable: *const fn (
@@ -3681,24 +3451,19 @@ pub const IAudioClient2 = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IAudioClient.MethodMixin(T);
-            pub inline fn IsOffloadCapable(self: *const T, Category: AUDIO_STREAM_CATEGORY, pbOffloadCapable: ?*BOOL) HRESULT {
-                return @as(*const IAudioClient2.VTable, @ptrCast(self.vtable)).IsOffloadCapable(@as(*const IAudioClient2, @ptrCast(self)), Category, pbOffloadCapable);
-            }
-            pub inline fn SetClientProperties(self: *const T, pProperties: ?*const AudioClientProperties) HRESULT {
-                return @as(*const IAudioClient2.VTable, @ptrCast(self.vtable)).SetClientProperties(@as(*const IAudioClient2, @ptrCast(self)), pProperties);
-            }
-            pub inline fn GetBufferSizeLimits(self: *const T, pFormat: ?*const WAVEFORMATEX, bEventDriven: BOOL, phnsMinBufferDuration: ?*i64, phnsMaxBufferDuration: ?*i64) HRESULT {
-                return @as(*const IAudioClient2.VTable, @ptrCast(self.vtable)).GetBufferSizeLimits(@as(*const IAudioClient2, @ptrCast(self)), pFormat, bEventDriven, phnsMinBufferDuration, phnsMaxBufferDuration);
-            }
-        };
+    IAudioClient: IAudioClient,
+    pub fn IsOffloadCapable(self: *const IAudioClient2, Category: AUDIO_STREAM_CATEGORY, pbOffloadCapable: ?*BOOL) callconv(.@"inline") HRESULT {
+        return self.vtable.IsOffloadCapable(self, Category, pbOffloadCapable);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn SetClientProperties(self: *const IAudioClient2, pProperties: ?*const AudioClientProperties) callconv(.@"inline") HRESULT {
+        return self.vtable.SetClientProperties(self, pProperties);
+    }
+    pub fn GetBufferSizeLimits(self: *const IAudioClient2, pFormat: ?*const WAVEFORMATEX, bEventDriven: BOOL, phnsMinBufferDuration: ?*i64, phnsMaxBufferDuration: ?*i64) callconv(.@"inline") HRESULT {
+        return self.vtable.GetBufferSizeLimits(self, pFormat, bEventDriven, phnsMinBufferDuration, phnsMaxBufferDuration);
+    }
 };
 pub const IID_IAudioClient3 = &Guid.initString("7ed4ee07-8e67-4cd4-8c1a-2b7a5987ad42");
-pub const IAudioClient3 = extern struct {
+pub const IAudioClient3 = extern union {
     pub const VTable = extern struct {
         base: IAudioClient2.VTable,
         GetSharedModeEnginePeriod: *const fn (
@@ -3723,25 +3488,20 @@ pub const IAudioClient3 = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IAudioClient2.MethodMixin(T);
-            pub inline fn GetSharedModeEnginePeriod(self: *const T, pFormat: ?*const WAVEFORMATEX, pDefaultPeriodInFrames: ?*u32, pFundamentalPeriodInFrames: ?*u32, pMinPeriodInFrames: ?*u32, pMaxPeriodInFrames: ?*u32) HRESULT {
-                return @as(*const IAudioClient3.VTable, @ptrCast(self.vtable)).GetSharedModeEnginePeriod(@as(*const IAudioClient3, @ptrCast(self)), pFormat, pDefaultPeriodInFrames, pFundamentalPeriodInFrames, pMinPeriodInFrames, pMaxPeriodInFrames);
-            }
-            pub inline fn GetCurrentSharedModeEnginePeriod(self: *const T, ppFormat: ?*?*WAVEFORMATEX, pCurrentPeriodInFrames: ?*u32) HRESULT {
-                return @as(*const IAudioClient3.VTable, @ptrCast(self.vtable)).GetCurrentSharedModeEnginePeriod(@as(*const IAudioClient3, @ptrCast(self)), ppFormat, pCurrentPeriodInFrames);
-            }
-            pub inline fn InitializeSharedAudioStream(self: *const T, StreamFlags: u32, PeriodInFrames: u32, pFormat: ?*const WAVEFORMATEX, AudioSessionGuid: ?*const Guid) HRESULT {
-                return @as(*const IAudioClient3.VTable, @ptrCast(self.vtable)).InitializeSharedAudioStream(@as(*const IAudioClient3, @ptrCast(self)), StreamFlags, PeriodInFrames, pFormat, AudioSessionGuid);
-            }
-        };
+    IAudioClient2: IAudioClient2,
+    pub fn GetSharedModeEnginePeriod(self: *const IAudioClient3, pFormat: ?*const WAVEFORMATEX, pDefaultPeriodInFrames: ?*u32, pFundamentalPeriodInFrames: ?*u32, pMinPeriodInFrames: ?*u32, pMaxPeriodInFrames: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetSharedModeEnginePeriod(self, pFormat, pDefaultPeriodInFrames, pFundamentalPeriodInFrames, pMinPeriodInFrames, pMaxPeriodInFrames);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn GetCurrentSharedModeEnginePeriod(self: *const IAudioClient3, ppFormat: ?*?*WAVEFORMATEX, pCurrentPeriodInFrames: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetCurrentSharedModeEnginePeriod(self, ppFormat, pCurrentPeriodInFrames);
+    }
+    pub fn InitializeSharedAudioStream(self: *const IAudioClient3, StreamFlags: u32, PeriodInFrames: u32, pFormat: ?*const WAVEFORMATEX, AudioSessionGuid: ?*const Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.InitializeSharedAudioStream(self, StreamFlags, PeriodInFrames, pFormat, AudioSessionGuid);
+    }
 };
 pub extern "ole32" fn CoTaskMemFree(pv: ?*anyopaque) callconv(WINAPI) void;
 pub const IID_IAudioRenderClient = &Guid.initString("f294acfc-3146-4483-a7bf-addca7c260e2");
-pub const IAudioRenderClient = extern struct {
+pub const IAudioRenderClient = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetBuffer: *const fn (
@@ -3756,21 +3516,16 @@ pub const IAudioRenderClient = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn GetBuffer(self: *const T, NumFramesRequested: u32, ppData: ?*?*u8) HRESULT {
-                return @as(*const IAudioRenderClient.VTable, @ptrCast(self.vtable)).GetBuffer(@as(*const IAudioRenderClient, @ptrCast(self)), NumFramesRequested, ppData);
-            }
-            pub inline fn ReleaseBuffer(self: *const T, NumFramesWritten: u32, dwFlags: u32) HRESULT {
-                return @as(*const IAudioRenderClient.VTable, @ptrCast(self.vtable)).ReleaseBuffer(@as(*const IAudioRenderClient, @ptrCast(self)), NumFramesWritten, dwFlags);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn GetBuffer(self: *const IAudioRenderClient, NumFramesRequested: u32, ppData: ?*?*u8) callconv(.@"inline") HRESULT {
+        return self.vtable.GetBuffer(self, NumFramesRequested, ppData);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn ReleaseBuffer(self: *const IAudioRenderClient, NumFramesWritten: u32, dwFlags: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.ReleaseBuffer(self, NumFramesWritten, dwFlags);
+    }
 };
 pub const IID_IAudioCaptureClient = &Guid.initString("c8adbd64-e71e-48a0-a4de-185c395cd317");
-pub const IAudioCaptureClient = extern struct {
+pub const IAudioCaptureClient = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetBuffer: *const fn (
@@ -3791,24 +3546,19 @@ pub const IAudioCaptureClient = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn GetBuffer(self: *const T, ppData: ?*?*u8, pNumFramesToRead: ?*u32, pdwFlags: ?*u32, pu64DevicePosition: ?*u64, pu64QPCPosition: ?*u64) HRESULT {
-                return @as(*const IAudioCaptureClient.VTable, @ptrCast(self.vtable)).GetBuffer(@as(*const IAudioCaptureClient, @ptrCast(self)), ppData, pNumFramesToRead, pdwFlags, pu64DevicePosition, pu64QPCPosition);
-            }
-            pub inline fn ReleaseBuffer(self: *const T, NumFramesRead: u32) HRESULT {
-                return @as(*const IAudioCaptureClient.VTable, @ptrCast(self.vtable)).ReleaseBuffer(@as(*const IAudioCaptureClient, @ptrCast(self)), NumFramesRead);
-            }
-            pub inline fn GetNextPacketSize(self: *const T, pNumFramesInNextPacket: ?*u32) HRESULT {
-                return @as(*const IAudioCaptureClient.VTable, @ptrCast(self.vtable)).GetNextPacketSize(@as(*const IAudioCaptureClient, @ptrCast(self)), pNumFramesInNextPacket);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn GetBuffer(self: *const IAudioCaptureClient, ppData: ?*?*u8, pNumFramesToRead: ?*u32, pdwFlags: ?*u32, pu64DevicePosition: ?*u64, pu64QPCPosition: ?*u64) callconv(.@"inline") HRESULT {
+        return self.vtable.GetBuffer(self, ppData, pNumFramesToRead, pdwFlags, pu64DevicePosition, pu64QPCPosition);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn ReleaseBuffer(self: *const IAudioCaptureClient, NumFramesRead: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.ReleaseBuffer(self, NumFramesRead);
+    }
+    pub fn GetNextPacketSize(self: *const IAudioCaptureClient, pNumFramesInNextPacket: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetNextPacketSize(self, pNumFramesInNextPacket);
+    }
 };
 pub const IID_ISimpleAudioVolume = &Guid.initString("87ce5498-68d6-44e5-9215-6da47ef883d8");
-pub const ISimpleAudioVolume = extern struct {
+pub const ISimpleAudioVolume = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         SetMasterVolume: *const fn (
@@ -3831,26 +3581,21 @@ pub const ISimpleAudioVolume = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn SetMasterVolume(self: *const T, fLevel: f32, EventContext: ?*const Guid) HRESULT {
-                return @as(*const ISimpleAudioVolume.VTable, @ptrCast(self.vtable)).SetMasterVolume(@as(*const ISimpleAudioVolume, @ptrCast(self)), fLevel, EventContext);
-            }
-            pub inline fn GetMasterVolume(self: *const T, pfLevel: ?*f32) HRESULT {
-                return @as(*const ISimpleAudioVolume.VTable, @ptrCast(self.vtable)).GetMasterVolume(@as(*const ISimpleAudioVolume, @ptrCast(self)), pfLevel);
-            }
-            pub inline fn SetMute(self: *const T, bMute: BOOL, EventContext: ?*const Guid) HRESULT {
-                return @as(*const ISimpleAudioVolume.VTable, @ptrCast(self.vtable)).SetMute(@as(*const ISimpleAudioVolume, @ptrCast(self)), bMute, EventContext);
-            }
-            pub inline fn GetMute(self: *const T, pbMute: ?*BOOL) HRESULT {
-                return @as(*const ISimpleAudioVolume.VTable, @ptrCast(self.vtable)).GetMute(@as(*const ISimpleAudioVolume, @ptrCast(self)), pbMute);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn SetMasterVolume(self: *const ISimpleAudioVolume, fLevel: f32, EventContext: ?*const Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.SetMasterVolume(self, fLevel, EventContext);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn GetMasterVolume(self: *const ISimpleAudioVolume, pfLevel: ?*f32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetMasterVolume(self, pfLevel);
+    }
+    pub fn SetMute(self: *const ISimpleAudioVolume, bMute: BOOL, EventContext: ?*const Guid) callconv(.@"inline") HRESULT {
+        return self.vtable.SetMute(self, bMute, EventContext);
+    }
+    pub fn GetMute(self: *const ISimpleAudioVolume, pbMute: ?*BOOL) callconv(.@"inline") HRESULT {
+        return self.vtable.GetMute(self, pbMute);
+    }
 };
-pub const IPropertyStore = extern struct {
+pub const IPropertyStore = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetCount: *const fn (
@@ -3877,30 +3622,25 @@ pub const IPropertyStore = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn GetCount(self: *const T, cProps: ?*u32) HRESULT {
-                return @as(*const IPropertyStore.VTable, @ptrCast(self.vtable)).GetCount(@as(*const IPropertyStore, @ptrCast(self)), cProps);
-            }
-            pub inline fn GetAt(self: *const T, iProp: u32, pkey: ?*PROPERTYKEY) HRESULT {
-                return @as(*const IPropertyStore.VTable, @ptrCast(self.vtable)).GetAt(@as(*const IPropertyStore, @ptrCast(self)), iProp, pkey);
-            }
-            pub inline fn GetValue(self: *const T, key: ?*const PROPERTYKEY, pv: ?*PROPVARIANT) HRESULT {
-                return @as(*const IPropertyStore.VTable, @ptrCast(self.vtable)).GetValue(@as(*const IPropertyStore, @ptrCast(self)), key, pv);
-            }
-            pub inline fn SetValue(self: *const T, key: ?*const PROPERTYKEY, propvar: ?*const PROPVARIANT) HRESULT {
-                return @as(*const IPropertyStore.VTable, @ptrCast(self.vtable)).SetValue(@as(*const IPropertyStore, @ptrCast(self)), key, propvar);
-            }
-            pub inline fn Commit(self: *const T) HRESULT {
-                return @as(*const IPropertyStore.VTable, @ptrCast(self.vtable)).Commit(@as(*const IPropertyStore, @ptrCast(self)));
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn GetCount(self: *const IPropertyStore, cProps: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetCount(self, cProps);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn GetAt(self: *const IPropertyStore, iProp: u32, pkey: ?*PROPERTYKEY) callconv(.@"inline") HRESULT {
+        return self.vtable.GetAt(self, iProp, pkey);
+    }
+    pub fn GetValue(self: *const IPropertyStore, key: ?*const PROPERTYKEY, pv: ?*PROPVARIANT) callconv(.@"inline") HRESULT {
+        return self.vtable.GetValue(self, key, pv);
+    }
+    pub fn SetValue(self: *const IPropertyStore, key: ?*const PROPERTYKEY, propvar: ?*const PROPVARIANT) callconv(.@"inline") HRESULT {
+        return self.vtable.SetValue(self, key, propvar);
+    }
+    pub fn Commit(self: *const IPropertyStore) callconv(.@"inline") HRESULT {
+        return self.vtable.Commit(self);
+    }
 };
 const IID_IMMDevice = &Guid.initString("d666063f-1587-4e43-81f1-b948e807363f");
-pub const IMMDevice = extern struct {
+pub const IMMDevice = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         Activate: *const fn (
@@ -3925,27 +3665,22 @@ pub const IMMDevice = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn Activate(self: *const T, iid: ?*const Guid, dwClsCtx: u32, pActivationParams: ?*PROPVARIANT, ppInterface: ?*?*anyopaque) HRESULT {
-                return @as(*const IMMDevice.VTable, @ptrCast(self.vtable)).Activate(@as(*const IMMDevice, @ptrCast(self)), iid, dwClsCtx, pActivationParams, ppInterface);
-            }
-            pub inline fn OpenPropertyStore(self: *const T, stgmAccess: u32, ppProperties: ?*?*IPropertyStore) HRESULT {
-                return @as(*const IMMDevice.VTable, @ptrCast(self.vtable)).OpenPropertyStore(@as(*const IMMDevice, @ptrCast(self)), stgmAccess, ppProperties);
-            }
-            pub inline fn GetId(self: *const T, ppstrId: ?*?PWSTR) HRESULT {
-                return @as(*const IMMDevice.VTable, @ptrCast(self.vtable)).GetId(@as(*const IMMDevice, @ptrCast(self)), ppstrId);
-            }
-            pub inline fn GetState(self: *const T, pdwState: ?*u32) HRESULT {
-                return @as(*const IMMDevice.VTable, @ptrCast(self.vtable)).GetState(@as(*const IMMDevice, @ptrCast(self)), pdwState);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn Activate(self: *const IMMDevice, iid: ?*const Guid, dwClsCtx: u32, pActivationParams: ?*PROPVARIANT, ppInterface: ?*?*anyopaque) callconv(.@"inline") HRESULT {
+        return self.vtable.Activate(self, iid, dwClsCtx, pActivationParams, ppInterface);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn OpenPropertyStore(self: *const IMMDevice, stgmAccess: u32, ppProperties: ?*?*IPropertyStore) callconv(.@"inline") HRESULT {
+        return self.vtable.OpenPropertyStore(self, stgmAccess, ppProperties);
+    }
+    pub fn GetId(self: *const IMMDevice, ppstrId: ?*?PWSTR) callconv(.@"inline") HRESULT {
+        return self.vtable.GetId(self, ppstrId);
+    }
+    pub fn GetState(self: *const IMMDevice, pdwState: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetState(self, pdwState);
+    }
 };
 pub const IID_IMMNotificationClient = &Guid.initString("7991eec9-7e89-4d85-8390-6c703cec60c0");
-pub const IMMNotificationClient = extern struct {
+pub const IMMNotificationClient = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         OnDeviceStateChanged: *const fn (
@@ -3974,30 +3709,25 @@ pub const IMMNotificationClient = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn OnDeviceStateChanged(self: *const T, pwstrDeviceId: ?[*:0]const u16, dwNewState: u32) HRESULT {
-                return @as(*const IMMNotificationClient.VTable, @ptrCast(self.vtable)).OnDeviceStateChanged(@as(*const IMMNotificationClient, @ptrCast(self)), pwstrDeviceId, dwNewState);
-            }
-            pub inline fn OnDeviceAdded(self: *const T, pwstrDeviceId: ?[*:0]const u16) HRESULT {
-                return @as(*const IMMNotificationClient.VTable, @ptrCast(self.vtable)).OnDeviceAdded(@as(*const IMMNotificationClient, @ptrCast(self)), pwstrDeviceId);
-            }
-            pub inline fn OnDeviceRemoved(self: *const T, pwstrDeviceId: ?[*:0]const u16) HRESULT {
-                return @as(*const IMMNotificationClient.VTable, @ptrCast(self.vtable)).OnDeviceRemoved(@as(*const IMMNotificationClient, @ptrCast(self)), pwstrDeviceId);
-            }
-            pub inline fn OnDefaultDeviceChanged(self: *const T, flow: DataFlow, role: Role, pwstrDefaultDeviceId: ?[*:0]const u16) HRESULT {
-                return @as(*const IMMNotificationClient.VTable, @ptrCast(self.vtable)).OnDefaultDeviceChanged(@as(*const IMMNotificationClient, @ptrCast(self)), flow, role, pwstrDefaultDeviceId);
-            }
-            pub inline fn OnPropertyValueChanged(self: *const T, pwstrDeviceId: ?[*:0]const u16, key: PROPERTYKEY) HRESULT {
-                return @as(*const IMMNotificationClient.VTable, @ptrCast(self.vtable)).OnPropertyValueChanged(@as(*const IMMNotificationClient, @ptrCast(self)), pwstrDeviceId, key);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn OnDeviceStateChanged(self: *const IMMNotificationClient, pwstrDeviceId: ?[*:0]const u16, dwNewState: u32) callconv(.@"inline") HRESULT {
+        return self.vtable.OnDeviceStateChanged(self, pwstrDeviceId, dwNewState);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn OnDeviceAdded(self: *const IMMNotificationClient, pwstrDeviceId: ?[*:0]const u16) callconv(.@"inline") HRESULT {
+        return self.vtable.OnDeviceAdded(self, pwstrDeviceId);
+    }
+    pub fn OnDeviceRemoved(self: *const IMMNotificationClient, pwstrDeviceId: ?[*:0]const u16) callconv(.@"inline") HRESULT {
+        return self.vtable.OnDeviceRemoved(self, pwstrDeviceId);
+    }
+    pub fn OnDefaultDeviceChanged(self: *const IMMNotificationClient, flow: DataFlow, role: Role, pwstrDefaultDeviceId: ?[*:0]const u16) callconv(.@"inline") HRESULT {
+        return self.vtable.OnDefaultDeviceChanged(self, flow, role, pwstrDefaultDeviceId);
+    }
+    pub fn OnPropertyValueChanged(self: *const IMMNotificationClient, pwstrDeviceId: ?[*:0]const u16, key: PROPERTYKEY) callconv(.@"inline") HRESULT {
+        return self.vtable.OnPropertyValueChanged(self, pwstrDeviceId, key);
+    }
 };
 pub const IID_IMMDeviceCollection = &Guid.initString("0bd7a1be-7a1a-44db-8397-cc5392387b5e");
-pub const IMMDeviceCollection = extern struct {
+pub const IMMDeviceCollection = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetCount: *const fn (
@@ -4011,21 +3741,16 @@ pub const IMMDeviceCollection = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn GetCount(self: *const T, pcDevices: ?*u32) HRESULT {
-                return @as(*const IMMDeviceCollection.VTable, @ptrCast(self.vtable)).GetCount(@as(*const IMMDeviceCollection, @ptrCast(self)), pcDevices);
-            }
-            pub inline fn Item(self: *const T, nDevice: u32, ppDevice: ?*?*IMMDevice) HRESULT {
-                return @as(*const IMMDeviceCollection.VTable, @ptrCast(self.vtable)).Item(@as(*const IMMDeviceCollection, @ptrCast(self)), nDevice, ppDevice);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn GetCount(self: *const IMMDeviceCollection, pcDevices: ?*u32) callconv(.@"inline") HRESULT {
+        return self.vtable.GetCount(self, pcDevices);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn Item(self: *const IMMDeviceCollection, nDevice: u32, ppDevice: ?*?*IMMDevice) callconv(.@"inline") HRESULT {
+        return self.vtable.Item(self, nDevice, ppDevice);
+    }
 };
 pub const IID_IMMDeviceEnumerator = &Guid.initString("a95664d2-9614-4f35-a746-de8db63617e6");
-pub const IMMDeviceEnumerator = extern struct {
+pub const IMMDeviceEnumerator = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         EnumAudioEndpoints: *const fn (
@@ -4055,30 +3780,25 @@ pub const IMMDeviceEnumerator = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn EnumAudioEndpoints(self: *const T, dataFlow: DataFlow, dwStateMask: u32, ppDevices: ?*?*IMMDeviceCollection) HRESULT {
-                return @as(*const IMMDeviceEnumerator.VTable, @ptrCast(self.vtable)).EnumAudioEndpoints(@as(*const IMMDeviceEnumerator, @ptrCast(self)), dataFlow, dwStateMask, ppDevices);
-            }
-            pub inline fn GetDefaultAudioEndpoint(self: *const T, dataFlow: DataFlow, role: Role, ppEndpoint: ?*?*IMMDevice) HRESULT {
-                return @as(*const IMMDeviceEnumerator.VTable, @ptrCast(self.vtable)).GetDefaultAudioEndpoint(@as(*const IMMDeviceEnumerator, @ptrCast(self)), dataFlow, role, ppEndpoint);
-            }
-            pub inline fn GetDevice(self: *const T, pwstrId: ?[*:0]const u16, ppDevice: ?*?*IMMDevice) HRESULT {
-                return @as(*const IMMDeviceEnumerator.VTable, @ptrCast(self.vtable)).GetDevice(@as(*const IMMDeviceEnumerator, @ptrCast(self)), pwstrId, ppDevice);
-            }
-            pub inline fn RegisterEndpointNotificationCallback(self: *const T, pClient: ?*IMMNotificationClient) HRESULT {
-                return @as(*const IMMDeviceEnumerator.VTable, @ptrCast(self.vtable)).RegisterEndpointNotificationCallback(@as(*const IMMDeviceEnumerator, @ptrCast(self)), pClient);
-            }
-            pub inline fn UnregisterEndpointNotificationCallback(self: *const T, pClient: ?*IMMNotificationClient) HRESULT {
-                return @as(*const IMMDeviceEnumerator.VTable, @ptrCast(self.vtable)).UnregisterEndpointNotificationCallback(@as(*const IMMDeviceEnumerator, @ptrCast(self)), pClient);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn EnumAudioEndpoints(self: *const IMMDeviceEnumerator, dataFlow: DataFlow, dwStateMask: u32, ppDevices: ?*?*IMMDeviceCollection) callconv(.@"inline") HRESULT {
+        return self.vtable.EnumAudioEndpoints(self, dataFlow, dwStateMask, ppDevices);
     }
-    pub usingnamespace MethodMixin(@This());
+    pub fn GetDefaultAudioEndpoint(self: *const IMMDeviceEnumerator, dataFlow: DataFlow, role: Role, ppEndpoint: ?*?*IMMDevice) callconv(.@"inline") HRESULT {
+        return self.vtable.GetDefaultAudioEndpoint(self, dataFlow, role, ppEndpoint);
+    }
+    pub fn GetDevice(self: *const IMMDeviceEnumerator, pwstrId: ?[*:0]const u16, ppDevice: ?*?*IMMDevice) callconv(.@"inline") HRESULT {
+        return self.vtable.GetDevice(self, pwstrId, ppDevice);
+    }
+    pub fn RegisterEndpointNotificationCallback(self: *const IMMDeviceEnumerator, pClient: ?*IMMNotificationClient) callconv(.@"inline") HRESULT {
+        return self.vtable.RegisterEndpointNotificationCallback(self, pClient);
+    }
+    pub fn UnregisterEndpointNotificationCallback(self: *const IMMDeviceEnumerator, pClient: ?*IMMNotificationClient) callconv(.@"inline") HRESULT {
+        return self.vtable.UnregisterEndpointNotificationCallback(self, pClient);
+    }
 };
 pub const IID_IMMEndpoint = &Guid.initString("1be09788-6894-4089-8586-9a2a6c265ac5");
-pub const IMMEndpoint = extern struct {
+pub const IMMEndpoint = extern union {
     pub const VTable = extern struct {
         base: IUnknown.VTable,
         GetDataFlow: *const fn (
@@ -4087,15 +3807,10 @@ pub const IMMEndpoint = extern struct {
         ) callconv(WINAPI) HRESULT,
     };
     vtable: *const VTable,
-    pub fn MethodMixin(comptime T: type) type {
-        return struct {
-            pub usingnamespace IUnknown.MethodMixin(T);
-            pub inline fn GetDataFlow(self: *const T, pDataFlow: ?*DataFlow) HRESULT {
-                return @as(*const IMMEndpoint.VTable, @ptrCast(self.vtable)).GetDataFlow(@as(*const IMMEndpoint, @ptrCast(self)), pDataFlow);
-            }
-        };
+    IUnknown: IUnknown,
+    pub fn GetDataFlow(self: *const IMMEndpoint, pDataFlow: ?*DataFlow) callconv(.@"inline") HRESULT {
+        return self.vtable.GetDataFlow(self, pDataFlow);
     }
-    pub usingnamespace MethodMixin(@This());
 };
 pub const AUDCLNT_STREAMFLAGS_CROSSPROCESS = 65536;
 pub const AUDCLNT_STREAMFLAGS_LOOPBACK = 131072;
@@ -4174,7 +3889,7 @@ pub const AUDCLNT_E_EFFECT_STATE_READ_ONLY = -2004287422;
 
 pub extern "user32" fn GetDpiForWindow(
     hwnd: ?HWND,
-) callconv(@import("std").os.windows.WINAPI) u32;
+) callconv(WINAPI) u32;
 
 pub fn dpiFromHwnd(hwnd: HWND) u32 {
     const value = GetDpiForWindow(hwnd);
@@ -4224,7 +3939,7 @@ pub const CREATESTRUCTW = extern struct {
 pub fn loword(value: anytype) u16 {
     switch (@typeInfo(@TypeOf(value))) {
         .int => |int| switch (int.signedness) {
-            .signed => return loword(@as(@Type(.{ .int = .{ .signedness = .unsigned, .bits = int.bits } }), @bitCast(value))),
+            .signed => return loword(@as(@Int(.unsigned, int.bits), @bitCast(value))),
             .unsigned => return if (int.bits <= 16) value else @intCast(0xffff & value),
         },
         else => {},
@@ -4234,7 +3949,7 @@ pub fn loword(value: anytype) u16 {
 pub fn hiword(value: anytype) u16 {
     switch (@typeInfo(@TypeOf(value))) {
         .int => |int| switch (int.signedness) {
-            .signed => return hiword(@as(@Type(.{ .int = .{ .signedness = .unsigned, .bits = int.bits } }), @bitCast(value))),
+            .signed => return hiword(@as(@Int(.unsigned, int.bits), @bitCast(value))),
             .unsigned => return @intCast(0xffff & (value >> 16)),
         },
         else => {},
