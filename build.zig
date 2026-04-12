@@ -161,9 +161,11 @@ pub fn build(b: *std.Build) !void {
             for (&sysaudio_tests) |*sysaudio_test| {
                 const test_exe = b.addExecutable(.{
                     .name = b.fmt("sysaudio-{s}", .{sysaudio_test.name}),
-                    .root_source_file = b.path(b.fmt("src/sysaudio/tests/{s}.zig", .{sysaudio_test.name})),
-                    .target = target,
-                    .optimize = optimize,
+                    .root_module = b.createModule(.{
+                        .root_source_file = b.path(b.fmt("src/sysaudio/tests/{s}.zig", .{sysaudio_test.name})),
+                        .target = target,
+                        .optimize = optimize,
+                    }),
                 });
                 test_exe.root_module.addImport("mach", module);
 
@@ -188,7 +190,7 @@ pub fn build(b: *std.Build) !void {
                 module.addImport("vulkan", vulkan_mod);
             }
         }
-        if (target.result.isDarwin()) {
+        if (target.result.os.tag.isDarwin()) {
             if (b.lazyDependency("mach_objc", .{
                 .target = target,
                 .optimize = optimize,
@@ -196,11 +198,13 @@ pub fn build(b: *std.Build) !void {
         }
         if (want_libs) {
             // TODO(build): make this 'libmach' and test the build of this in CI.
-            const lib = b.addStaticLibrary(.{
+            const lib = b.addLibrary(.{
                 .name = "mach-sysgpu",
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = optimize,
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path("src/main.zig"),
+                    .target = target,
+                    .optimize = optimize,
+                }),
             });
             var iter = module.import_table.iterator();
             while (iter.next()) |e| {
@@ -215,9 +219,11 @@ pub fn build(b: *std.Build) !void {
         // Creates a step for unit testing. This only builds the test executable
         // but does not run it.
         const unit_tests = b.addTest(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
         });
         var iter = module.import_table.iterator();
         while (iter.next()) |e| {
@@ -246,9 +252,11 @@ pub fn build(b: *std.Build) !void {
         // Documentation
         const docs_obj = b.addObject(.{
             .name = "mach",
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = .Debug,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = .Debug,
+            }),
         });
         //docs_obj.root_module.addOptions("build_options", build_options);
         const docs = docs_obj.getEmittedDocs();
@@ -284,11 +292,9 @@ fn linkSysgpu(b: *std.Build, module: *std.Build.Module) void {
 
     if (target.result.os.tag == .linux) {
         module.link_libc = true;
-        if (b.lazyDependency("opengl_headers", .{
-            .target = target,
-            .optimize = optimize,
-        })) |dep| module.linkLibrary(dep.artifact("opengl-headers"));
-    } else if (target.result.isDarwin()) {
+        if (b.lazyDependency("opengl_headers", .{})) |dep|
+            module.addSystemIncludePath(dep.path("."));
+    } else if (target.result.os.tag.isDarwin()) {
         module.linkFramework("CoreGraphics", .{});
         module.linkFramework("Foundation", .{});
         module.linkFramework("Metal", .{});
@@ -309,14 +315,10 @@ fn linkSysgpu(b: *std.Build, module: *std.Build.Module) void {
         module.linkSystemLibrary("d3dcompiler_47", .{});
         module.linkSystemLibrary("opengl32", .{});
 
-        if (b.lazyDependency("directx_headers", .{
-            .target = target,
-            .optimize = optimize,
-        })) |dep| module.linkLibrary(dep.artifact("directx-headers"));
-        if (b.lazyDependency("opengl_headers", .{
-            .target = target,
-            .optimize = optimize,
-        })) |dep| module.linkLibrary(dep.artifact("opengl-headers"));
+        if (b.lazyDependency("directx_headers", .{})) |dep|
+            module.addSystemIncludePath(dep.path("include"));
+        if (b.lazyDependency("opengl_headers", .{})) |dep|
+            module.addSystemIncludePath(dep.path("."));
     }
 }
 
@@ -334,13 +336,10 @@ fn linkCore(b: *std.Build, module: *std.Build.Module) void {
             module.addIncludePath(dep.path("wayland"));
             module.addIncludePath(dep.path("wayland-protocols"));
         }
-        if (b.lazyDependency("x11_headers", .{
-            .target = target,
-            .optimize = optimize,
-        })) |dep| {
-            module.linkLibrary(dep.artifact("x11-headers"));
+        if (b.lazyDependency("x11_headers", .{})) |dep| {
+            module.addSystemIncludePath(dep.path("."));
         }
-    } else if (target.result.isDarwin()) {
+    } else if (target.result.os.tag.isDarwin()) {
         if (target.result.os.tag == .macos) {
             module.linkFramework("AppKit", .{});
         } else {
@@ -374,13 +373,10 @@ fn linkSysaudio(b: *std.Build, module: *std.Build.Module) void {
     if (target.result.os.tag == .linux) {
         module.link_libc = true;
 
-        if (b.lazyDependency("linux_audio_headers", .{
-            .target = target,
-            .optimize = optimize,
-        })) |dep| {
-            module.linkLibrary(dep.artifact("linux-audio-headers"));
+        if (b.lazyDependency("linux_audio_headers", .{})) |dep| {
+            module.addSystemIncludePath(dep.path("."));
         }
-    } else if (target.result.isDarwin()) {
+    } else if (target.result.os.tag.isDarwin()) {
         module.linkFramework("AudioToolbox", .{});
         module.linkFramework("CoreFoundation", .{});
         module.linkFramework("CoreAudio", .{});
@@ -496,8 +492,8 @@ const SysAudioTest = struct {
 };
 
 comptime {
-    const supported_zig = std.SemanticVersion.parse("0.14.0-dev.2577+271452d22") catch unreachable;
+    const supported_zig = std.SemanticVersion.parse("0.16.0-dev.3142+5ccfeb926") catch unreachable;
     if (builtin.zig_version.order(supported_zig) != .eq) {
-        @compileError(std.fmt.comptimePrint("unsupported Zig version ({}). Required Zig version 2024.11.0-mach: https://machengine.org/docs/zig-version/", .{builtin.zig_version}));
+        @compileError(std.fmt.comptimePrint("unsupported Zig version ({}). Required Zig version 2026.4.10-mach: https://machengine.org/docs/zig-version/", .{builtin.zig_version}));
     }
 }
