@@ -36,6 +36,7 @@ const Lib = struct {
 
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libjack.so.0", "libjack.so" });
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(Lib).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);

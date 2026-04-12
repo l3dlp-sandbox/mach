@@ -64,6 +64,7 @@ const Lib = struct {
 
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libpulse.so.0", "libpulse.so" });
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(Lib).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -261,22 +262,22 @@ pub const Context = struct {
     }
 
     fn deviceInfoOp(ctx: *Context, info: anytype, mode: main.Device.Mode) !void {
-        const id = try ctx.allocator.dupeZ(u8, std.mem.span(info.*.name));
+        const id = try ctx.allocator.dupeZ(u8, std.mem.span(info[0].name));
         errdefer ctx.allocator.free(id);
-        const name = try ctx.allocator.dupeZ(u8, std.mem.span(info.*.description));
+        const name = try ctx.allocator.dupeZ(u8, std.mem.span(info[0].description));
         errdefer ctx.allocator.free(name);
 
         const device = main.Device{
             .mode = mode,
             .channels = blk: {
-                const channels = try ctx.allocator.alloc(main.ChannelPosition, info.*.channel_map.channels);
-                for (channels, 0..) |*ch, i| ch.* = try fromPAChannelPos(info.*.channel_map.map[i]);
+                const channels = try ctx.allocator.alloc(main.ChannelPosition, info[0].channel_map.channels);
+                for (channels, 0..) |*ch, i| ch.* = try fromPAChannelPos(info[0].channel_map.map[i]);
                 break :blk channels;
             },
             .formats = available_formats,
             .sample_rate = .{
-                .min = @as(u24, @intCast(info.*.sample_spec.rate)),
-                .max = @as(u24, @intCast(info.*.sample_spec.rate)),
+                .min = @as(u24, @intCast(info[0].sample_spec.rate)),
+                .max = @as(u24, @intCast(info[0].sample_spec.rate)),
             },
             .id = id,
             .name = name,
@@ -725,7 +726,7 @@ fn sinkInputInfoOp(_: ?*c.pa_context, info: [*c]const c.pa_sink_input_info, eol:
         return;
     }
 
-    player.vol = @as(f32, @floatFromInt(info.*.volume.values[0])) / @as(f32, @floatFromInt(c.PA_VOLUME_NORM));
+    player.vol = @as(f32, @floatFromInt(info[0].volume.values[0])) / @as(f32, @floatFromInt(c.PA_VOLUME_NORM));
 }
 
 fn freeDevice(allocator: std.mem.Allocator, device: main.Device) void {
