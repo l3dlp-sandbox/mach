@@ -3,11 +3,15 @@ const Air = @import("Air.zig");
 
 const indention_size = 2;
 
+const TtyConfig = struct {
+    pub fn setColor(_: TtyConfig, _: anytype, _: anytype) !void {}
+};
+
 pub fn printAir(ir: Air, writer: anytype) !void {
     var p = Printer(@TypeOf(writer)){
         .ir = ir,
         .writer = writer,
-        .tty = std.io.tty.Config{ .escape_codes = {} },
+        .tty = TtyConfig{},
     };
     const globals = ir.refToList(ir.globals_index);
     for (globals) |ref| {
@@ -19,7 +23,7 @@ fn Printer(comptime Writer: type) type {
     return struct {
         ir: Air,
         writer: Writer,
-        tty: std.io.tty.Config,
+        tty: TtyConfig,
 
         fn printInst(self: @This(), indent: u16, index: Air.InstIndex) Writer.Error!void {
             const inst = self.ir.getInst(index);

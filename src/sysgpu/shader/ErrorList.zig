@@ -54,78 +54,47 @@ pub fn createNote(
 }
 
 pub fn print(self: ErrorList, source: []const u8, file_path: ?[]const u8) !void {
-    const stderr = std.io.getStdErr();
-    var bw = std.io.bufferedWriter(stderr.writer());
-    const b = bw.writer();
-    const term = std.io.tty.detectConfig(stderr);
-
     for (self.list.items) |*err| {
         const loc_extra = err.loc.extraInfo(source);
 
         // 'file:line:column error: MSG'
-        try term.setColor(b, .bold);
-        try b.print("{?s}:{d}:{d} ", .{ file_path, loc_extra.line, loc_extra.col });
-        try term.setColor(b, .bright_red);
-        try b.writeAll("error: ");
-        try term.setColor(b, .reset);
-        try term.setColor(b, .bold);
-        try b.writeAll(err.msg);
-        try b.writeByte('\n');
+        std.debug.print("{?s}:{d}:{d} error: {s}\n", .{ file_path, loc_extra.line, loc_extra.col, err.msg });
 
-        try printCode(b, term, source, err.loc);
+        printCode(source, err.loc);
 
         // note
         if (err.note) |note| {
             if (note.loc) |note_loc| {
                 const note_loc_extra = note_loc.extraInfo(source);
-
-                try term.setColor(b, .reset);
-                try term.setColor(b, .bold);
-                try b.print("{?s}:{d}:{d} ", .{ file_path, note_loc_extra.line, note_loc_extra.col });
+                std.debug.print("{?s}:{d}:{d} ", .{ file_path, note_loc_extra.line, note_loc_extra.col });
             }
-            try term.setColor(b, .cyan);
-            try b.writeAll("note: ");
-
-            try term.setColor(b, .reset);
-            try term.setColor(b, .bold);
-            try b.writeAll(note.msg);
-            try b.writeByte('\n');
+            std.debug.print("note: {s}\n", .{note.msg});
 
             if (note.loc) |note_loc| {
-                try printCode(b, term, source, note_loc);
+                printCode(source, note_loc);
             }
         }
-
-        try term.setColor(b, .reset);
     }
-    try bw.flush();
 }
 
-fn printCode(writer: anytype, term: std.io.tty.Config, source: []const u8, loc: Token.Loc) !void {
+fn printCode(source: []const u8, loc: Token.Loc) void {
     const loc_extra = loc.extraInfo(source);
-    try term.setColor(writer, .dim);
-    try writer.print("{d} │ ", .{loc_extra.line});
-    try term.setColor(writer, .reset);
-    try writer.writeAll(source[loc_extra.line_start..loc.start]);
-    try term.setColor(writer, .green);
-    try writer.writeAll(source[loc.start..loc.end]);
-    try term.setColor(writer, .reset);
-    try writer.writeAll(source[loc.end..loc_extra.line_end]);
-    try writer.writeByte('\n');
+    std.debug.print("{d} │ {s}{s}{s}\n", .{
+        loc_extra.line,
+        source[loc_extra.line_start..loc.start],
+        source[loc.start..loc.end],
+        source[loc.end..loc_extra.line_end],
+    });
 
     // location pointer
     const line_number_len = (std.math.log10(loc_extra.line) + 1) + 3;
-    if (line_number_len > loc_extra.col) {
-        try writer.writeByteNTimes(
-            ' ',
-            line_number_len + (loc_extra.col - 1),
-        );
-    }
-    try term.setColor(writer, .bold);
-    try term.setColor(writer, .green);
-    try writer.writeByte('^');
+    const pad = if (line_number_len > loc_extra.col) line_number_len + (loc_extra.col - 1) else 0;
+    var i: usize = 0;
+    while (i < pad) : (i += 1) std.debug.print(" ", .{});
+    std.debug.print("^", .{});
     if (loc.end > loc.start) {
-        try writer.writeByteNTimes('~', loc.end - loc.start - 1);
+        var j: usize = 0;
+        while (j < loc.end - loc.start - 1) : (j += 1) std.debug.print("~", .{});
     }
-    try writer.writeByte('\n');
+    std.debug.print("\n", .{});
 }
