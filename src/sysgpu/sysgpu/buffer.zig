@@ -135,7 +135,7 @@ pub const Buffer = opaque {
         offset: usize,
         size: usize,
         context: anytype,
-        comptime callback: fn (ctx: @TypeOf(context), status: MapAsyncStatus) callconv(.Inline) void,
+        comptime callback: fn (ctx: @TypeOf(context), status: MapAsyncStatus) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {

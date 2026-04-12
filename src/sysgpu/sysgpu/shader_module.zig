@@ -51,7 +51,7 @@ pub const ShaderModule = opaque {
             ctx: @TypeOf(context),
             status: CompilationInfoRequestStatus,
             compilation_info: *const CompilationInfo,
-        ) callconv(.Inline) void,
+        ) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {

@@ -39,7 +39,7 @@ pub const Queue = opaque {
         queue: *Queue,
         signal_value: u64,
         context: anytype,
-        comptime callback: fn (ctx: @TypeOf(context), status: WorkDoneStatus) callconv(.Inline) void,
+        comptime callback: fn (ctx: @TypeOf(context), status: WorkDoneStatus) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {

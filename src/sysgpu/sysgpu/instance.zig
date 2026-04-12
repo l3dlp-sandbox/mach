@@ -32,7 +32,7 @@ pub const Instance = opaque {
             status: RequestAdapterStatus,
             adapter: ?*Adapter,
             message: ?[*:0]const u8,
-        ) callconv(.Inline) void,
+        ) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {

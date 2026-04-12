@@ -21,278 +21,278 @@ pub const Impl = blk: {
 /// Verifies that a sysgpu.Interface implementation exposes the expected function declarations.
 pub fn Interface(comptime T: type) type {
     // sysgpu.Device
-    assertDecl(T, "deviceCreateRenderPipeline", fn (device: *sysgpu.Device, descriptor: *const sysgpu.RenderPipeline.Descriptor) callconv(.Inline) *sysgpu.RenderPipeline);
-    assertDecl(T, "deviceCreateRenderPipelineAsync", fn (device: *sysgpu.Device, descriptor: *const sysgpu.RenderPipeline.Descriptor, callback: sysgpu.CreateRenderPipelineAsyncCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "deviceCreatePipelineLayout", fn (device: *sysgpu.Device, pipeline_layout_descriptor: *const sysgpu.PipelineLayout.Descriptor) callconv(.Inline) *sysgpu.PipelineLayout);
+    assertDecl(T, "deviceCreateRenderPipeline", fn (device: *sysgpu.Device, descriptor: *const sysgpu.RenderPipeline.Descriptor) callconv(.@"inline") *sysgpu.RenderPipeline);
+    assertDecl(T, "deviceCreateRenderPipelineAsync", fn (device: *sysgpu.Device, descriptor: *const sysgpu.RenderPipeline.Descriptor, callback: sysgpu.CreateRenderPipelineAsyncCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "deviceCreatePipelineLayout", fn (device: *sysgpu.Device, pipeline_layout_descriptor: *const sysgpu.PipelineLayout.Descriptor) callconv(.@"inline") *sysgpu.PipelineLayout);
 
     // sysgpu.PipelineLayout
-    assertDecl(T, "pipelineLayoutSetLabel", fn (pipeline_layout: *sysgpu.PipelineLayout, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "pipelineLayoutReference", fn (pipeline_layout: *sysgpu.PipelineLayout) callconv(.Inline) void);
-    assertDecl(T, "pipelineLayoutRelease", fn (pipeline_layout: *sysgpu.PipelineLayout) callconv(.Inline) void);
+    assertDecl(T, "pipelineLayoutSetLabel", fn (pipeline_layout: *sysgpu.PipelineLayout, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "pipelineLayoutReference", fn (pipeline_layout: *sysgpu.PipelineLayout) callconv(.@"inline") void);
+    assertDecl(T, "pipelineLayoutRelease", fn (pipeline_layout: *sysgpu.PipelineLayout) callconv(.@"inline") void);
 
     // sysgpu.RenderBundleEncoder
-    assertDecl(T, "renderBundleEncoderSetPipeline", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, pipeline: *sysgpu.RenderPipeline) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderSetBindGroup", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, group_index: u32, group: *sysgpu.BindGroup, dynamic_offset_count: usize, dynamic_offsets: ?[*]const u32) callconv(.Inline) void);
+    assertDecl(T, "renderBundleEncoderSetPipeline", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, pipeline: *sysgpu.RenderPipeline) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderSetBindGroup", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, group_index: u32, group: *sysgpu.BindGroup, dynamic_offset_count: usize, dynamic_offsets: ?[*]const u32) callconv(.@"inline") void);
 
     // sysgpu.RenderPassEncoder
-    assertDecl(T, "renderPassEncoderSetPipeline", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, pipeline: *sysgpu.RenderPipeline) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetBindGroup", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, group_index: u32, group: *sysgpu.BindGroup, dynamic_offset_count: usize, dynamic_offsets: ?[*]const u32) callconv(.Inline) void);
+    assertDecl(T, "renderPassEncoderSetPipeline", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, pipeline: *sysgpu.RenderPipeline) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetBindGroup", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, group_index: u32, group: *sysgpu.BindGroup, dynamic_offset_count: usize, dynamic_offsets: ?[*]const u32) callconv(.@"inline") void);
 
     // sysgpu.BindGroup
-    assertDecl(T, "bindGroupSetLabel", fn (bind_group: *sysgpu.BindGroup, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "bindGroupReference", fn (bind_group: *sysgpu.BindGroup) callconv(.Inline) void);
-    assertDecl(T, "bindGroupRelease", fn (bind_group: *sysgpu.BindGroup) callconv(.Inline) void);
+    assertDecl(T, "bindGroupSetLabel", fn (bind_group: *sysgpu.BindGroup, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "bindGroupReference", fn (bind_group: *sysgpu.BindGroup) callconv(.@"inline") void);
+    assertDecl(T, "bindGroupRelease", fn (bind_group: *sysgpu.BindGroup) callconv(.@"inline") void);
 
     // sysgpu.BindGroupLayout
-    assertDecl(T, "bindGroupLayoutSetLabel", fn (bind_group_layout: *sysgpu.BindGroupLayout, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "bindGroupLayoutReference", fn (bind_group_layout: *sysgpu.BindGroupLayout) callconv(.Inline) void);
-    assertDecl(T, "bindGroupLayoutRelease", fn (bind_group_layout: *sysgpu.BindGroupLayout) callconv(.Inline) void);
+    assertDecl(T, "bindGroupLayoutSetLabel", fn (bind_group_layout: *sysgpu.BindGroupLayout, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "bindGroupLayoutReference", fn (bind_group_layout: *sysgpu.BindGroupLayout) callconv(.@"inline") void);
+    assertDecl(T, "bindGroupLayoutRelease", fn (bind_group_layout: *sysgpu.BindGroupLayout) callconv(.@"inline") void);
 
     // sysgpu.RenderPipeline
-    assertDecl(T, "renderPipelineGetBindGroupLayout", fn (render_pipeline: *sysgpu.RenderPipeline, group_index: u32) callconv(.Inline) *sysgpu.BindGroupLayout);
-    assertDecl(T, "renderPipelineSetLabel", fn (render_pipeline: *sysgpu.RenderPipeline, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderPipelineReference", fn (render_pipeline: *sysgpu.RenderPipeline) callconv(.Inline) void);
-    assertDecl(T, "renderPipelineRelease", fn (render_pipeline: *sysgpu.RenderPipeline) callconv(.Inline) void);
+    assertDecl(T, "renderPipelineGetBindGroupLayout", fn (render_pipeline: *sysgpu.RenderPipeline, group_index: u32) callconv(.@"inline") *sysgpu.BindGroupLayout);
+    assertDecl(T, "renderPipelineSetLabel", fn (render_pipeline: *sysgpu.RenderPipeline, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderPipelineReference", fn (render_pipeline: *sysgpu.RenderPipeline) callconv(.@"inline") void);
+    assertDecl(T, "renderPipelineRelease", fn (render_pipeline: *sysgpu.RenderPipeline) callconv(.@"inline") void);
 
     // sysgpu.Instance
-    assertDecl(T, "createInstance", fn (descriptor: ?*const sysgpu.Instance.Descriptor) callconv(.Inline) ?*sysgpu.Instance);
+    assertDecl(T, "createInstance", fn (descriptor: ?*const sysgpu.Instance.Descriptor) callconv(.@"inline") ?*sysgpu.Instance);
 
     // sysgpu.Adapter
-    assertDecl(T, "adapterCreateDevice", fn (adapter: *sysgpu.Adapter, descriptor: ?*const sysgpu.Device.Descriptor) callconv(.Inline) ?*sysgpu.Device);
-    assertDecl(T, "adapterEnumerateFeatures", fn (adapter: *sysgpu.Adapter, features: ?[*]sysgpu.FeatureName) callconv(.Inline) usize);
-    assertDecl(T, "adapterGetInstance", fn (adapter: *sysgpu.Adapter) callconv(.Inline) *sysgpu.Instance);
-    assertDecl(T, "adapterGetLimits", fn (adapter: *sysgpu.Adapter, limits: *sysgpu.SupportedLimits) callconv(.Inline) u32);
-    assertDecl(T, "adapterGetProperties", fn (adapter: *sysgpu.Adapter, properties: *sysgpu.Adapter.Properties) callconv(.Inline) void);
-    assertDecl(T, "adapterHasFeature", fn (adapter: *sysgpu.Adapter, feature: sysgpu.FeatureName) callconv(.Inline) u32);
-    assertDecl(T, "adapterPropertiesFreeMembers", fn (value: sysgpu.Adapter.Properties) callconv(.Inline) void);
-    assertDecl(T, "adapterRequestDevice", fn (adapter: *sysgpu.Adapter, descriptor: ?*const sysgpu.Device.Descriptor, callback: sysgpu.RequestDeviceCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "adapterReference", fn (adapter: *sysgpu.Adapter) callconv(.Inline) void);
-    assertDecl(T, "adapterRelease", fn (adapter: *sysgpu.Adapter) callconv(.Inline) void);
+    assertDecl(T, "adapterCreateDevice", fn (adapter: *sysgpu.Adapter, descriptor: ?*const sysgpu.Device.Descriptor) callconv(.@"inline") ?*sysgpu.Device);
+    assertDecl(T, "adapterEnumerateFeatures", fn (adapter: *sysgpu.Adapter, features: ?[*]sysgpu.FeatureName) callconv(.@"inline") usize);
+    assertDecl(T, "adapterGetInstance", fn (adapter: *sysgpu.Adapter) callconv(.@"inline") *sysgpu.Instance);
+    assertDecl(T, "adapterGetLimits", fn (adapter: *sysgpu.Adapter, limits: *sysgpu.SupportedLimits) callconv(.@"inline") u32);
+    assertDecl(T, "adapterGetProperties", fn (adapter: *sysgpu.Adapter, properties: *sysgpu.Adapter.Properties) callconv(.@"inline") void);
+    assertDecl(T, "adapterHasFeature", fn (adapter: *sysgpu.Adapter, feature: sysgpu.FeatureName) callconv(.@"inline") u32);
+    assertDecl(T, "adapterPropertiesFreeMembers", fn (value: sysgpu.Adapter.Properties) callconv(.@"inline") void);
+    assertDecl(T, "adapterRequestDevice", fn (adapter: *sysgpu.Adapter, descriptor: ?*const sysgpu.Device.Descriptor, callback: sysgpu.RequestDeviceCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "adapterReference", fn (adapter: *sysgpu.Adapter) callconv(.@"inline") void);
+    assertDecl(T, "adapterRelease", fn (adapter: *sysgpu.Adapter) callconv(.@"inline") void);
 
     // sysgpu.Buffer
-    assertDecl(T, "bufferDestroy", fn (buffer: *sysgpu.Buffer) callconv(.Inline) void);
-    assertDecl(T, "bufferGetConstMappedRange", fn (buffer: *sysgpu.Buffer, offset: usize, size: usize) callconv(.Inline) ?*const anyopaque);
-    assertDecl(T, "bufferGetMappedRange", fn (buffer: *sysgpu.Buffer, offset: usize, size: usize) callconv(.Inline) ?*anyopaque);
-    assertDecl(T, "bufferGetSize", fn (buffer: *sysgpu.Buffer) callconv(.Inline) u64);
-    assertDecl(T, "bufferGetUsage", fn (buffer: *sysgpu.Buffer) callconv(.Inline) sysgpu.Buffer.UsageFlags);
-    assertDecl(T, "bufferMapAsync", fn (buffer: *sysgpu.Buffer, mode: sysgpu.MapModeFlags, offset: usize, size: usize, callback: sysgpu.Buffer.MapCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "bufferSetLabel", fn (buffer: *sysgpu.Buffer, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "bufferUnmap", fn (buffer: *sysgpu.Buffer) callconv(.Inline) void);
-    assertDecl(T, "bufferReference", fn (buffer: *sysgpu.Buffer) callconv(.Inline) void);
-    assertDecl(T, "bufferRelease", fn (buffer: *sysgpu.Buffer) callconv(.Inline) void);
+    assertDecl(T, "bufferDestroy", fn (buffer: *sysgpu.Buffer) callconv(.@"inline") void);
+    assertDecl(T, "bufferGetConstMappedRange", fn (buffer: *sysgpu.Buffer, offset: usize, size: usize) callconv(.@"inline") ?*const anyopaque);
+    assertDecl(T, "bufferGetMappedRange", fn (buffer: *sysgpu.Buffer, offset: usize, size: usize) callconv(.@"inline") ?*anyopaque);
+    assertDecl(T, "bufferGetSize", fn (buffer: *sysgpu.Buffer) callconv(.@"inline") u64);
+    assertDecl(T, "bufferGetUsage", fn (buffer: *sysgpu.Buffer) callconv(.@"inline") sysgpu.Buffer.UsageFlags);
+    assertDecl(T, "bufferMapAsync", fn (buffer: *sysgpu.Buffer, mode: sysgpu.MapModeFlags, offset: usize, size: usize, callback: sysgpu.Buffer.MapCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "bufferSetLabel", fn (buffer: *sysgpu.Buffer, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "bufferUnmap", fn (buffer: *sysgpu.Buffer) callconv(.@"inline") void);
+    assertDecl(T, "bufferReference", fn (buffer: *sysgpu.Buffer) callconv(.@"inline") void);
+    assertDecl(T, "bufferRelease", fn (buffer: *sysgpu.Buffer) callconv(.@"inline") void);
 
     // sysgpu.CommandBuffer
-    assertDecl(T, "commandBufferSetLabel", fn (command_buffer: *sysgpu.CommandBuffer, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "commandBufferReference", fn (command_buffer: *sysgpu.CommandBuffer) callconv(.Inline) void);
-    assertDecl(T, "commandBufferRelease", fn (command_buffer: *sysgpu.CommandBuffer) callconv(.Inline) void);
+    assertDecl(T, "commandBufferSetLabel", fn (command_buffer: *sysgpu.CommandBuffer, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "commandBufferReference", fn (command_buffer: *sysgpu.CommandBuffer) callconv(.@"inline") void);
+    assertDecl(T, "commandBufferRelease", fn (command_buffer: *sysgpu.CommandBuffer) callconv(.@"inline") void);
 
     // sysgpu.CommandEncoder
-    assertDecl(T, "commandEncoderBeginComputePass", fn (command_encoder: *sysgpu.CommandEncoder, descriptor: ?*const sysgpu.ComputePassDescriptor) callconv(.Inline) *sysgpu.ComputePassEncoder);
-    assertDecl(T, "commandEncoderBeginRenderPass", fn (command_encoder: *sysgpu.CommandEncoder, descriptor: *const sysgpu.RenderPassDescriptor) callconv(.Inline) *sysgpu.RenderPassEncoder);
-    assertDecl(T, "commandEncoderClearBuffer", fn (command_encoder: *sysgpu.CommandEncoder, buffer: *sysgpu.Buffer, offset: u64, size: u64) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderCopyBufferToBuffer", fn (command_encoder: *sysgpu.CommandEncoder, source: *sysgpu.Buffer, source_offset: u64, destination: *sysgpu.Buffer, destination_offset: u64, size: u64) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderCopyBufferToTexture", fn (command_encoder: *sysgpu.CommandEncoder, source: *const sysgpu.ImageCopyBuffer, destination: *const sysgpu.ImageCopyTexture, copy_size: *const sysgpu.Extent3D) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderCopyTextureToBuffer", fn (command_encoder: *sysgpu.CommandEncoder, source: *const sysgpu.ImageCopyTexture, destination: *const sysgpu.ImageCopyBuffer, copy_size: *const sysgpu.Extent3D) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderCopyTextureToTexture", fn (command_encoder: *sysgpu.CommandEncoder, source: *const sysgpu.ImageCopyTexture, destination: *const sysgpu.ImageCopyTexture, copy_size: *const sysgpu.Extent3D) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderFinish", fn (command_encoder: *sysgpu.CommandEncoder, descriptor: ?*const sysgpu.CommandBuffer.Descriptor) callconv(.Inline) *sysgpu.CommandBuffer);
-    assertDecl(T, "commandEncoderInjectValidationError", fn (command_encoder: *sysgpu.CommandEncoder, message: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderInsertDebugMarker", fn (command_encoder: *sysgpu.CommandEncoder, marker_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderPopDebugGroup", fn (command_encoder: *sysgpu.CommandEncoder) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderPushDebugGroup", fn (command_encoder: *sysgpu.CommandEncoder, group_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderResolveQuerySet", fn (command_encoder: *sysgpu.CommandEncoder, query_set: *sysgpu.QuerySet, first_query: u32, query_count: u32, destination: *sysgpu.Buffer, destination_offset: u64) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderSetLabel", fn (command_encoder: *sysgpu.CommandEncoder, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderWriteBuffer", fn (command_encoder: *sysgpu.CommandEncoder, buffer: *sysgpu.Buffer, buffer_offset: u64, data: [*]const u8, size: u64) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderWriteTimestamp", fn (command_encoder: *sysgpu.CommandEncoder, query_set: *sysgpu.QuerySet, query_index: u32) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderReference", fn (command_encoder: *sysgpu.CommandEncoder) callconv(.Inline) void);
-    assertDecl(T, "commandEncoderRelease", fn (command_encoder: *sysgpu.CommandEncoder) callconv(.Inline) void);
+    assertDecl(T, "commandEncoderBeginComputePass", fn (command_encoder: *sysgpu.CommandEncoder, descriptor: ?*const sysgpu.ComputePassDescriptor) callconv(.@"inline") *sysgpu.ComputePassEncoder);
+    assertDecl(T, "commandEncoderBeginRenderPass", fn (command_encoder: *sysgpu.CommandEncoder, descriptor: *const sysgpu.RenderPassDescriptor) callconv(.@"inline") *sysgpu.RenderPassEncoder);
+    assertDecl(T, "commandEncoderClearBuffer", fn (command_encoder: *sysgpu.CommandEncoder, buffer: *sysgpu.Buffer, offset: u64, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderCopyBufferToBuffer", fn (command_encoder: *sysgpu.CommandEncoder, source: *sysgpu.Buffer, source_offset: u64, destination: *sysgpu.Buffer, destination_offset: u64, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderCopyBufferToTexture", fn (command_encoder: *sysgpu.CommandEncoder, source: *const sysgpu.ImageCopyBuffer, destination: *const sysgpu.ImageCopyTexture, copy_size: *const sysgpu.Extent3D) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderCopyTextureToBuffer", fn (command_encoder: *sysgpu.CommandEncoder, source: *const sysgpu.ImageCopyTexture, destination: *const sysgpu.ImageCopyBuffer, copy_size: *const sysgpu.Extent3D) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderCopyTextureToTexture", fn (command_encoder: *sysgpu.CommandEncoder, source: *const sysgpu.ImageCopyTexture, destination: *const sysgpu.ImageCopyTexture, copy_size: *const sysgpu.Extent3D) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderFinish", fn (command_encoder: *sysgpu.CommandEncoder, descriptor: ?*const sysgpu.CommandBuffer.Descriptor) callconv(.@"inline") *sysgpu.CommandBuffer);
+    assertDecl(T, "commandEncoderInjectValidationError", fn (command_encoder: *sysgpu.CommandEncoder, message: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderInsertDebugMarker", fn (command_encoder: *sysgpu.CommandEncoder, marker_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderPopDebugGroup", fn (command_encoder: *sysgpu.CommandEncoder) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderPushDebugGroup", fn (command_encoder: *sysgpu.CommandEncoder, group_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderResolveQuerySet", fn (command_encoder: *sysgpu.CommandEncoder, query_set: *sysgpu.QuerySet, first_query: u32, query_count: u32, destination: *sysgpu.Buffer, destination_offset: u64) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderSetLabel", fn (command_encoder: *sysgpu.CommandEncoder, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderWriteBuffer", fn (command_encoder: *sysgpu.CommandEncoder, buffer: *sysgpu.Buffer, buffer_offset: u64, data: [*]const u8, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderWriteTimestamp", fn (command_encoder: *sysgpu.CommandEncoder, query_set: *sysgpu.QuerySet, query_index: u32) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderReference", fn (command_encoder: *sysgpu.CommandEncoder) callconv(.@"inline") void);
+    assertDecl(T, "commandEncoderRelease", fn (command_encoder: *sysgpu.CommandEncoder) callconv(.@"inline") void);
 
     // sysgpu.ComputePassEncoder
-    assertDecl(T, "computePassEncoderDispatchWorkgroups", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, workgroup_count_x: u32, workgroup_count_y: u32, workgroup_count_z: u32) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderDispatchWorkgroupsIndirect", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderEnd", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderInsertDebugMarker", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, marker_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderPopDebugGroup", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderPushDebugGroup", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, group_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderSetBindGroup", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, group_index: u32, group: *sysgpu.BindGroup, dynamic_offset_count: usize, dynamic_offsets: ?[*]const u32) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderSetLabel", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderSetPipeline", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, pipeline: *sysgpu.ComputePipeline) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderWriteTimestamp", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, query_set: *sysgpu.QuerySet, query_index: u32) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderReference", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.Inline) void);
-    assertDecl(T, "computePassEncoderRelease", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.Inline) void);
+    assertDecl(T, "computePassEncoderDispatchWorkgroups", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, workgroup_count_x: u32, workgroup_count_y: u32, workgroup_count_z: u32) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderDispatchWorkgroupsIndirect", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderEnd", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderInsertDebugMarker", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, marker_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderPopDebugGroup", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderPushDebugGroup", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, group_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderSetBindGroup", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, group_index: u32, group: *sysgpu.BindGroup, dynamic_offset_count: usize, dynamic_offsets: ?[*]const u32) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderSetLabel", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderSetPipeline", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, pipeline: *sysgpu.ComputePipeline) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderWriteTimestamp", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder, query_set: *sysgpu.QuerySet, query_index: u32) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderReference", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "computePassEncoderRelease", fn (compute_pass_encoder: *sysgpu.ComputePassEncoder) callconv(.@"inline") void);
 
     // sysgpu.ComputePipeline
-    assertDecl(T, "computePipelineGetBindGroupLayout", fn (compute_pipeline: *sysgpu.ComputePipeline, group_index: u32) callconv(.Inline) *sysgpu.BindGroupLayout);
-    assertDecl(T, "computePipelineSetLabel", fn (compute_pipeline: *sysgpu.ComputePipeline, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "computePipelineReference", fn (compute_pipeline: *sysgpu.ComputePipeline) callconv(.Inline) void);
-    assertDecl(T, "computePipelineRelease", fn (compute_pipeline: *sysgpu.ComputePipeline) callconv(.Inline) void);
+    assertDecl(T, "computePipelineGetBindGroupLayout", fn (compute_pipeline: *sysgpu.ComputePipeline, group_index: u32) callconv(.@"inline") *sysgpu.BindGroupLayout);
+    assertDecl(T, "computePipelineSetLabel", fn (compute_pipeline: *sysgpu.ComputePipeline, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "computePipelineReference", fn (compute_pipeline: *sysgpu.ComputePipeline) callconv(.@"inline") void);
+    assertDecl(T, "computePipelineRelease", fn (compute_pipeline: *sysgpu.ComputePipeline) callconv(.@"inline") void);
 
     // sysgpu.Device
-    assertDecl(T, "getProcAddress", fn (device: *sysgpu.Device, proc_name: [*:0]const u8) callconv(.Inline) ?sysgpu.Proc);
-    assertDecl(T, "deviceCreateBindGroup", fn (device: *sysgpu.Device, descriptor: *const sysgpu.BindGroup.Descriptor) callconv(.Inline) *sysgpu.BindGroup);
-    assertDecl(T, "deviceCreateBindGroupLayout", fn (device: *sysgpu.Device, descriptor: *const sysgpu.BindGroupLayout.Descriptor) callconv(.Inline) *sysgpu.BindGroupLayout);
-    assertDecl(T, "deviceCreateBuffer", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Buffer.Descriptor) callconv(.Inline) *sysgpu.Buffer);
-    assertDecl(T, "deviceCreateCommandEncoder", fn (device: *sysgpu.Device, descriptor: ?*const sysgpu.CommandEncoder.Descriptor) callconv(.Inline) *sysgpu.CommandEncoder);
-    assertDecl(T, "deviceCreateComputePipeline", fn (device: *sysgpu.Device, descriptor: *const sysgpu.ComputePipeline.Descriptor) callconv(.Inline) *sysgpu.ComputePipeline);
-    assertDecl(T, "deviceCreateComputePipelineAsync", fn (device: *sysgpu.Device, descriptor: *const sysgpu.ComputePipeline.Descriptor, callback: sysgpu.CreateComputePipelineAsyncCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "deviceCreateErrorBuffer", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Buffer.Descriptor) callconv(.Inline) *sysgpu.Buffer);
-    assertDecl(T, "deviceCreateErrorExternalTexture", fn (device: *sysgpu.Device) callconv(.Inline) *sysgpu.ExternalTexture);
-    assertDecl(T, "deviceCreateErrorTexture", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Texture.Descriptor) callconv(.Inline) *sysgpu.Texture);
-    assertDecl(T, "deviceCreateExternalTexture", fn (device: *sysgpu.Device, external_texture_descriptor: *const sysgpu.ExternalTexture.Descriptor) callconv(.Inline) *sysgpu.ExternalTexture);
-    assertDecl(T, "deviceCreateQuerySet", fn (device: *sysgpu.Device, descriptor: *const sysgpu.QuerySet.Descriptor) callconv(.Inline) *sysgpu.QuerySet);
-    assertDecl(T, "deviceCreateRenderBundleEncoder", fn (device: *sysgpu.Device, descriptor: *const sysgpu.RenderBundleEncoder.Descriptor) callconv(.Inline) *sysgpu.RenderBundleEncoder);
+    assertDecl(T, "getProcAddress", fn (device: *sysgpu.Device, proc_name: [*:0]const u8) callconv(.@"inline") ?sysgpu.Proc);
+    assertDecl(T, "deviceCreateBindGroup", fn (device: *sysgpu.Device, descriptor: *const sysgpu.BindGroup.Descriptor) callconv(.@"inline") *sysgpu.BindGroup);
+    assertDecl(T, "deviceCreateBindGroupLayout", fn (device: *sysgpu.Device, descriptor: *const sysgpu.BindGroupLayout.Descriptor) callconv(.@"inline") *sysgpu.BindGroupLayout);
+    assertDecl(T, "deviceCreateBuffer", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Buffer.Descriptor) callconv(.@"inline") *sysgpu.Buffer);
+    assertDecl(T, "deviceCreateCommandEncoder", fn (device: *sysgpu.Device, descriptor: ?*const sysgpu.CommandEncoder.Descriptor) callconv(.@"inline") *sysgpu.CommandEncoder);
+    assertDecl(T, "deviceCreateComputePipeline", fn (device: *sysgpu.Device, descriptor: *const sysgpu.ComputePipeline.Descriptor) callconv(.@"inline") *sysgpu.ComputePipeline);
+    assertDecl(T, "deviceCreateComputePipelineAsync", fn (device: *sysgpu.Device, descriptor: *const sysgpu.ComputePipeline.Descriptor, callback: sysgpu.CreateComputePipelineAsyncCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "deviceCreateErrorBuffer", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Buffer.Descriptor) callconv(.@"inline") *sysgpu.Buffer);
+    assertDecl(T, "deviceCreateErrorExternalTexture", fn (device: *sysgpu.Device) callconv(.@"inline") *sysgpu.ExternalTexture);
+    assertDecl(T, "deviceCreateErrorTexture", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Texture.Descriptor) callconv(.@"inline") *sysgpu.Texture);
+    assertDecl(T, "deviceCreateExternalTexture", fn (device: *sysgpu.Device, external_texture_descriptor: *const sysgpu.ExternalTexture.Descriptor) callconv(.@"inline") *sysgpu.ExternalTexture);
+    assertDecl(T, "deviceCreateQuerySet", fn (device: *sysgpu.Device, descriptor: *const sysgpu.QuerySet.Descriptor) callconv(.@"inline") *sysgpu.QuerySet);
+    assertDecl(T, "deviceCreateRenderBundleEncoder", fn (device: *sysgpu.Device, descriptor: *const sysgpu.RenderBundleEncoder.Descriptor) callconv(.@"inline") *sysgpu.RenderBundleEncoder);
     // TODO(self-hosted): this cannot be marked as inline for some reason:
     // https://github.com/ziglang/zig/issues/12545
-    assertDecl(T, "deviceCreateSampler", fn (device: *sysgpu.Device, descriptor: ?*const sysgpu.Sampler.Descriptor) callconv(.Inline) *sysgpu.Sampler);
-    assertDecl(T, "deviceCreateShaderModule", fn (device: *sysgpu.Device, descriptor: *const sysgpu.ShaderModule.Descriptor) callconv(.Inline) *sysgpu.ShaderModule);
-    assertDecl(T, "deviceCreateSwapChain", fn (device: *sysgpu.Device, surface: ?*sysgpu.Surface, descriptor: *const sysgpu.SwapChain.Descriptor) callconv(.Inline) *sysgpu.SwapChain);
-    assertDecl(T, "deviceCreateTexture", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Texture.Descriptor) callconv(.Inline) *sysgpu.Texture);
-    assertDecl(T, "deviceDestroy", fn (device: *sysgpu.Device) callconv(.Inline) void);
-    assertDecl(T, "deviceEnumerateFeatures", fn (device: *sysgpu.Device, features: ?[*]sysgpu.FeatureName) callconv(.Inline) usize);
-    assertDecl(T, "deviceGetLimits", fn (device: *sysgpu.Device, limits: *sysgpu.SupportedLimits) callconv(.Inline) u32);
-    assertDecl(T, "deviceGetQueue", fn (device: *sysgpu.Device) callconv(.Inline) *sysgpu.Queue);
-    assertDecl(T, "deviceHasFeature", fn (device: *sysgpu.Device, feature: sysgpu.FeatureName) callconv(.Inline) u32);
-    assertDecl(T, "deviceImportSharedFence", fn (device: *sysgpu.Device, descriptor: *const sysgpu.SharedFence.Descriptor) callconv(.Inline) *sysgpu.SharedFence);
-    assertDecl(T, "deviceImportSharedTextureMemory", fn (device: *sysgpu.Device, descriptor: *const sysgpu.SharedTextureMemory.Descriptor) callconv(.Inline) *sysgpu.SharedTextureMemory);
-    assertDecl(T, "deviceInjectError", fn (device: *sysgpu.Device, typ: sysgpu.ErrorType, message: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "devicePopErrorScope", fn (device: *sysgpu.Device, callback: sysgpu.ErrorCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "devicePushErrorScope", fn (device: *sysgpu.Device, filter: sysgpu.ErrorFilter) callconv(.Inline) void);
-    assertDecl(T, "deviceSetDeviceLostCallback", fn (device: *sysgpu.Device, callback: ?sysgpu.Device.LostCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "deviceSetLabel", fn (device: *sysgpu.Device, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "deviceSetLoggingCallback", fn (device: *sysgpu.Device, callback: ?sysgpu.LoggingCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "deviceSetUncapturedErrorCallback", fn (device: *sysgpu.Device, callback: ?sysgpu.ErrorCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "deviceTick", fn (device: *sysgpu.Device) callconv(.Inline) void);
-    assertDecl(T, "machDeviceWaitForCommandsToBeScheduled", fn (device: *sysgpu.Device) callconv(.Inline) void);
-    assertDecl(T, "deviceReference", fn (device: *sysgpu.Device) callconv(.Inline) void);
-    assertDecl(T, "deviceRelease", fn (device: *sysgpu.Device) callconv(.Inline) void);
+    assertDecl(T, "deviceCreateSampler", fn (device: *sysgpu.Device, descriptor: ?*const sysgpu.Sampler.Descriptor) callconv(.@"inline") *sysgpu.Sampler);
+    assertDecl(T, "deviceCreateShaderModule", fn (device: *sysgpu.Device, descriptor: *const sysgpu.ShaderModule.Descriptor) callconv(.@"inline") *sysgpu.ShaderModule);
+    assertDecl(T, "deviceCreateSwapChain", fn (device: *sysgpu.Device, surface: ?*sysgpu.Surface, descriptor: *const sysgpu.SwapChain.Descriptor) callconv(.@"inline") *sysgpu.SwapChain);
+    assertDecl(T, "deviceCreateTexture", fn (device: *sysgpu.Device, descriptor: *const sysgpu.Texture.Descriptor) callconv(.@"inline") *sysgpu.Texture);
+    assertDecl(T, "deviceDestroy", fn (device: *sysgpu.Device) callconv(.@"inline") void);
+    assertDecl(T, "deviceEnumerateFeatures", fn (device: *sysgpu.Device, features: ?[*]sysgpu.FeatureName) callconv(.@"inline") usize);
+    assertDecl(T, "deviceGetLimits", fn (device: *sysgpu.Device, limits: *sysgpu.SupportedLimits) callconv(.@"inline") u32);
+    assertDecl(T, "deviceGetQueue", fn (device: *sysgpu.Device) callconv(.@"inline") *sysgpu.Queue);
+    assertDecl(T, "deviceHasFeature", fn (device: *sysgpu.Device, feature: sysgpu.FeatureName) callconv(.@"inline") u32);
+    assertDecl(T, "deviceImportSharedFence", fn (device: *sysgpu.Device, descriptor: *const sysgpu.SharedFence.Descriptor) callconv(.@"inline") *sysgpu.SharedFence);
+    assertDecl(T, "deviceImportSharedTextureMemory", fn (device: *sysgpu.Device, descriptor: *const sysgpu.SharedTextureMemory.Descriptor) callconv(.@"inline") *sysgpu.SharedTextureMemory);
+    assertDecl(T, "deviceInjectError", fn (device: *sysgpu.Device, typ: sysgpu.ErrorType, message: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "devicePopErrorScope", fn (device: *sysgpu.Device, callback: sysgpu.ErrorCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "devicePushErrorScope", fn (device: *sysgpu.Device, filter: sysgpu.ErrorFilter) callconv(.@"inline") void);
+    assertDecl(T, "deviceSetDeviceLostCallback", fn (device: *sysgpu.Device, callback: ?sysgpu.Device.LostCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "deviceSetLabel", fn (device: *sysgpu.Device, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "deviceSetLoggingCallback", fn (device: *sysgpu.Device, callback: ?sysgpu.LoggingCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "deviceSetUncapturedErrorCallback", fn (device: *sysgpu.Device, callback: ?sysgpu.ErrorCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "deviceTick", fn (device: *sysgpu.Device) callconv(.@"inline") void);
+    assertDecl(T, "machDeviceWaitForCommandsToBeScheduled", fn (device: *sysgpu.Device) callconv(.@"inline") void);
+    assertDecl(T, "deviceReference", fn (device: *sysgpu.Device) callconv(.@"inline") void);
+    assertDecl(T, "deviceRelease", fn (device: *sysgpu.Device) callconv(.@"inline") void);
 
     // sysgpu.ExternalTexture
-    assertDecl(T, "externalTextureDestroy", fn (external_texture: *sysgpu.ExternalTexture) callconv(.Inline) void);
-    assertDecl(T, "externalTextureSetLabel", fn (external_texture: *sysgpu.ExternalTexture, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "externalTextureReference", fn (external_texture: *sysgpu.ExternalTexture) callconv(.Inline) void);
-    assertDecl(T, "externalTextureRelease", fn (external_texture: *sysgpu.ExternalTexture) callconv(.Inline) void);
+    assertDecl(T, "externalTextureDestroy", fn (external_texture: *sysgpu.ExternalTexture) callconv(.@"inline") void);
+    assertDecl(T, "externalTextureSetLabel", fn (external_texture: *sysgpu.ExternalTexture, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "externalTextureReference", fn (external_texture: *sysgpu.ExternalTexture) callconv(.@"inline") void);
+    assertDecl(T, "externalTextureRelease", fn (external_texture: *sysgpu.ExternalTexture) callconv(.@"inline") void);
 
     // sysgpu.Instance
-    assertDecl(T, "instanceCreateSurface", fn (instance: *sysgpu.Instance, descriptor: *const sysgpu.Surface.Descriptor) callconv(.Inline) *sysgpu.Surface);
-    assertDecl(T, "instanceProcessEvents", fn (instance: *sysgpu.Instance) callconv(.Inline) void);
-    assertDecl(T, "instanceRequestAdapter", fn (instance: *sysgpu.Instance, options: ?*const sysgpu.RequestAdapterOptions, callback: sysgpu.RequestAdapterCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "instanceReference", fn (instance: *sysgpu.Instance) callconv(.Inline) void);
-    assertDecl(T, "instanceRelease", fn (instance: *sysgpu.Instance) callconv(.Inline) void);
+    assertDecl(T, "instanceCreateSurface", fn (instance: *sysgpu.Instance, descriptor: *const sysgpu.Surface.Descriptor) callconv(.@"inline") *sysgpu.Surface);
+    assertDecl(T, "instanceProcessEvents", fn (instance: *sysgpu.Instance) callconv(.@"inline") void);
+    assertDecl(T, "instanceRequestAdapter", fn (instance: *sysgpu.Instance, options: ?*const sysgpu.RequestAdapterOptions, callback: sysgpu.RequestAdapterCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "instanceReference", fn (instance: *sysgpu.Instance) callconv(.@"inline") void);
+    assertDecl(T, "instanceRelease", fn (instance: *sysgpu.Instance) callconv(.@"inline") void);
 
     // sysgpu.QuerySet
-    assertDecl(T, "querySetDestroy", fn (query_set: *sysgpu.QuerySet) callconv(.Inline) void);
-    assertDecl(T, "querySetGetCount", fn (query_set: *sysgpu.QuerySet) callconv(.Inline) u32);
-    assertDecl(T, "querySetGetType", fn (query_set: *sysgpu.QuerySet) callconv(.Inline) sysgpu.QueryType);
-    assertDecl(T, "querySetSetLabel", fn (query_set: *sysgpu.QuerySet, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "querySetReference", fn (query_set: *sysgpu.QuerySet) callconv(.Inline) void);
-    assertDecl(T, "querySetRelease", fn (query_set: *sysgpu.QuerySet) callconv(.Inline) void);
+    assertDecl(T, "querySetDestroy", fn (query_set: *sysgpu.QuerySet) callconv(.@"inline") void);
+    assertDecl(T, "querySetGetCount", fn (query_set: *sysgpu.QuerySet) callconv(.@"inline") u32);
+    assertDecl(T, "querySetGetType", fn (query_set: *sysgpu.QuerySet) callconv(.@"inline") sysgpu.QueryType);
+    assertDecl(T, "querySetSetLabel", fn (query_set: *sysgpu.QuerySet, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "querySetReference", fn (query_set: *sysgpu.QuerySet) callconv(.@"inline") void);
+    assertDecl(T, "querySetRelease", fn (query_set: *sysgpu.QuerySet) callconv(.@"inline") void);
 
     // sysgpu.Queue
-    assertDecl(T, "queueCopyTextureForBrowser", fn (queue: *sysgpu.Queue, source: *const sysgpu.ImageCopyTexture, destination: *const sysgpu.ImageCopyTexture, copy_size: *const sysgpu.Extent3D, options: *const sysgpu.CopyTextureForBrowserOptions) callconv(.Inline) void);
-    assertDecl(T, "queueOnSubmittedWorkDone", fn (queue: *sysgpu.Queue, signal_value: u64, callback: sysgpu.Queue.WorkDoneCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "queueSetLabel", fn (queue: *sysgpu.Queue, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "queueSubmit", fn (queue: *sysgpu.Queue, command_count: usize, commands: [*]const *const sysgpu.CommandBuffer) callconv(.Inline) void);
-    assertDecl(T, "queueWriteBuffer", fn (queue: *sysgpu.Queue, buffer: *sysgpu.Buffer, buffer_offset: u64, data: *const anyopaque, size: usize) callconv(.Inline) void);
-    assertDecl(T, "queueWriteTexture", fn (queue: *sysgpu.Queue, destination: *const sysgpu.ImageCopyTexture, data: *const anyopaque, data_size: usize, data_layout: *const sysgpu.Texture.DataLayout, write_size: *const sysgpu.Extent3D) callconv(.Inline) void);
-    assertDecl(T, "queueReference", fn (queue: *sysgpu.Queue) callconv(.Inline) void);
-    assertDecl(T, "queueRelease", fn (queue: *sysgpu.Queue) callconv(.Inline) void);
+    assertDecl(T, "queueCopyTextureForBrowser", fn (queue: *sysgpu.Queue, source: *const sysgpu.ImageCopyTexture, destination: *const sysgpu.ImageCopyTexture, copy_size: *const sysgpu.Extent3D, options: *const sysgpu.CopyTextureForBrowserOptions) callconv(.@"inline") void);
+    assertDecl(T, "queueOnSubmittedWorkDone", fn (queue: *sysgpu.Queue, signal_value: u64, callback: sysgpu.Queue.WorkDoneCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "queueSetLabel", fn (queue: *sysgpu.Queue, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "queueSubmit", fn (queue: *sysgpu.Queue, command_count: usize, commands: [*]const *const sysgpu.CommandBuffer) callconv(.@"inline") void);
+    assertDecl(T, "queueWriteBuffer", fn (queue: *sysgpu.Queue, buffer: *sysgpu.Buffer, buffer_offset: u64, data: *const anyopaque, size: usize) callconv(.@"inline") void);
+    assertDecl(T, "queueWriteTexture", fn (queue: *sysgpu.Queue, destination: *const sysgpu.ImageCopyTexture, data: *const anyopaque, data_size: usize, data_layout: *const sysgpu.Texture.DataLayout, write_size: *const sysgpu.Extent3D) callconv(.@"inline") void);
+    assertDecl(T, "queueReference", fn (queue: *sysgpu.Queue) callconv(.@"inline") void);
+    assertDecl(T, "queueRelease", fn (queue: *sysgpu.Queue) callconv(.@"inline") void);
 
     // sysgpu.RenderBundle
-    assertDecl(T, "renderBundleSetLabel", fn (render_bundle: *sysgpu.RenderBundle, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderBundleReference", fn (render_bundle: *sysgpu.RenderBundle) callconv(.Inline) void);
-    assertDecl(T, "renderBundleRelease", fn (render_bundle: *sysgpu.RenderBundle) callconv(.Inline) void);
+    assertDecl(T, "renderBundleSetLabel", fn (render_bundle: *sysgpu.RenderBundle, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleReference", fn (render_bundle: *sysgpu.RenderBundle) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleRelease", fn (render_bundle: *sysgpu.RenderBundle) callconv(.@"inline") void);
 
     // sysgpu.RenderBundleEncoder
-    assertDecl(T, "renderBundleEncoderDraw", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderDrawIndexed", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, index_count: u32, instance_count: u32, first_index: u32, base_vertex: i32, first_instance: u32) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderDrawIndexedIndirect", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderDrawIndirect", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderFinish", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, descriptor: ?*const sysgpu.RenderBundle.Descriptor) callconv(.Inline) *sysgpu.RenderBundle);
-    assertDecl(T, "renderBundleEncoderInsertDebugMarker", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, marker_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderPopDebugGroup", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderPushDebugGroup", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, group_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderSetIndexBuffer", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, buffer: *sysgpu.Buffer, format: sysgpu.IndexFormat, offset: u64, size: u64) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderSetLabel", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderSetVertexBuffer", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, slot: u32, buffer: *sysgpu.Buffer, offset: u64, size: u64) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderReference", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder) callconv(.Inline) void);
-    assertDecl(T, "renderBundleEncoderRelease", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder) callconv(.Inline) void);
+    assertDecl(T, "renderBundleEncoderDraw", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderDrawIndexed", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, index_count: u32, instance_count: u32, first_index: u32, base_vertex: i32, first_instance: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderDrawIndexedIndirect", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderDrawIndirect", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderFinish", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, descriptor: ?*const sysgpu.RenderBundle.Descriptor) callconv(.@"inline") *sysgpu.RenderBundle);
+    assertDecl(T, "renderBundleEncoderInsertDebugMarker", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, marker_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderPopDebugGroup", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderPushDebugGroup", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, group_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderSetIndexBuffer", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, buffer: *sysgpu.Buffer, format: sysgpu.IndexFormat, offset: u64, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderSetLabel", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderSetVertexBuffer", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder, slot: u32, buffer: *sysgpu.Buffer, offset: u64, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderReference", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder) callconv(.@"inline") void);
+    assertDecl(T, "renderBundleEncoderRelease", fn (render_bundle_encoder: *sysgpu.RenderBundleEncoder) callconv(.@"inline") void);
 
     // sysgpu.RenderPassEncoder
-    assertDecl(T, "renderPassEncoderBeginOcclusionQuery", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, query_index: u32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderDraw", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderDrawIndexed", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, index_count: u32, instance_count: u32, first_index: u32, base_vertex: i32, first_instance: u32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderDrawIndexedIndirect", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderDrawIndirect", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderEnd", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderEndOcclusionQuery", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderExecuteBundles", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, bundles_count: usize, bundles: [*]const *const sysgpu.RenderBundle) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderInsertDebugMarker", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, marker_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderPopDebugGroup", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderPushDebugGroup", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, group_label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetBlendConstant", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, color: *const sysgpu.Color) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetIndexBuffer", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, buffer: *sysgpu.Buffer, format: sysgpu.IndexFormat, offset: u64, size: u64) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetLabel", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetScissorRect", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, x: u32, y: u32, width: u32, height: u32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetStencilReference", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, reference: u32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetVertexBuffer", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, slot: u32, buffer: *sysgpu.Buffer, offset: u64, size: u64) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderSetViewport", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderWriteTimestamp", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, query_set: *sysgpu.QuerySet, query_index: u32) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderReference", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.Inline) void);
-    assertDecl(T, "renderPassEncoderRelease", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.Inline) void);
+    assertDecl(T, "renderPassEncoderBeginOcclusionQuery", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, query_index: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderDraw", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, vertex_count: u32, instance_count: u32, first_vertex: u32, first_instance: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderDrawIndexed", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, index_count: u32, instance_count: u32, first_index: u32, base_vertex: i32, first_instance: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderDrawIndexedIndirect", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderDrawIndirect", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, indirect_buffer: *sysgpu.Buffer, indirect_offset: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderEnd", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderEndOcclusionQuery", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderExecuteBundles", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, bundles_count: usize, bundles: [*]const *const sysgpu.RenderBundle) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderInsertDebugMarker", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, marker_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderPopDebugGroup", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderPushDebugGroup", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, group_label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetBlendConstant", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, color: *const sysgpu.Color) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetIndexBuffer", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, buffer: *sysgpu.Buffer, format: sysgpu.IndexFormat, offset: u64, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetLabel", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetScissorRect", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, x: u32, y: u32, width: u32, height: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetStencilReference", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, reference: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetVertexBuffer", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, slot: u32, buffer: *sysgpu.Buffer, offset: u64, size: u64) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderSetViewport", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderWriteTimestamp", fn (render_pass_encoder: *sysgpu.RenderPassEncoder, query_set: *sysgpu.QuerySet, query_index: u32) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderReference", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.@"inline") void);
+    assertDecl(T, "renderPassEncoderRelease", fn (render_pass_encoder: *sysgpu.RenderPassEncoder) callconv(.@"inline") void);
 
     // sysgpu.Sampler
-    assertDecl(T, "samplerSetLabel", fn (sampler: *sysgpu.Sampler, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "samplerReference", fn (sampler: *sysgpu.Sampler) callconv(.Inline) void);
-    assertDecl(T, "samplerRelease", fn (sampler: *sysgpu.Sampler) callconv(.Inline) void);
+    assertDecl(T, "samplerSetLabel", fn (sampler: *sysgpu.Sampler, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "samplerReference", fn (sampler: *sysgpu.Sampler) callconv(.@"inline") void);
+    assertDecl(T, "samplerRelease", fn (sampler: *sysgpu.Sampler) callconv(.@"inline") void);
 
     // sysgpu.ShaderModule
-    assertDecl(T, "shaderModuleGetCompilationInfo", fn (shader_module: *sysgpu.ShaderModule, callback: sysgpu.CompilationInfoCallback, userdata: ?*anyopaque) callconv(.Inline) void);
-    assertDecl(T, "shaderModuleSetLabel", fn (shader_module: *sysgpu.ShaderModule, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "shaderModuleReference", fn (shader_module: *sysgpu.ShaderModule) callconv(.Inline) void);
-    assertDecl(T, "shaderModuleRelease", fn (shader_module: *sysgpu.ShaderModule) callconv(.Inline) void);
+    assertDecl(T, "shaderModuleGetCompilationInfo", fn (shader_module: *sysgpu.ShaderModule, callback: sysgpu.CompilationInfoCallback, userdata: ?*anyopaque) callconv(.@"inline") void);
+    assertDecl(T, "shaderModuleSetLabel", fn (shader_module: *sysgpu.ShaderModule, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "shaderModuleReference", fn (shader_module: *sysgpu.ShaderModule) callconv(.@"inline") void);
+    assertDecl(T, "shaderModuleRelease", fn (shader_module: *sysgpu.ShaderModule) callconv(.@"inline") void);
 
     // sysgpu.SharedFence
-    assertDecl(T, "sharedFenceExportInfo", fn (shared_fence: *sysgpu.SharedFence, info: *sysgpu.SharedFence.ExportInfo) callconv(.Inline) void);
-    assertDecl(T, "sharedFenceReference", fn (shared_fence: *sysgpu.SharedFence) callconv(.Inline) void);
-    assertDecl(T, "sharedFenceRelease", fn (shared_fence: *sysgpu.SharedFence) callconv(.Inline) void);
+    assertDecl(T, "sharedFenceExportInfo", fn (shared_fence: *sysgpu.SharedFence, info: *sysgpu.SharedFence.ExportInfo) callconv(.@"inline") void);
+    assertDecl(T, "sharedFenceReference", fn (shared_fence: *sysgpu.SharedFence) callconv(.@"inline") void);
+    assertDecl(T, "sharedFenceRelease", fn (shared_fence: *sysgpu.SharedFence) callconv(.@"inline") void);
 
     // sysgpu.SharedTextureMemory
-    assertDecl(T, "sharedTextureMemoryBeginAccess", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, texture: *sysgpu.Texture, descriptor: *const sysgpu.SharedTextureMemory.BeginAccessDescriptor) callconv(.Inline) void);
-    assertDecl(T, "sharedTextureMemoryCreateTexture", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, descriptor: *const sysgpu.Texture.Descriptor) callconv(.Inline) *sysgpu.Texture);
-    assertDecl(T, "sharedTextureMemoryEndAccess", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, texture: *sysgpu.Texture, descriptor: *sysgpu.SharedTextureMemory.EndAccessState) callconv(.Inline) void);
-    assertDecl(T, "sharedTextureMemoryEndAccessStateFreeMembers", fn (value: sysgpu.SharedTextureMemory.EndAccessState) callconv(.Inline) void);
-    assertDecl(T, "sharedTextureMemoryGetProperties", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, properties: *sysgpu.SharedTextureMemory.Properties) callconv(.Inline) void);
-    assertDecl(T, "sharedTextureMemorySetLabel", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "sharedTextureMemoryReference", fn (shared_texture_memory: *sysgpu.SharedTextureMemory) callconv(.Inline) void);
-    assertDecl(T, "sharedTextureMemoryRelease", fn (shared_texture_memory: *sysgpu.SharedTextureMemory) callconv(.Inline) void);
+    assertDecl(T, "sharedTextureMemoryBeginAccess", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, texture: *sysgpu.Texture, descriptor: *const sysgpu.SharedTextureMemory.BeginAccessDescriptor) callconv(.@"inline") void);
+    assertDecl(T, "sharedTextureMemoryCreateTexture", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, descriptor: *const sysgpu.Texture.Descriptor) callconv(.@"inline") *sysgpu.Texture);
+    assertDecl(T, "sharedTextureMemoryEndAccess", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, texture: *sysgpu.Texture, descriptor: *sysgpu.SharedTextureMemory.EndAccessState) callconv(.@"inline") void);
+    assertDecl(T, "sharedTextureMemoryEndAccessStateFreeMembers", fn (value: sysgpu.SharedTextureMemory.EndAccessState) callconv(.@"inline") void);
+    assertDecl(T, "sharedTextureMemoryGetProperties", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, properties: *sysgpu.SharedTextureMemory.Properties) callconv(.@"inline") void);
+    assertDecl(T, "sharedTextureMemorySetLabel", fn (shared_texture_memory: *sysgpu.SharedTextureMemory, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "sharedTextureMemoryReference", fn (shared_texture_memory: *sysgpu.SharedTextureMemory) callconv(.@"inline") void);
+    assertDecl(T, "sharedTextureMemoryRelease", fn (shared_texture_memory: *sysgpu.SharedTextureMemory) callconv(.@"inline") void);
 
     // sysgpu.Surface
-    assertDecl(T, "surfaceReference", fn (surface: *sysgpu.Surface) callconv(.Inline) void);
-    assertDecl(T, "surfaceRelease", fn (surface: *sysgpu.Surface) callconv(.Inline) void);
+    assertDecl(T, "surfaceReference", fn (surface: *sysgpu.Surface) callconv(.@"inline") void);
+    assertDecl(T, "surfaceRelease", fn (surface: *sysgpu.Surface) callconv(.@"inline") void);
 
     // sysgpu.SwapChain
-    assertDecl(T, "swapChainGetCurrentTexture", fn (swap_chain: *sysgpu.SwapChain) callconv(.Inline) ?*sysgpu.Texture);
-    assertDecl(T, "swapChainGetCurrentTextureView", fn (swap_chain: *sysgpu.SwapChain) callconv(.Inline) ?*sysgpu.TextureView);
-    assertDecl(T, "swapChainPresent", fn (swap_chain: *sysgpu.SwapChain) callconv(.Inline) void);
-    assertDecl(T, "swapChainReference", fn (swap_chain: *sysgpu.SwapChain) callconv(.Inline) void);
-    assertDecl(T, "swapChainRelease", fn (swap_chain: *sysgpu.SwapChain) callconv(.Inline) void);
+    assertDecl(T, "swapChainGetCurrentTexture", fn (swap_chain: *sysgpu.SwapChain) callconv(.@"inline") ?*sysgpu.Texture);
+    assertDecl(T, "swapChainGetCurrentTextureView", fn (swap_chain: *sysgpu.SwapChain) callconv(.@"inline") ?*sysgpu.TextureView);
+    assertDecl(T, "swapChainPresent", fn (swap_chain: *sysgpu.SwapChain) callconv(.@"inline") void);
+    assertDecl(T, "swapChainReference", fn (swap_chain: *sysgpu.SwapChain) callconv(.@"inline") void);
+    assertDecl(T, "swapChainRelease", fn (swap_chain: *sysgpu.SwapChain) callconv(.@"inline") void);
 
     // sysgpu.Texture
-    assertDecl(T, "textureCreateView", fn (texture: *sysgpu.Texture, descriptor: ?*const sysgpu.TextureView.Descriptor) callconv(.Inline) *sysgpu.TextureView);
-    assertDecl(T, "textureDestroy", fn (texture: *sysgpu.Texture) callconv(.Inline) void);
-    assertDecl(T, "textureGetDepthOrArrayLayers", fn (texture: *sysgpu.Texture) callconv(.Inline) u32);
-    assertDecl(T, "textureGetDimension", fn (texture: *sysgpu.Texture) callconv(.Inline) sysgpu.Texture.Dimension);
-    assertDecl(T, "textureGetFormat", fn (texture: *sysgpu.Texture) callconv(.Inline) sysgpu.Texture.Format);
-    assertDecl(T, "textureGetHeight", fn (texture: *sysgpu.Texture) callconv(.Inline) u32);
-    assertDecl(T, "textureGetMipLevelCount", fn (texture: *sysgpu.Texture) callconv(.Inline) u32);
-    assertDecl(T, "textureGetSampleCount", fn (texture: *sysgpu.Texture) callconv(.Inline) u32);
-    assertDecl(T, "textureGetUsage", fn (texture: *sysgpu.Texture) callconv(.Inline) sysgpu.Texture.UsageFlags);
-    assertDecl(T, "textureGetWidth", fn (texture: *sysgpu.Texture) callconv(.Inline) u32);
-    assertDecl(T, "textureSetLabel", fn (texture: *sysgpu.Texture, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "textureReference", fn (texture: *sysgpu.Texture) callconv(.Inline) void);
-    assertDecl(T, "textureRelease", fn (texture: *sysgpu.Texture) callconv(.Inline) void);
-    assertDecl(T, "textureViewSetLabel", fn (texture_view: *sysgpu.TextureView, label: [*:0]const u8) callconv(.Inline) void);
-    assertDecl(T, "textureViewReference", fn (texture_view: *sysgpu.TextureView) callconv(.Inline) void);
-    assertDecl(T, "textureViewRelease", fn (texture_view: *sysgpu.TextureView) callconv(.Inline) void);
+    assertDecl(T, "textureCreateView", fn (texture: *sysgpu.Texture, descriptor: ?*const sysgpu.TextureView.Descriptor) callconv(.@"inline") *sysgpu.TextureView);
+    assertDecl(T, "textureDestroy", fn (texture: *sysgpu.Texture) callconv(.@"inline") void);
+    assertDecl(T, "textureGetDepthOrArrayLayers", fn (texture: *sysgpu.Texture) callconv(.@"inline") u32);
+    assertDecl(T, "textureGetDimension", fn (texture: *sysgpu.Texture) callconv(.@"inline") sysgpu.Texture.Dimension);
+    assertDecl(T, "textureGetFormat", fn (texture: *sysgpu.Texture) callconv(.@"inline") sysgpu.Texture.Format);
+    assertDecl(T, "textureGetHeight", fn (texture: *sysgpu.Texture) callconv(.@"inline") u32);
+    assertDecl(T, "textureGetMipLevelCount", fn (texture: *sysgpu.Texture) callconv(.@"inline") u32);
+    assertDecl(T, "textureGetSampleCount", fn (texture: *sysgpu.Texture) callconv(.@"inline") u32);
+    assertDecl(T, "textureGetUsage", fn (texture: *sysgpu.Texture) callconv(.@"inline") sysgpu.Texture.UsageFlags);
+    assertDecl(T, "textureGetWidth", fn (texture: *sysgpu.Texture) callconv(.@"inline") u32);
+    assertDecl(T, "textureSetLabel", fn (texture: *sysgpu.Texture, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "textureReference", fn (texture: *sysgpu.Texture) callconv(.@"inline") void);
+    assertDecl(T, "textureRelease", fn (texture: *sysgpu.Texture) callconv(.@"inline") void);
+    assertDecl(T, "textureViewSetLabel", fn (texture_view: *sysgpu.TextureView, label: [*:0]const u8) callconv(.@"inline") void);
+    assertDecl(T, "textureViewReference", fn (texture_view: *sysgpu.TextureView) callconv(.@"inline") void);
+    assertDecl(T, "textureViewRelease", fn (texture_view: *sysgpu.TextureView) callconv(.@"inline") void);
     return T;
 }
 

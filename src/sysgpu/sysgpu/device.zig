@@ -103,7 +103,7 @@ pub const Device = opaque {
             compute_pipeline: *ComputePipeline,
             message: [*:0]const u8,
             ctx: @TypeOf(context),
-        ) callconv(.Inline) void,
+        ) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {
@@ -165,7 +165,7 @@ pub const Device = opaque {
             status: CreatePipelineAsyncStatus,
             pipeline: *RenderPipeline,
             message: [*:0]const u8,
-        ) callconv(.Inline) void,
+        ) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {
@@ -307,7 +307,7 @@ pub const Device = opaque {
     pub inline fn popErrorScope(
         device: *Device,
         context: anytype,
-        comptime callback: fn (ctx: @TypeOf(context), typ: ErrorType, message: [*:0]const u8) callconv(.Inline) void,
+        comptime callback: fn (ctx: @TypeOf(context), typ: ErrorType, message: [*:0]const u8) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {
@@ -325,7 +325,7 @@ pub const Device = opaque {
     pub inline fn setDeviceLostCallback(
         device: *Device,
         context: anytype,
-        comptime callback: ?fn (ctx: @TypeOf(context), reason: LostReason, message: [*:0]const u8) callconv(.Inline) void,
+        comptime callback: ?fn (ctx: @TypeOf(context), reason: LostReason, message: [*:0]const u8) callconv(.@"inline") void,
     ) void {
         if (callback) |cb| {
             const Context = @TypeOf(context);
@@ -347,7 +347,7 @@ pub const Device = opaque {
     pub inline fn setLoggingCallback(
         device: *Device,
         context: anytype,
-        comptime callback: ?fn (ctx: @TypeOf(context), typ: LoggingType, message: [*:0]const u8) callconv(.Inline) void,
+        comptime callback: ?fn (ctx: @TypeOf(context), typ: LoggingType, message: [*:0]const u8) callconv(.@"inline") void,
     ) void {
         if (callback) |cb| {
             const Context = @TypeOf(context);
@@ -365,7 +365,7 @@ pub const Device = opaque {
     pub inline fn setUncapturedErrorCallback(
         device: *Device,
         context: anytype,
-        comptime callback: ?fn (ctx: @TypeOf(context), typ: ErrorType, message: [*:0]const u8) callconv(.Inline) void,
+        comptime callback: ?fn (ctx: @TypeOf(context), typ: ErrorType, message: [*:0]const u8) callconv(.@"inline") void,
     ) void {
         if (callback) |cb| {
             const Context = @TypeOf(context);

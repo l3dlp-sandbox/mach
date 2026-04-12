@@ -99,7 +99,7 @@ pub const Adapter = opaque {
             status: RequestDeviceStatus,
             device: *Device,
             message: ?[*:0]const u8,
-        ) callconv(.Inline) void,
+        ) callconv(.@"inline") void,
     ) void {
         const Context = @TypeOf(context);
         const Helper = struct {
