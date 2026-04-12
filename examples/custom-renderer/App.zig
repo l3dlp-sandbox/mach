@@ -101,7 +101,7 @@ pub fn tick(
                     else => {},
                 }
             },
-            .window_open => |_| {
+            .window_open => {
                 renderer_mod.call(.init);
             },
             .close => core.exit(),

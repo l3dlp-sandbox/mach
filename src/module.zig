@@ -503,45 +503,34 @@ pub fn Mod(comptime M: type) type {
 }
 
 pub fn ModFunctionIDs(comptime Module: type) type {
-    var fields: []const std.builtin.Type.StructField = &[0]std.builtin.Type.StructField{};
+    var field_names: []const []const u8 = &.{};
+    var field_types: []const type = &.{};
+    var field_attrs: []const std.builtin.Type.StructField.Attributes = &.{};
     for (Module.mach_systems) |fn_name| {
-        fields = fields ++ [_]std.builtin.Type.StructField{.{
-            .name = @tagName(fn_name),
-            .type = FunctionID,
-            .default_value = null,
-            .is_comptime = false,
-            .alignment = @alignOf(FunctionID),
+        field_names = field_names ++ [_][]const u8{@tagName(fn_name)};
+        field_types = field_types ++ [_]type{FunctionID};
+        field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
+            .default_value_ptr = null,
+            .@"comptime" = false,
+            .@"align" = null,
         }};
     }
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .is_tuple = false,
-            .fields = fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-        },
-    });
+    return @Struct(.auto, null, field_names, field_types, field_attrs);
 }
 
 /// Enum describing all declarations for a given comptime-known module.
 // TODO: unify with ModuleFunctionName
 fn ModuleFunctionName2(comptime M: type) type {
     validate(M);
-    var enum_fields: []const std.builtin.Type.EnumField = &[0]std.builtin.Type.EnumField{};
-    var i: u32 = 0;
-    inline for (M.mach_systems) |fn_tag| {
+    var enum_names: []const []const u8 = &.{};
+    const TagInt = if (M.mach_systems.len > 0) std.math.IntFittingRange(0, M.mach_systems.len - 1) else u0;
+    var enum_values: []const TagInt = &.{};
+    inline for (M.mach_systems, 0..) |fn_tag, i| {
         // TODO: verify decls are Fn or mach.schedule() decl
-        enum_fields = enum_fields ++ [_]std.builtin.Type.EnumField{.{ .name = @tagName(fn_tag), .value = i }};
-        i += 1;
+        enum_names = enum_names ++ [_][]const u8{@tagName(fn_tag)};
+        enum_values = enum_values ++ [_]TagInt{@intCast(i)};
     }
-    return @Type(.{
-        .@"enum" = .{
-            .tag_type = if (enum_fields.len > 0) std.math.IntFittingRange(0, enum_fields.len - 1) else u0,
-            .fields = enum_fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_exhaustive = true,
-        },
-    });
+    return @Enum(TagInt, .exhaustive, enum_names, enum_values);
 }
 
 /// Enum describing all mach_tags for a given comptime-known module.
@@ -552,13 +541,11 @@ fn ModuleTagEnum(comptime M: type) type {
     if (@typeInfo(@TypeOf(M.mach_tags)) != .@"struct") {
         @compileError("mach: invalid module, `pub const mach_tags must be `.{ .is_monster, .{ .renderer, mach.Renderer.objects } }`, found: " ++ @typeName(@TypeOf(M.mach_tags)));
     }
-    var enum_fields: []const std.builtin.Type.EnumField = &[0]std.builtin.Type.EnumField{};
-    var i: u32 = 0;
+    var enum_names: []const []const u8 = &.{};
     inline for (@typeInfo(@TypeOf(M.mach_tags)).@"struct".fields, 0..) |field, field_index| {
         const f = M.mach_tags[field_index];
         if (@typeInfo(field.type) == .enum_literal) {
-            enum_fields = enum_fields ++ [_]std.builtin.Type.EnumField{.{ .name = @tagName(f), .value = i }};
-            i += 1;
+            enum_names = enum_names ++ [_][]const u8{@tagName(f)};
         } else {
             if (@typeInfo(field.type) != .@"struct") {
                 @compileError("mach: invalid module, mach_tags entry is not an enum literal or struct, found: " ++ @typeName(field.type));
@@ -570,18 +557,11 @@ fn ModuleTagEnum(comptime M: type) type {
             _ = object_list_tag; // autofix
             validate(M2);
             // TODO: validate that M2.object_list_tag is a mach objects list
-            enum_fields = enum_fields ++ [_]std.builtin.Type.EnumField{.{ .name = @tagName(tag), .value = i }};
-            i += 1;
+            enum_names = enum_names ++ [_][]const u8{@tagName(tag)};
         }
     }
-    return @Type(.{
-        .@"enum" = .{
-            .tag_type = if (enum_fields.len > 0) std.math.IntFittingRange(0, enum_fields.len - 1) else u0,
-            .fields = enum_fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_exhaustive = true,
-        },
-    });
+    const TagType = if (enum_names.len > 0) std.math.IntFittingRange(0, enum_names.len - 1) else u0;
+    return @Enum(TagType, .exhaustive, enum_names, &std.simd.iota(TagType, enum_names.len));
 }
 
 pub fn Modules(module_lists: anytype) type {
@@ -610,21 +590,13 @@ pub fn Modules(module_lists: anytype) type {
             const module = @field(ModuleTypesByName(modules){}, @tagName(module_name));
             validate(module);
 
-            var enum_fields: []const std.builtin.Type.EnumField = &[0]std.builtin.Type.EnumField{};
-            var i: u32 = 0;
+            var enum_names: []const []const u8 = &.{};
             inline for (module.mach_systems) |fn_tag| {
                 // TODO: verify decls are Fn or mach.schedule() decl
-                enum_fields = enum_fields ++ [_]std.builtin.Type.EnumField{.{ .name = @tagName(fn_tag), .value = i }};
-                i += 1;
+                enum_names = enum_names ++ [_][]const u8{@tagName(fn_tag)};
             }
-            return @Type(.{
-                .@"enum" = .{
-                    .tag_type = if (enum_fields.len > 0) std.math.IntFittingRange(0, enum_fields.len - 1) else u0,
-                    .fields = enum_fields,
-                    .decls = &[_]std.builtin.Type.Declaration{},
-                    .is_exhaustive = true,
-                },
-            });
+            const TagType = if (enum_names.len > 0) std.math.IntFittingRange(0, enum_names.len - 1) else u0;
+            return @Enum(TagType, .exhaustive, enum_names, &std.simd.iota(TagType, enum_names.len));
         }
 
         pub fn init(m: *@This(), allocator: std.mem.Allocator) (std.mem.Allocator.Error || std.Thread.SpawnError)!void {
@@ -805,19 +777,13 @@ fn isValid(comptime module: anytype) bool {
 /// Given a tuple of Mach module structs, returns an enum which has every possible comptime-known
 /// module name.
 fn NameEnum(comptime mods: anytype) type {
-    var enum_fields: []const std.builtin.Type.EnumField = &[0]std.builtin.Type.EnumField{};
-    for (mods, 0..) |module, i| {
+    var enum_names: []const []const u8 = &.{};
+    for (mods) |module| {
         validate(module);
-        enum_fields = enum_fields ++ [_]std.builtin.Type.EnumField{.{ .name = @tagName(module.mach_module), .value = i }};
+        enum_names = enum_names ++ [_][]const u8{@tagName(module.mach_module)};
     }
-    return @Type(.{
-        .@"enum" = .{
-            .tag_type = std.math.IntFittingRange(0, enum_fields.len - 1),
-            .fields = enum_fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-            .is_exhaustive = true,
-        },
-    });
+    const TagType = std.math.IntFittingRange(0, enum_names.len - 1);
+    return @Enum(TagType, .exhaustive, enum_names, &std.simd.iota(TagType, enum_names.len));
 }
 
 /// Given a tuple of module structs or module struct tuples:
@@ -845,96 +811,81 @@ fn ModuleTuple(comptime tuple: anytype) type {
         @compileError("Expected to find a tuple, found: " ++ @typeName(@TypeOf(tuple)));
     }
 
-    var tuple_fields: []const std.builtin.Type.StructField = &[0]std.builtin.Type.StructField{};
+    var field_names: []const []const u8 = &.{};
+    var field_types: []const type = &.{};
+    var field_attrs: []const std.builtin.Type.StructField.Attributes = &.{};
     loop: inline for (tuple) |elem| {
         if (@typeInfo(@TypeOf(elem)) == .type and @typeInfo(elem) == .@"struct") {
             // Struct type
             validate(elem);
-            for (tuple_fields) |field| if (@as(*const type, @ptrCast(field.default_value.?)).* == elem)
+            for (field_attrs) |attr| if (@as(*const type, @ptrCast(attr.default_value_ptr.?)).* == elem)
                 continue :loop;
 
             var num_buf: [128]u8 = undefined;
-            tuple_fields = tuple_fields ++ [_]std.builtin.Type.StructField{.{
-                .name = std.fmt.bufPrintZ(&num_buf, "{d}", .{tuple_fields.len}) catch unreachable,
-                .type = type,
-                .default_value = &elem,
-                .is_comptime = true,
-                .alignment = 0,
+            field_names = field_names ++ [_][]const u8{std.fmt.bufPrintZ(&num_buf, "{d}", .{field_names.len}) catch unreachable};
+            field_types = field_types ++ [_]type{type};
+            field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
+                .default_value_ptr = @ptrCast(&elem),
+                .@"comptime" = true,
+                .@"align" = null,
             }};
         } else if (@typeInfo(@TypeOf(elem)) == .@"struct" and @typeInfo(@TypeOf(elem)).@"struct".is_tuple) {
             // Nested tuple
             inline for (moduleTuple(elem)) |nested| {
                 validate(nested);
-                for (tuple_fields) |field| if (@as(*const type, @ptrCast(field.default_value.?)).* == nested)
+                for (field_attrs) |attr| if (@as(*const type, @ptrCast(attr.default_value_ptr.?)).* == nested)
                     continue :loop;
 
                 var num_buf: [128]u8 = undefined;
-                tuple_fields = tuple_fields ++ [_]std.builtin.Type.StructField{.{
-                    .name = std.fmt.bufPrintZ(&num_buf, "{d}", .{tuple_fields.len}) catch unreachable,
-                    .type = type,
-                    .default_value = &nested,
-                    .is_comptime = true,
-                    .alignment = 0,
+                field_names = field_names ++ [_][]const u8{std.fmt.bufPrintZ(&num_buf, "{d}", .{field_names.len}) catch unreachable};
+                field_types = field_types ++ [_]type{type};
+                field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
+                    .default_value_ptr = @ptrCast(&nested),
+                    .@"comptime" = true,
+                    .@"align" = null,
                 }};
             }
         } else {
             @compileError("Expected to find a tuple or struct type, found: " ++ @typeName(@TypeOf(elem)));
         }
     }
-    return @Type(.{
-        .@"struct" = .{
-            .is_tuple = true,
-            .layout = .auto,
-            .decls = &.{},
-            .fields = tuple_fields,
-        },
-    });
+    return @Struct(.auto, null, field_names, field_types, field_attrs);
 }
 
 /// Given .{Foo, Bar, Baz} Mach modules, returns .{.foo = Foo, .bar = Bar, .baz = Baz} with field
 /// names corresponding to each module's `pub const mach_module = .foo;` name.
 fn ModuleTypesByName(comptime modules: anytype) type {
-    var fields: []const std.builtin.Type.StructField = &[0]std.builtin.Type.StructField{};
+    var field_names: []const []const u8 = &.{};
+    var field_types: []const type = &.{};
+    var field_attrs: []const std.builtin.Type.StructField.Attributes = &.{};
     for (modules) |M| {
-        fields = fields ++ [_]std.builtin.Type.StructField{.{
-            .name = @tagName(M.mach_module),
-            .type = type,
-            .default_value = &M,
-            .is_comptime = true,
-            .alignment = @alignOf(type),
+        field_names = field_names ++ [_][]const u8{@tagName(M.mach_module)};
+        field_types = field_types ++ [_]type{type};
+        field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
+            .default_value_ptr = @ptrCast(&M),
+            .@"comptime" = true,
+            .@"align" = null,
         }};
     }
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .is_tuple = false,
-            .fields = fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-        },
-    });
+    return @Struct(.auto, null, field_names, field_types, field_attrs);
 }
 
 /// Given .{Foo, Bar, Baz} Mach modules, returns .{.foo: Foo = undefined, .bar: Bar = undefined, .baz: Baz = undefined}
 /// with field names corresponding to each module's `pub const mach_module = .foo;` name, and each Foo type.
 fn ModulesByName(comptime modules: anytype) type {
-    var fields: []const std.builtin.Type.StructField = &[0]std.builtin.Type.StructField{};
+    var field_names: []const []const u8 = &.{};
+    var field_types: []const type = &.{};
+    var field_attrs: []const std.builtin.Type.StructField.Attributes = &.{};
     for (modules) |M| {
-        fields = fields ++ [_]std.builtin.Type.StructField{.{
-            .name = @tagName(M.mach_module),
-            .type = M,
-            .default_value = &@as(M, undefined),
-            .is_comptime = false,
-            .alignment = @alignOf(M),
+        field_names = field_names ++ [_][]const u8{@tagName(M.mach_module)};
+        field_types = field_types ++ [_]type{M};
+        field_attrs = field_attrs ++ [_]std.builtin.Type.StructField.Attributes{.{
+            .default_value_ptr = @ptrCast(&@as(M, undefined)),
+            .@"comptime" = false,
+            .@"align" = null,
         }};
     }
-    return @Type(.{
-        .@"struct" = .{
-            .layout = .auto,
-            .is_tuple = false,
-            .fields = fields,
-            .decls = &[_]std.builtin.Type.Declaration{},
-        },
-    });
+    return @Struct(.auto, null, field_names, field_types, field_attrs);
 }
 
 test "Long field name" {
