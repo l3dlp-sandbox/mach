@@ -57,7 +57,14 @@ pub fn init(
     core: *mach.Core,
     app: *App,
     app_mod: mach.Mod(App),
+    io: std.Io,
 ) !void {
+    // You should use mach.Timer in general, but here we call std.Io.Timestamp.now() to show that
+    // you can always get an 'io' parameter in any module function - it's automatically injected
+    // for you.
+    const timestamp = std.Io.Timestamp.now(io, .awake);
+    std.debug.print("sprite: init at timestamp {d}ns\n", .{timestamp.nanoseconds});
+
     core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 

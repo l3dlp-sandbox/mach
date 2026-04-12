@@ -729,6 +729,10 @@ pub fn Modules(module_lists: anytype) type {
                             @field(args, arg.name) = &@field(m.mods, @tagName(std.meta.Child(arg.type).mach_module));
                             continue :outer;
                         }
+                        if (arg.type == std.Io) {
+                            @field(args, arg.name) = m.modules.io;
+                            continue :outer;
+                        }
                         if (@typeInfo(arg.type) == .@"struct" and @hasDecl(arg.type, "IsMachMod")) {
                             const M = arg.type.Module;
                             var mv: Mod(M) = .{
