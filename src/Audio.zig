@@ -69,11 +69,11 @@ driver_needs_num_samples: usize = 0,
 const SampleBuffer = std.fifo.LinearFifo(u8, .Dynamic);
 
 fn initAudioContext(allocator: std.mem.Allocator) sysaudio.Context.InitError!sysaudio.Context {
-    const forced = std.process.getEnvVarOwned(allocator, "MACH_FORCE_AUDIO_BACKEND") catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => return sysaudio.Context.init(null, allocator, .{}),
-        else => return sysaudio.Context.init(null, allocator, .{}),
-    };
-    defer allocator.free(forced);
+    // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
+    // env around
+    const forced_ptr = std.c.getenv("MACH_FORCE_AUDIO_BACKEND") orelse
+        return sysaudio.Context.init(null, allocator, .{});
+    const forced = std.mem.sliceTo(forced_ptr, 0);
 
     inline for (std.meta.fields(sysaudio.Backend)) |field| {
         if (std.ascii.eqlIgnoreCase(forced, field.name)) {
@@ -97,17 +97,12 @@ pub fn init(audio: *Audio, audio_mod: mach.Mod(Audio)) !void {
     var player = try ctx.createPlayer(device, writeFn, .{ .user_data = audio, .sample_rate = 48000 });
     log.info("opened audio device: channels={} sample_rate={} format={s}", .{ player.channels().len, player.sampleRate(), @tagName(player.format()) });
 
-    const debug_str = std.process.getEnvVarOwned(
-        allocator,
-        "MACH_DEBUG_AUDIO",
-    ) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => null,
-        else => return err,
-    };
-    const debug = if (debug_str) |s| blk: {
-        defer allocator.free(s);
-        break :blk std.ascii.eqlIgnoreCase(s, "true");
-    } else false;
+    // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
+    // env around
+    const debug = if (std.c.getenv("MACH_DEBUG_AUDIO")) |s|
+        std.ascii.eqlIgnoreCase(std.mem.sliceTo(s, 0), "true")
+    else
+        false;
 
     audio.* = .{
         .buffers = audio.buffers,

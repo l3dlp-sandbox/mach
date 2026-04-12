@@ -397,23 +397,20 @@ pub inline fn printUnhandledErrorCallback(_: void, ty: gpu.ErrorType, message: [
 }
 
 pub fn detectBackendType(allocator: std.mem.Allocator) !gpu.BackendType {
-    const backend = std.process.getEnvVarOwned(
-        allocator,
-        "MACH_FORCE_GPU_BACKEND",
-    ) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => {
-            return switch (build_options.sysgpu_backend) {
-                .default => if (builtin.target.isDarwin()) .metal else if (builtin.target.os.tag == .windows) .d3d12 else .vulkan,
-                .d3d12 => .d3d12,
-                .metal => .metal,
-                .vulkan => .vulkan,
-                .opengl => .opengl,
-                .webgpu => .null,
-            };
-        },
-        else => return err,
+    _ = allocator;
+    // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
+    // env around
+    const backend_ptr = std.c.getenv("MACH_FORCE_GPU_BACKEND") orelse {
+        return switch (build_options.sysgpu_backend) {
+            .default => if (builtin.target.isDarwin()) .metal else if (builtin.target.os.tag == .windows) .d3d12 else .vulkan,
+            .d3d12 => .d3d12,
+            .metal => .metal,
+            .vulkan => .vulkan,
+            .opengl => .opengl,
+            .webgpu => .null,
+        };
     };
-    defer allocator.free(backend);
+    const backend = std.mem.sliceTo(backend_ptr, 0);
 
     if (std.ascii.eqlIgnoreCase(backend, "null")) return .null;
     if (std.ascii.eqlIgnoreCase(backend, "d3d11")) return .d3d11;

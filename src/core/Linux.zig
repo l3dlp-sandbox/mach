@@ -122,14 +122,10 @@ pub fn initWindow(
     window_id: mach.ObjectID,
 ) !void {
     const force_backend: ?BackendEnum = blk: {
-        const backend = std.process.getEnvVarOwned(
-            core.allocator,
-            "MACH_FORCE_BACKEND",
-        ) catch |err| switch (err) {
-            error.EnvironmentVariableNotFound => break :blk null,
-            else => return err,
-        };
-        defer core.allocator.free(backend);
+        // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
+        // env around
+        const backend_ptr = std.c.getenv("MACH_FORCE_BACKEND") orelse break :blk null;
+        const backend = std.mem.sliceTo(backend_ptr, 0);
 
         if (std.ascii.eqlIgnoreCase(backend, "x11")) break :blk .x11;
         if (std.ascii.eqlIgnoreCase(backend, "wayland")) break :blk .wayland;
