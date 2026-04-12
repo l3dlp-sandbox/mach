@@ -163,13 +163,13 @@ pub fn initWindow(
             log.err("{s}\n\nFalling back to X11\n", .{err_msg});
             X11.initWindow(core, window_id) catch |e| {
                 log.err("Failed to connect to fallback display server, X11.\n", .{});
-                var libs = std.ArrayList(u8).init(core.allocator);
-                defer libs.deinit();
+                var libs: std.ArrayList(u8) = .empty;
+                defer libs.deinit(core.allocator);
                 if (Wayland.libwaylandclient == null) {
-                    try libs.appendSlice("\t* libwayland-client\n");
+                    try libs.appendSlice(core.allocator, "\t* libwayland-client\n");
                 }
                 if (Wayland.libxkbcommon == null) {
-                    try libs.appendSlice("\t* libxkbcommon\n");
+                    try libs.appendSlice(core.allocator, "\t* libxkbcommon\n");
                 }
                 log.err("The following Wayland libraries were not available:\n{s}", .{libs.items});
                 return e;
@@ -237,11 +237,11 @@ fn warnAboutIncompleteFeatures(backend: BackendEnum, missing_features_x11: []con
         \\Contributions welcome!
         \\
     ;
-    const bullet_points = switch (backend) {
+    var bullet_points = switch (backend) {
         .x11 => try generateFeatureBulletPoints(missing_features_x11, alloc),
         .wayland => try generateFeatureBulletPoints(missing_features_wayland, alloc),
     };
-    defer bullet_points.deinit();
+    defer bullet_points.deinit(alloc);
     log.warn(features_incomplete_message, .{ @tagName(backend), bullet_points.items });
 }
 
@@ -251,12 +251,12 @@ fn warnAboutIncompleteFeatures(backend: BackendEnum, missing_features_x11: []con
 ///
 /// Returned value will need to be deinitialized.
 fn generateFeatureBulletPoints(features: []const []const u8, alloc: std.mem.Allocator) !std.ArrayList(u8) {
-    var message = std.ArrayList(u8).init(alloc);
+    var message: std.ArrayList(u8) = .empty;
     for (features, 0..) |str, i| {
-        try message.appendSlice("* ");
-        try message.appendSlice(str);
+        try message.appendSlice(alloc, "* ");
+        try message.appendSlice(alloc, str);
         if (i < features.len - 1) {
-            try message.appendSlice("\n");
+            try message.appendSlice(alloc, "\n");
         }
     }
     return message;

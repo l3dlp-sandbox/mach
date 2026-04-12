@@ -152,7 +152,7 @@ pub fn initWindow(
         .backend_type = try Core.detectBackendType(core.allocator),
         .cursors = std.mem.zeroes([@typeInfo(CursorShape).@"enum".fields.len]?c.Cursor),
         .display = display,
-        .empty_event_pipe = try std.posix.pipe(),
+        .empty_event_pipe = try std.Io.Threaded.pipe2(.{ .NONBLOCK = true, .CLOEXEC = true }),
         .gl_ctx = null,
         .hidden_cursor = libx11.?.XCreatePixmapCursor(display, blank_pixmap, blank_pixmap, &color, &color, 0, 0),
         .libxcursor = libxcursor,
@@ -169,12 +169,7 @@ pub fn initWindow(
     } };
     var x11 = &core_window.native.?.x11;
 
-    for (0..2) |i| {
-        const sf = try std.posix.fcntl(x11.empty_event_pipe[i], std.posix.F.GETFL, 0);
-        const df = try std.posix.fcntl(x11.empty_event_pipe[i], std.posix.F.GETFD, 0);
-        _ = try std.posix.fcntl(x11.empty_event_pipe[i], std.posix.F.SETFL, sf | @as(u32, @bitCast(std.posix.O{ .NONBLOCK = true })));
-        _ = try std.posix.fcntl(x11.empty_event_pipe[i], std.posix.F.SETFD, df | std.posix.FD_CLOEXEC);
-    }
+    // NONBLOCK and CLOEXEC already set via pipe2 flags above.
     var protocols = [_]c.Atom{ x11.wm_delete_window, x11.net_wm_ping };
     _ = libx11.?.XSetWMProtocols(x11.display, x11.window, &protocols, protocols.len);
     _ = libx11.?.XStoreName(x11.display, x11.window, core_window.title);
@@ -404,6 +399,7 @@ pub const LibX11 = struct {
     pub fn load() !LibX11 {
         var lib: LibX11 = undefined;
         lib.handle = mach.dynLibOpen(.{ "libX11.so.6", "libX11.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibX11).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -424,6 +420,7 @@ const LibXCursor = struct {
     pub fn load() !LibXCursor {
         var lib: LibXCursor = undefined;
         lib.handle = mach.dynLibOpen(.{ "libXcursor.so.1", "libXcursor.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibXCursor).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -440,6 +437,7 @@ const LibXRR = struct {
     pub fn load() !LibXRR {
         var lib: LibXRR = undefined;
         lib.handle = mach.dynLibOpen(.{ "libXrandr.so.1", "libXrandr.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibXRR).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -472,6 +470,7 @@ pub const LibGL = struct {
     pub fn load() !LibGL {
         var lib: LibGL = undefined;
         lib.handle = mach.dynLibOpen(.{ "libGL.so.1", "libGL.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibGL).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -504,6 +503,7 @@ pub const LibXkbCommon = struct {
     pub fn load() !LibXkbCommon {
         var lib: LibXkbCommon = undefined;
         lib.handle = mach.dynLibOpen(.{ "libxkbcommon.so.0", "libxkbcommon.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibXkbCommon).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);

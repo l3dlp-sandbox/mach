@@ -43,10 +43,10 @@ var core_ptr: *Core = undefined;
 // compile time, but since they are not run until run time, after `libwaylandclient` is
 // defined, an error never occurs.
 export fn wl_proxy_add_listener(proxy: ?*c.struct_wl_proxy, implementation: [*c]?*const fn () callconv(.c) void, data: ?*anyopaque) c_int {
-    return @call(.always_tail, libwaylandclient.?.wl_proxy_add_listener, .{ proxy, implementation, data });
+    return @call(.auto, libwaylandclient.?.wl_proxy_add_listener, .{ proxy, implementation, data });
 }
 export fn wl_proxy_get_version(proxy: ?*c.struct_wl_proxy) u32 {
-    return @call(.always_tail, libwaylandclient.?.wl_proxy_get_version, .{proxy});
+    return @call(.auto, libwaylandclient.?.wl_proxy_get_version, .{proxy});
 }
 // TODO(aarch64-linux): we have to write varargs code in C due to Zig on aarch64-linux not providing a varargs
 // implementation, see https://github.com/ziglang/zig/issues/15389
@@ -62,7 +62,7 @@ export var wl_proxy_marshal_array_flags_ptr: ?*const fn () callconv(.c) void = n
 // TODO(aarch64-linux): remove the code above, and uncomment the commented out code once aarch64-linux has a varargs implementation.
 
 export fn wl_proxy_destroy(proxy: ?*c.struct_wl_proxy) void {
-    return @call(.always_tail, libwaylandclient.?.wl_proxy_destroy, .{proxy});
+    return @call(.auto, libwaylandclient.?.wl_proxy_destroy, .{proxy});
 }
 
 pub const Native = struct {
@@ -337,6 +337,7 @@ pub const LibXkbCommon = struct {
     pub fn load() !LibXkbCommon {
         var lib: LibXkbCommon = undefined;
         lib.handle = mach.dynLibOpen(.{ "libxkbcommon.so.0", "libxkbcommon.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibXkbCommon).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -398,6 +399,7 @@ pub const LibWaylandClient = struct {
     pub fn load() !LibWaylandClient {
         var lib: LibWaylandClient = undefined;
         lib.handle = mach.dynLibOpen(.{ "libwayland-client.so.0", "libwayland-client.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibWaylandClient).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -426,6 +428,7 @@ pub const LibDecor = struct {
     pub fn load() !LibDecor {
         var lib: LibDecor = undefined;
         lib.handle = mach.dynLibOpen(.{ "libdecor-0.so.0", "libdecor-0.so" }) catch return error.LibraryNotFound;
+        @setEvalBranchQuota(10000);
         inline for (@typeInfo(LibDecor).@"struct".fields[1..]) |field| {
             const name = std.fmt.comptimePrint("{s}\x00", .{field.name});
             const name_z: [:0]const u8 = @ptrCast(name[0 .. name.len - 1]);
@@ -618,7 +621,7 @@ const keyboard_listener = struct {
             @panic("TODO");
         }
 
-        const map_str = std.posix.mmap(null, keymap_size, std.posix.PROT.READ, .{ .TYPE = .SHARED }, fd, 0) catch unreachable;
+        const map_str = std.posix.mmap(null, keymap_size, .{ .READ = true }, .{ .TYPE = .SHARED }, fd, 0) catch unreachable;
 
         const keymap = libxkbcommon.?.xkb_keymap_new_from_string(
             wl.xkb_context,
@@ -630,14 +633,14 @@ const keyboard_listener = struct {
         //Unmap the keymap
         std.posix.munmap(map_str);
         //Close the fd
-        std.posix.close(fd);
+        std.Io.Threaded.closeFd(fd);
 
         //Release reference to old state and create new state
         libxkbcommon.?.xkb_state_unref(wl.xkb_state);
         const state = libxkbcommon.?.xkb_state_new(keymap).?;
 
         //this chain hurts me. why must C be this way.
-        const locale = std.posix.getenv("LC_ALL") orelse std.posix.getenv("LC_CTYPE") orelse std.posix.getenv("LANG") orelse "C";
+        const locale = std.c.getenv("LC_ALL") orelse std.c.getenv("LC_CTYPE") orelse std.c.getenv("LANG") orelse "C";
 
         var compose_table = libxkbcommon.?.xkb_compose_table_new_from_locale(
             wl.xkb_context,

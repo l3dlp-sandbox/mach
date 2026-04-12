@@ -400,7 +400,7 @@ pub fn detectBackendType(allocator: std.mem.Allocator) !gpu.BackendType {
     // TODO(env): upgrade to https://codeberg.org/ziglang/zig/pulls/30644 by properly passing
     // env around
     const backend_ptr = std.c.getenv("MACH_FORCE_GPU_BACKEND") orelse {
-        return if (builtin.target.isDarwin()) .metal else if (builtin.target.os.tag == .windows) .d3d12 else .vulkan;
+        return if (builtin.target.os.tag.isDarwin()) .metal else if (builtin.target.os.tag == .windows) .d3d12 else .vulkan;
     };
     const backend = std.mem.sliceTo(backend_ptr, 0);
 

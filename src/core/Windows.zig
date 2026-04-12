@@ -310,7 +310,7 @@ fn getKeyboardModifiers() mach.Core.KeyMods {
 const debug_wndproc_log = false;
 var global_msg_tail: ?*windowmsg.MessageNode = null;
 
-fn wndProc(hwnd: w.HWND, msg: u32, wParam: w.WPARAM, lParam: w.LPARAM) callconv(w.WINAPI) w.LRESULT {
+fn wndProc(hwnd: w.HWND, msg: u32, wParam: w.WPARAM, lParam: w.LPARAM) callconv(.winapi) w.LRESULT {
     var msg_node: windowmsg.MessageNode = undefined;
     if (debug_wndproc_log) msg_node.init(&global_msg_tail, hwnd, msg, wParam, lParam);
     defer if (debug_wndproc_log) msg_node.deinit();
