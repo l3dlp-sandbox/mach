@@ -18,7 +18,7 @@ pub const Context = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator, options: main.Context.Options) !backends.Context {
-        const flags = win32.COINIT_APARTMENTTHREADED | win32.COINIT_DISABLE_OLE1DDE;
+        const flags = win32.COINIT{ .APARTMENTTHREADED = 1, .DISABLE_OLE1DDE = 1 };
         var hr = win32.CoInitializeEx(null, flags);
         switch (hr) {
             win32.S_OK,
@@ -43,7 +43,7 @@ pub const Context = struct {
                     null,
                     win32.CLSCTX_ALL,
                     win32.IID_IMMDeviceEnumerator,
-                    @as(*?*anyopaque, @ptrCast(&enumerator)),
+                    @as(**anyopaque, @ptrCast(&enumerator)),
                 );
                 switch (hr) {
                     win32.S_OK => {},
@@ -97,13 +97,14 @@ pub const Context = struct {
         return .{ .wasapi = ctx };
     }
 
-    fn queryInterfaceCB(ctx: *const win32.IUnknown, riid: ?*const win32.Guid, ppv: ?*?*anyopaque) callconv(.winapi) win32.HRESULT {
-        if (riid.?.eql(win32.IID_IUnknown.*) or riid.?.eql(win32.IID_IMMNotificationClient.*)) {
-            ppv.?.* = @as(?*anyopaque, @ptrFromInt(@intFromPtr(ctx)));
+    fn queryInterfaceCB(ctx: *const win32.IUnknown, riid: *const win32.Guid, ppv: **anyopaque) callconv(.winapi) win32.HRESULT {
+        if (std.mem.eql(u8, &riid.Bytes, &win32.IID_IUnknown.Bytes) or std.mem.eql(u8, &riid.Bytes, &win32.IID_IMMNotificationClient.Bytes)) {
+            ppv.* = @as(*anyopaque, @ptrFromInt(@intFromPtr(ctx)));
             _ = ctx.AddRef();
             return win32.S_OK;
         } else {
-            ppv.?.* = null;
+            const p: *?*anyopaque = @ptrCast(ppv);
+            p.* = null;
             return win32.E_NOINTERFACE;
         }
     }
@@ -134,7 +135,7 @@ pub const Context = struct {
         return win32.S_OK;
     }
 
-    fn onDefaultDeviceChangedCB(ctx: *const win32.IMMNotificationClient, _: win32.DataFlow, _: win32.Role, _: ?[*:0]const u16) callconv(.winapi) win32.HRESULT {
+    fn onDefaultDeviceChangedCB(ctx: *const win32.IMMNotificationClient, _: win32.EDataFlow, _: win32.ERole, _: ?[*:0]const u16) callconv(.winapi) win32.HRESULT {
         var watcher: *Watcher = @constCast(@fieldParentPtr("notif_client", ctx));
         watcher.deviceChangeFn(watcher.user_data);
         return win32.S_OK;
@@ -169,7 +170,7 @@ pub const Context = struct {
         // enumerate
         var collection: ?*win32.IMMDeviceCollection = null;
         var hr = ctx.enumerator.?.EnumAudioEndpoints(
-            win32.DataFlow.all,
+            win32.EDataFlow.eAll,
             win32.DEVICE_STATE_ACTIVE,
             &collection,
         );
@@ -238,7 +239,7 @@ pub const Context = struct {
 
             const formats = blk: {
                 var audio_client: ?*win32.IAudioClient = null;
-                hr = imm_device.?.Activate(win32.IID_IAudioClient, win32.CLSCTX_ALL, null, @as(?*?*anyopaque, @ptrCast(&audio_client)));
+                hr = imm_device.?.Activate(win32.IID_IAudioClient, win32.CLSCTX_ALL, null, @as(**anyopaque, @ptrCast(&audio_client)));
                 switch (hr) {
                     win32.S_OK => {},
                     win32.E_POINTER => unreachable,
@@ -302,7 +303,7 @@ pub const Context = struct {
 
             const dataflow = blk: {
                 var endpoint: ?*win32.IMMEndpoint = null;
-                hr = imm_device.?.IUnknown.QueryInterface(win32.IID_IMMEndpoint, @as(?*?*anyopaque, @ptrCast(&endpoint)));
+                hr = imm_device.?.IUnknown.QueryInterface(win32.IID_IMMEndpoint, @as(**anyopaque, @ptrCast(&endpoint)));
                 switch (hr) {
                     win32.S_OK => {},
                     win32.E_POINTER => unreachable,
@@ -311,7 +312,7 @@ pub const Context = struct {
                 }
                 defer _ = endpoint.?.IUnknown.Release();
 
-                var dataflow: win32.DataFlow = undefined;
+                var dataflow: win32.EDataFlow = undefined;
                 hr = endpoint.?.GetDataFlow(&dataflow);
                 switch (hr) {
                     win32.S_OK => {},
@@ -322,9 +323,10 @@ pub const Context = struct {
             };
 
             const modes: []const main.Device.Mode = switch (dataflow) {
-                .render => &.{.playback},
-                .capture => &.{.capture},
-                .all => &.{ .playback, .capture },
+                .eRender => &.{.playback},
+                .eCapture => &.{.capture},
+                .eAll => &.{ .playback, .capture },
+                .EDataFlow_enum_count => unreachable,
             };
 
             for (modes) |mode| {
@@ -387,8 +389,8 @@ pub const Context = struct {
     fn getDefaultAudioEndpoint(ctx: *Context, mode: main.Device.Mode) !?[:0]u8 {
         var default_playback_device: ?*win32.IMMDevice = null;
         var hr = ctx.enumerator.?.GetDefaultAudioEndpoint(
-            if (mode == .playback) .render else .capture,
-            if (mode == .playback) .console else .communications,
+            if (mode == .playback) .eRender else .eCapture,
+            if (mode == .playback) .eConsole else .eCommunications,
             &default_playback_device,
         );
         switch (hr) {
@@ -440,9 +442,9 @@ pub const Context = struct {
             else => return error.OpeningDevice,
         }
 
-        hr = imm_device.*.?.Activate(win32.IID_IAudioClient3, win32.CLSCTX_ALL, null, @as(?*?*anyopaque, @ptrCast(audio_client3)));
+        hr = imm_device.*.?.Activate(win32.IID_IAudioClient3, win32.CLSCTX_ALL, null, @as(**anyopaque, @ptrCast(audio_client3)));
         if (hr == win32.S_OK) {
-            hr = audio_client3.*.?.IAudioClient2.IAudioClient.IUnknown.QueryInterface(win32.IID_IAudioClient, @as(?*?*anyopaque, @ptrCast(audio_client)));
+            hr = audio_client3.*.?.IAudioClient2.IAudioClient.IUnknown.QueryInterface(win32.IID_IAudioClient, @as(**anyopaque, @ptrCast(audio_client)));
             switch (hr) {
                 win32.S_OK => {},
                 win32.E_NOINTERFACE => unreachable,
@@ -450,7 +452,7 @@ pub const Context = struct {
                 else => return error.OpeningDevice,
             }
         } else {
-            hr = imm_device.*.?.Activate(win32.IID_IAudioClient, win32.CLSCTX_ALL, null, @as(?*?*anyopaque, @ptrCast(audio_client)));
+            hr = imm_device.*.?.Activate(win32.IID_IAudioClient, win32.CLSCTX_ALL, null, @as(**anyopaque, @ptrCast(audio_client)));
             switch (hr) {
                 win32.S_OK => {},
                 win32.E_POINTER => unreachable,
@@ -547,7 +549,7 @@ pub const Context = struct {
 
     fn createSimpleVolume(audio_client: ?*win32.IAudioClient) !?*win32.ISimpleAudioVolume {
         var simple_volume: ?*win32.ISimpleAudioVolume = null;
-        const hr = audio_client.?.GetService(win32.IID_ISimpleAudioVolume, @as(?*?*anyopaque, @ptrCast(&simple_volume)));
+        const hr = audio_client.?.GetService(win32.IID_ISimpleAudioVolume, @as(**anyopaque, @ptrCast(&simple_volume)));
         switch (hr) {
             win32.S_OK => return simple_volume,
             win32.E_POINTER => unreachable,
@@ -571,7 +573,7 @@ pub const Context = struct {
         try ctx.createAudioClient(device, format, sample_rate, &imm_device, &audio_client, &audio_client3, &max_buffer_frames);
 
         var render_client: ?*win32.IAudioRenderClient = null;
-        const hr = audio_client.?.GetService(win32.IID_IAudioRenderClient, @as(?*?*anyopaque, @ptrCast(&render_client)));
+        const hr = audio_client.?.GetService(win32.IID_IAudioRenderClient, @as(**anyopaque, @ptrCast(&render_client)));
         switch (hr) {
             win32.S_OK => {},
             win32.E_POINTER => unreachable,
@@ -619,7 +621,7 @@ pub const Context = struct {
         try ctx.createAudioClient(device, format, sample_rate, &imm_device, &audio_client, &audio_client3, &max_buffer_frames);
 
         var capture_client: ?*win32.IAudioCaptureClient = null;
-        const hr = audio_client.?.GetService(win32.IID_IAudioCaptureClient, @as(?*?*anyopaque, @ptrCast(&capture_client)));
+        const hr = audio_client.?.GetService(win32.IID_IAudioCaptureClient, @as(**anyopaque, @ptrCast(&capture_client)));
         switch (hr) {
             win32.S_OK => {},
             win32.E_POINTER => unreachable,
