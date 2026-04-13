@@ -1,5 +1,7 @@
 const std = @import("std");
 const c = @cImport({
+    // TODO: Zig translate-c / Aro chokes on these so we must define them away
+    @cDefine("_Static_assert(expr, msg)", "((void)0)");
     @cInclude("pipewire/pipewire.h");
     @cInclude("spa/param/audio/format-utils.h");
 });
