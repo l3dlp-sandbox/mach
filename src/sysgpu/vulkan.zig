@@ -3673,5 +3673,5 @@ const MemoryAllocator = struct {
 };
 
 test "reference declarations" {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }
