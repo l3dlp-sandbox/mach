@@ -1802,7 +1802,6 @@ const Command = union(enum) {
         color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined,
         color_attachments_len: usize = 0,
         depth_stencil_attachment: ?sysgpu.RenderPassDepthStencilAttachment,
-
     },
     end_render_pass,
     copy_buffer_to_buffer: struct {

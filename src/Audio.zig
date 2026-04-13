@@ -124,7 +124,7 @@ const SampleBuffer = struct {
                 @memcpy(new_buf[0..self.count], self.buf[self.head..][0..self.count]);
             } else {
                 @memcpy(new_buf[0..first_part], self.buf[self.head..][0..first_part]);
-                @memcpy(new_buf[first_part..][0..self.count - first_part], self.buf[0..self.count - first_part]);
+                @memcpy(new_buf[first_part..][0 .. self.count - first_part], self.buf[0 .. self.count - first_part]);
             }
         }
         if (self.buf.len > 0) self.allocator.free(self.buf);
@@ -141,7 +141,7 @@ const SampleBuffer = struct {
             const tmp = self.allocator.alloc(u8, self.count) catch return;
             defer self.allocator.free(tmp);
             @memcpy(tmp[0..first_part], self.buf[self.head..][0..first_part]);
-            @memcpy(tmp[first_part..][0..self.count - first_part], self.buf[0..self.count - first_part]);
+            @memcpy(tmp[first_part..][0 .. self.count - first_part], self.buf[0 .. self.count - first_part]);
             @memcpy(self.buf[0..self.count], tmp);
         }
         self.head = 0;
