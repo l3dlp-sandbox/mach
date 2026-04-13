@@ -72,8 +72,12 @@
 
         // Dependencies used by examples only
         .zigimg = .{
-            .url = "https://pkg.hexops.org/pkg/thirdparty/zigimg/7b98e82621fe302a9edc147df1191f4d1b7ff7a5.tar.gz",
-            .hash = "zigimg-0.1.0-8_eo2qWHFwA-S24SH7x7NplPii0EbIQiUfDrimgA6rzN",
+            // TODO: switch back to upstream zigimg once it supports Zig 0.16
+            // and once https://codeberg.org/ziglang/zig/issues/31617 is resolved
+            // .url = "https://pkg.hexops.org/pkg/thirdparty/zigimg/7b98e82621fe302a9edc147df1191f4d1b7ff7a5.tar.gz",
+            // .hash = "zigimg-0.1.0-8_eo2qWHFwA-S24SH7x7NplPii0EbIQiUfDrimgA6rzN",
+            .url = "https://github.com/emidoots/zigimg/archive/204076da6e0cce50ca19c46570793deda6c2b8cb.tar.gz",
+            .hash = "zigimg-0.1.0-8_eo2naZFwDyZ1zDEeRFB2EDzeZ37qxhxXVWsdUAWkE8",
             .lazy = true,
         },
         .opusfile = .{
