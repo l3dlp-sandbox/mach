@@ -14,8 +14,8 @@
     },
     .dependencies = .{
         .freetype = .{
-            .url = "https://pkg.hexops.org/pkg/hexops/freetype/a59bb269295a7b6425c7fa8e93f4f4d43c4ffc7f.tar.gz",
-            .hash = "freetype-0.0.0-Oa073Y2ZdgB3EdRZiP3qn0TiFCW_tslmRxgzuSx6ah65",
+            .url = "https://pkg.hexops.org/pkg/hexops/freetype/c4188e125fd4e8c84d49b619f4f409fde52ff1d0.tar.gz",
+            .hash = "freetype-0.0.0-Oa073aKZdgBGGFCSwR0IWkb5oV2rgBGAHeTnXIejmo0k",
             .lazy = true,
         },
 
@@ -81,13 +81,13 @@
             .lazy = true,
         },
         .opusfile = .{
-            .url = "https://pkg.hexops.org/pkg/hexops/opusfile/18ba2362319da6629cfe11503c7078a1c1748e06.tar.gz",
-            .hash = "opusfile-0.0.0-cWXcaQzLBgCca8CFtbQqCyS-0revP7HTcyGFRW70Dmij",
+            .url = "https://pkg.hexops.org/pkg/hexops/opusfile/cc08065df55c6caa0cae132bed039f7152066d84.tar.gz",
+            .hash = "opusfile-0.0.0-cWXcaQzLBgBcvY-nFqAoXHoa089gkh1-pIPraohKZWks",
             .lazy = true,
         },
         .opusenc = .{
-            .url = "https://pkg.hexops.org/pkg/hexops/opusenc/0cd2df344df644a6835c5940cd1bea85d0a6ff88.tar.gz",
-            .hash = "opusenc-0.0.0-X0lZjYv5AgCK7212DRvH3a5QKtFPBEMw2RbwGb7DtAWG",
+            .url = "https://pkg.hexops.org/pkg/hexops/opusenc/7ac71dec46e389cdf52c5a27f1f236354add512b.tar.gz",
+            .hash = "opusenc-0.0.0-X0lZjYv5AgCwRXp0UnRSTcUmYelT-aknQPvsgWVCMneT",
             .lazy = true,
         },
         .mach_example_assets = .{
