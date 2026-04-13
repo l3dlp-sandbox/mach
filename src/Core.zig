@@ -777,16 +777,16 @@ fn assertHasField(comptime T: anytype, comptime field_name: []const u8) void {
 
 test {
     _ = Platform;
-    @import("std").testing.refAllDeclsRecursive(VSyncMode);
-    @import("std").testing.refAllDeclsRecursive(Size);
-    @import("std").testing.refAllDeclsRecursive(Position);
-    @import("std").testing.refAllDeclsRecursive(Event);
-    @import("std").testing.refAllDeclsRecursive(KeyEvent);
-    @import("std").testing.refAllDeclsRecursive(MouseButtonEvent);
-    @import("std").testing.refAllDeclsRecursive(MouseButton);
-    @import("std").testing.refAllDeclsRecursive(Key);
-    @import("std").testing.refAllDeclsRecursive(KeyMods);
-    @import("std").testing.refAllDeclsRecursive(DisplayMode);
-    @import("std").testing.refAllDeclsRecursive(CursorMode);
-    @import("std").testing.refAllDeclsRecursive(CursorShape);
+    @import("std").testing.refAllDecls(VSyncMode);
+    @import("std").testing.refAllDecls(Size);
+    @import("std").testing.refAllDecls(Position);
+    @import("std").testing.refAllDecls(Event);
+    @import("std").testing.refAllDecls(KeyEvent);
+    @import("std").testing.refAllDecls(MouseButtonEvent);
+    @import("std").testing.refAllDecls(MouseButton);
+    @import("std").testing.refAllDecls(Key);
+    @import("std").testing.refAllDecls(KeyMods);
+    @import("std").testing.refAllDecls(DisplayMode);
+    @import("std").testing.refAllDecls(CursorMode);
+    @import("std").testing.refAllDecls(CursorShape);
 }

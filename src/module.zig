@@ -902,11 +902,13 @@ test "Long field name" {
     var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = aa.allocator();
 
+    const io = std.Options.debug_io;
     var modules = Modules(.{test_module}){
         .mods = undefined,
         .graph = undefined,
+        .io = io,
     };
-    try modules.init(allocator);
+    try modules.init(allocator, io);
     modules.deinit(allocator);
     aa.deinit();
 }
@@ -930,11 +932,13 @@ test "Many fields, same module" {
     var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = aa.allocator();
 
+    const io = std.Options.debug_io;
     var modules = Modules(.{test_module}){
         .mods = undefined,
         .graph = undefined,
+        .io = io,
     };
-    try modules.init(allocator);
+    try modules.init(allocator, io);
     modules.deinit(allocator);
     aa.deinit();
 }
@@ -964,11 +968,13 @@ test "Many fields, Many modules" {
     var aa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = aa.allocator();
 
+    const io = std.Options.debug_io;
     var modules = Modules(.{ test_module0, test_module1, test_module2 }){
         .mods = undefined,
         .graph = undefined,
+        .io = io,
     };
-    try modules.init(allocator);
+    try modules.init(allocator, io);
     modules.deinit(allocator);
     aa.deinit();
 }

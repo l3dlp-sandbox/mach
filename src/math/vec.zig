@@ -507,9 +507,11 @@ pub fn VecShared(comptime Scalar: type, comptime VecN: type) type {
         /// Checks for approximate (absolute tolerance) equality between two vectors
         /// of the same type and dimensions
         pub inline fn eqlApprox(a: *const VecN, b: *const VecN, tolerance: Scalar) bool {
+            const a_arr: [VecN.n]Scalar = a.v;
+            const b_arr: [VecN.n]Scalar = b.v;
             var i: usize = 0;
             while (i < VecN.n) : (i += 1) {
-                if (!math.eql(Scalar, a.v[i], b.v[i], tolerance)) {
+                if (!math.eql(Scalar, a_arr[i], b_arr[i], tolerance)) {
                     return false;
                 }
             }
@@ -594,7 +596,7 @@ test "dimensions" {
 }
 
 test "type" {
-    try testing.expect(type, f16).eql(math.Vec3h.T);
+    try std.testing.expectEqual(f16, math.Vec3h.T);
 }
 
 test "init" {

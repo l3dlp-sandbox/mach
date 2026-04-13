@@ -187,27 +187,34 @@ pub fn Quat(comptime Scalar: type) type {
                 dst.v.v[1] = (m.v[2].v[0] - m.v[0].v[2]) * rootInv;
                 dst.v.v[2] = (m.v[0].v[1] - m.v[1].v[0]) * rootInv;
             } else {
+                const m0: [4]T = m.v[0].v;
+                const m1: [4]T = m.v[1].v;
+                const m2: [4]T = m.v[2].v;
+                const cols = [3][4]T{ m0, m1, m2 };
+
                 var i: usize = 0;
 
-                if (m.v[1].v[1] > m.v[0].v[0]) {
+                if (cols[1][1] > cols[0][0]) {
                     i = 1;
                 }
 
-                if (m.v[2].v[2] > m.v[i].v[i]) {
+                if (cols[2][2] > cols[i][i]) {
                     i = 2;
                 }
 
                 const j = (i + 1) % 3;
                 const k = (i + 2) % 3;
 
-                const root = math.sqrt(m.v[i].v[i] - m.v[j].v[j] - m.v[k].v[k] + 1.0);
-                dst.v.v[i] = 0.5 * root;
+                const root = math.sqrt(cols[i][i] - cols[j][j] - cols[k][k] + 1.0);
+                var dst_arr: [4]T = dst.v.v;
+                dst_arr[i] = 0.5 * root;
 
                 const rootInv = 0.5 / root;
 
-                dst.v.v[3] = (m.v[j].v[k] - m.v[k].v[j]) * rootInv;
-                dst.v.v[j] = (m.v[j].v[i] - m.v[i].v[j]) * rootInv;
-                dst.v.v[k] = (m.v[k].v[i] - m.v[i].v[k]) * rootInv;
+                dst_arr[3] = (cols[j][k] - cols[k][j]) * rootInv;
+                dst_arr[j] = (cols[j][i] - cols[i][j]) * rootInv;
+                dst_arr[k] = (cols[k][i] - cols[i][k]) * rootInv;
+                dst.v.v = dst_arr;
             }
 
             return dst;

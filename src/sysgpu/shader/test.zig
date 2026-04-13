@@ -298,6 +298,7 @@ fn expectCodegen(
     const out = try CodeGen.generate(allocator, &ir, lang, use_spirv_cross, .{}, null, null, null);
     defer allocator.free(out);
 
-    try std.fs.cwd().makePath("zig-out/shader/");
-    try std.fs.cwd().writeFile(.{ .sub_path = "zig-out/shader/" ++ file_name, .data = out });
+    const io = std.Options.debug_io;
+    try std.Io.Dir.cwd().createDirPath(io, "zig-out/shader/");
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = "zig-out/shader/" ++ file_name, .data = out });
 }

@@ -1005,5 +1005,5 @@ pub const CreateRenderPipelineAsyncCallback = *const fn (
 ) callconv(.c) void;
 
 test {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }

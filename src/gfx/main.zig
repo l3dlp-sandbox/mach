@@ -21,11 +21,11 @@ test {
     const std = @import("std");
     // TODO: refactor code so we can use this here:
     // std.testing.refAllDeclsRecursive(@This());
-    std.testing.refAllDeclsRecursive(util);
-    std.testing.refAllDeclsRecursive(Sprite);
-    std.testing.refAllDeclsRecursive(Atlas);
-    std.testing.refAllDeclsRecursive(Text);
-    std.testing.refAllDeclsRecursive(Font);
-    std.testing.refAllDeclsRecursive(TextRun);
-    std.testing.refAllDeclsRecursive(Glyph);
+    std.testing.refAllDecls(util);
+    std.testing.refAllDecls(Sprite);
+    std.testing.refAllDecls(Atlas);
+    std.testing.refAllDecls(Text);
+    std.testing.refAllDecls(Font);
+    std.testing.refAllDecls(TextRun);
+    std.testing.refAllDecls(Glyph);
 }

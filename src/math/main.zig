@@ -116,7 +116,7 @@ pub const mat3x3d = Mat3x3d.init;
 pub const mat4x4d = Mat4x4d.init;
 
 test {
-    testing.refAllDeclsRecursive(@This());
+    testing.refAllDecls(@This());
 }
 
 // std.math customizations

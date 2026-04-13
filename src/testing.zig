@@ -43,11 +43,13 @@ fn ExpectVector(comptime T: type) type {
 
         /// Approximate (absolute tolerance) equality
         pub fn eqlApprox(e: *const @This(), actual: T, tolerance: Elem) !void {
+            const expected_arr: [len]Elem = e.expected;
+            const actual_arr: [len]Elem = actual;
             var i: usize = 0;
             while (i < len) : (i += 1) {
-                if (!math.eql(Elem, e.expected[i], actual[i], tolerance)) {
+                if (!math.eql(Elem, expected_arr[i], actual_arr[i], tolerance)) {
                     std.debug.print("actual vector {d}, expected {d} (not within absolute epsilon tolerance {d})\n", .{ actual, e.expected, tolerance });
-                    std.debug.print("actual vector[{}] = {d}, expected {d} (not within absolute epsilon tolerance {d})\n", .{ i, actual[i], e.expected[i], tolerance });
+                    std.debug.print("actual vector[{}] = {d}, expected {d} (not within absolute epsilon tolerance {d})\n", .{ i, actual_arr[i], expected_arr[i], tolerance });
                     return error.TestExpectEqualEps;
                 }
             }
@@ -71,11 +73,13 @@ fn ExpectVecMat(comptime T: type) type {
 
         /// Approximate (absolute tolerance) equality
         pub fn eqlApprox(e: *const @This(), actual: T, tolerance: T.T) !void {
+            const expected_arr: [T.n]T.T = e.expected.v;
+            const actual_arr: [T.n]T.T = actual.v;
             var i: usize = 0;
             while (i < T.n) : (i += 1) {
-                if (!math.eql(T.T, e.expected.v[i], actual.v[i], tolerance)) {
+                if (!math.eql(T.T, expected_arr[i], actual_arr[i], tolerance)) {
                     std.debug.print("actual vector {d}, expected {d} (not within absolute epsilon tolerance {d})\n", .{ actual.v, e.expected.v, tolerance });
-                    std.debug.print("actual vector[{}] = {d}, expected {d} (not within absolute epsilon tolerance {d})\n", .{ i, actual.v[i], e.expected.v[i], tolerance });
+                    std.debug.print("actual vector[{}] = {d}, expected {d} (not within absolute epsilon tolerance {d})\n", .{ i, actual_arr[i], expected_arr[i], tolerance });
                     return error.TestExpectEqualEps;
                 }
             }
@@ -112,7 +116,7 @@ fn ExpectBytes(comptime T: type) type {
 }
 
 fn Expect(comptime T: type) type {
-    if (T == type) return ExpectComptime(T);
+    if (T == type) @compileError("use std.testing.expectEqual directly for comptime-only types");
     if (T == f16 or T == f32 or T == f64) return ExpectFloat(T);
     if (T == []const u8) return ExpectBytes(T);
     if (@typeInfo(T) == .vector) return ExpectVector(T);
@@ -206,17 +210,17 @@ pub fn expect(comptime T: type, expected: T) Expect(T) {
 }
 
 pub const allocator = testing.allocator;
-pub const refAllDeclsRecursive = testing.refAllDeclsRecursive;
+pub const refAllDecls = testing.refAllDecls;
 
 test {
-    refAllDeclsRecursive(Expect(u32));
-    refAllDeclsRecursive(Expect(f32));
-    refAllDeclsRecursive(Expect([]const u8));
-    refAllDeclsRecursive(Expect(@Vector(3, f32)));
-    refAllDeclsRecursive(Expect(mach.math.Vec2h));
-    refAllDeclsRecursive(Expect(mach.math.Vec3));
-    refAllDeclsRecursive(Expect(mach.math.Vec4d));
-    refAllDeclsRecursive(Expect(mach.math.Ray));
+    refAllDecls(Expect(u32));
+    refAllDecls(Expect(f32));
+    refAllDecls(Expect([]const u8));
+    refAllDecls(Expect(@Vector(3, f32)));
+    refAllDecls(Expect(mach.math.Vec2h));
+    refAllDecls(Expect(mach.math.Vec3));
+    refAllDecls(Expect(mach.math.Vec4d));
+    refAllDecls(Expect(mach.math.Ray));
     // refAllDeclsRecursive(Expect(mach.math.Mat4h));
     // refAllDeclsRecursive(Expect(mach.math.Mat4));
     // refAllDeclsRecursive(Expect(mach.math.Mat4d));

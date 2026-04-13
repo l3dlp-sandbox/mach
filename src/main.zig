@@ -52,7 +52,7 @@ pub inline fn dynLibOpen(comptime lib_names: anytype) !std.DynLib {
 
 test {
     // TODO: refactor code so we can use this here:
-    // std.testing.refAllDeclsRecursive(@This());
+    // std.testing.refAllDecls(@This());
     _ = Modules;
     _ = Core;
     _ = gpu;
@@ -67,5 +67,5 @@ test {
     _ = @import("mpsc.zig");
     _ = @import("graph.zig");
 
-    std.testing.refAllDeclsRecursive(math);
+    std.testing.refAllDecls(math);
 }

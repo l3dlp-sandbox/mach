@@ -83,7 +83,7 @@ pub const RenderedGlyph = struct {
 pub const default_font = @embedFile("firasans/FiraSans-Regular.ttf");
 
 test {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 
     // Load a font
     const allocator = std.testing.allocator;

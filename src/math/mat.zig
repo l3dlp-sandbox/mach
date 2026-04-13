@@ -613,7 +613,7 @@ test "zero_struct_overhead" {
 test "n" {
     try testing.expect(usize, 3).eql(math.Mat3x3.cols);
     try testing.expect(usize, 3).eql(math.Mat3x3.rows);
-    try testing.expect(type, math.Vec3).eql(math.Mat3x3.Vec);
+    try std.testing.expectEqual(math.Vec3, math.Mat3x3.Vec);
     try testing.expect(usize, 3).eql(math.Mat3x3.Vec.n);
 }
 

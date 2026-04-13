@@ -338,35 +338,29 @@ test "concurrent producers" {
     try queue.init(allocator, io, 32);
     defer queue.deinit(allocator);
 
-    const n_jobs = 100;
+    const n_threads = 4;
     const n_entries: u32 = 10000;
 
-    var pool: std.Thread.Pool = undefined;
-    try std.Thread.Pool.init(&pool, .{ .allocator = allocator, .n_jobs = n_jobs });
-    defer pool.deinit();
-
-    var wg: std.Thread.WaitGroup = .{};
-    for (0..n_jobs) |_| {
-        pool.spawnWg(
-            &wg,
-            struct {
-                pub fn run(q: *Queue(u32)) void {
-                    var i: u32 = 0;
-                    while (i < n_entries) : (i += 1) {
-                        q.push(allocator, i) catch unreachable;
-                    }
+    var threads: [n_threads]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, struct {
+            fn run(q: *Queue(u32)) void {
+                var i: u32 = 0;
+                while (i < n_entries) : (i += 1) {
+                    q.push(allocator, i) catch unreachable;
                 }
-            }.run,
-            .{&queue},
-        );
+            }
+        }.run, .{&queue});
     }
 
-    wg.wait();
+    for (&threads) |*t| {
+        t.join();
+    }
 
     // Verify we can read some values without crashing
     var count: usize = 0;
     while (queue.pop()) |_| {
         count += 1;
-        if (count >= n_jobs * n_entries) break;
+        if (count >= n_threads * n_entries) break;
     }
 }

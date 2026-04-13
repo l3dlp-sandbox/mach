@@ -2237,5 +2237,5 @@ pub const Queue = struct {
 };
 
 test "reference declarations" {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }

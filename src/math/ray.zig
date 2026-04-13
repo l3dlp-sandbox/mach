@@ -69,12 +69,13 @@ pub fn Ray3(comptime Scalar: type) type {
             vc: *const Vec3P,
             backface_culling: bool,
         ) ?Hit {
+            const dir: [3]P = ray.direction.v;
             const kz: u8 = maxDim([3]P{
-                @abs(ray.direction.v[0]),
-                @abs(ray.direction.v[1]),
-                @abs(ray.direction.v[2]),
+                @abs(dir[0]),
+                @abs(dir[1]),
+                @abs(dir[2]),
             });
-            if (ray.direction.v[kz] == 0.0) {
+            if (dir[kz] == 0.0) {
                 return null;
             }
             var kx: u8 = kz + 1;
@@ -84,19 +85,19 @@ pub fn Ray3(comptime Scalar: type) type {
             if (ky == 3)
                 ky = 0;
 
-            if (ray.direction.v[kz] < 0.0) {
+            if (dir[kz] < 0.0) {
                 const tmp = kx;
                 kx = ky;
                 ky = tmp;
             }
 
-            const sx: P = ray.direction.v[kx] / ray.direction.v[kz];
-            const sy: P = ray.direction.v[ky] / ray.direction.v[kz];
-            const sz: P = 1.0 / ray.direction.v[kz];
+            const sx: P = dir[kx] / dir[kz];
+            const sy: P = dir[ky] / dir[kz];
+            const sz: P = 1.0 / dir[kz];
 
-            const a: @Vector(3, P) = va.v - ray.origin.v;
-            const b: @Vector(3, P) = vb.v - ray.origin.v;
-            const c: @Vector(3, P) = vc.v - ray.origin.v;
+            const a: [3]P = va.v - ray.origin.v;
+            const b: [3]P = vb.v - ray.origin.v;
+            const c: [3]P = vc.v - ray.origin.v;
 
             const ax: P = a[kx] - sx * a[kz];
             const ay: P = a[ky] - sy * a[kz];
