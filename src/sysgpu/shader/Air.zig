@@ -42,6 +42,10 @@ pub fn generate(
         .errors = errors,
     };
     defer {
+        for (astgen.all_scopes.items) |scope| {
+            scope.decls.deinit(allocator);
+        }
+        astgen.all_scopes.deinit(allocator);
         astgen.instructions.deinit(allocator);
         astgen.scratch.deinit(allocator);
         astgen.globals.deinit(allocator);
