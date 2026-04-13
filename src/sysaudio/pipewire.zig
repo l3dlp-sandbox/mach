@@ -187,65 +187,21 @@ pub const Context = struct {
             @as(*allowzero u0, @ptrFromInt(0)),
         );
 
-        const stream_events = c.pw_stream_events{
-            .version = c.PW_VERSION_STREAM_EVENTS,
-            .process = Player.processCb,
-            .destroy = null,
-            .state_changed = stateChangedCb,
-            .control_info = null,
-            .io_changed = null,
-            .param_changed = null,
-            .add_buffer = null,
-            .remove_buffer = null,
-            .drained = null,
-            .command = null,
-            .trigger_done = null,
-        };
-
         const player = try ctx.allocator.create(Player);
         errdefer ctx.allocator.destroy(player);
 
+        const sample_rate = options.sample_rate orelse default_sample_rate;
         const thread = lib.pw_thread_loop_new(device.id, null) orelse return error.SystemResources;
         const stream = lib.pw_stream_new_simple(
             lib.pw_thread_loop_get_loop(thread),
             "audio-src",
             props,
-            &stream_events,
+            &player_stream_events,
             player,
         ) orelse return error.OpeningDevice;
 
-        var builder_buf: [256]u8 = undefined;
-        var pod_builder = c.spa_pod_builder{
-            .data = &builder_buf,
-            .size = builder_buf.len,
-            ._padding = 0,
-            .state = .{
-                .offset = 0,
-                .flags = 0,
-                .frame = null,
-            },
-            .callbacks = .{ .funcs = null, .data = null },
-        };
-        var info = c.spa_audio_info_raw{
-            .format = c.SPA_AUDIO_FORMAT_F32,
-            .channels = @as(u32, @intCast(device.channels.len)),
-            .rate = options.sample_rate orelse default_sample_rate,
-            .flags = 0,
-            .position = undefined,
-        };
-        var params = [1][*c]const c.spa_pod{
-            sysaudio_spa_format_audio_raw_build(&pod_builder, c.SPA_PARAM_EnumFormat, &info),
-        };
-
-        if (lib.pw_stream_connect(
-            stream,
-            c.PW_DIRECTION_OUTPUT,
-            c.PW_ID_ANY,
-            c.PW_STREAM_FLAG_AUTOCONNECT | c.PW_STREAM_FLAG_MAP_BUFFERS | c.PW_STREAM_FLAG_RT_PROCESS,
-            &params,
-            params.len,
-        ) < 0) return error.OpeningDevice;
-
+        // Initialize player before pw_stream_connect, since callbacks
+        // (e.g. stateChangedCb) can fire during connect.
         player.* = .{
             .allocator = ctx.allocator,
             .thread = thread,
@@ -256,8 +212,12 @@ pub const Context = struct {
             .user_data = options.user_data,
             .channels = device.channels,
             .format = .f32,
-            .sample_rate = options.sample_rate orelse default_sample_rate,
+            .sample_rate = sample_rate,
         };
+
+        if (sysaudio_pw_stream_connect_playback(lib.pw_stream_connect, stream, sample_rate, 2) < 0)
+            return error.OpeningDevice;
+
         return .{ .pipewire = player };
     }
 
@@ -292,65 +252,21 @@ pub const Context = struct {
             @as(*allowzero u0, @ptrFromInt(0)),
         );
 
-        const stream_events = c.pw_stream_events{
-            .version = c.PW_VERSION_STREAM_EVENTS,
-            .process = Recorder.processCb,
-            .destroy = null,
-            .state_changed = stateChangedCb,
-            .control_info = null,
-            .io_changed = null,
-            .param_changed = null,
-            .add_buffer = null,
-            .remove_buffer = null,
-            .drained = null,
-            .command = null,
-            .trigger_done = null,
-        };
-
         const recorder = try ctx.allocator.create(Recorder);
         errdefer ctx.allocator.destroy(recorder);
 
+        const sample_rate = options.sample_rate orelse default_sample_rate;
         const thread = lib.pw_thread_loop_new(device.id, null) orelse return error.SystemResources;
         const stream = lib.pw_stream_new_simple(
             lib.pw_thread_loop_get_loop(thread),
             "audio-capture",
             props,
-            &stream_events,
+            &recorder_stream_events,
             recorder,
         ) orelse return error.OpeningDevice;
 
-        var builder_buf: [256]u8 = undefined;
-        var pod_builder = c.spa_pod_builder{
-            .data = &builder_buf,
-            .size = builder_buf.len,
-            ._padding = 0,
-            .state = .{
-                .offset = 0,
-                .flags = 0,
-                .frame = null,
-            },
-            .callbacks = .{ .funcs = null, .data = null },
-        };
-        var info = c.spa_audio_info_raw{
-            .format = c.SPA_AUDIO_FORMAT_F32,
-            .channels = @as(u32, @intCast(device.channels.len)),
-            .rate = options.sample_rate orelse default_sample_rate,
-            .flags = 0,
-            .position = undefined,
-        };
-        var params = [1][*c]c.spa_pod{
-            sysaudio_spa_format_audio_raw_build(&pod_builder, c.SPA_PARAM_EnumFormat, &info),
-        };
-
-        if (lib.pw_stream_connect(
-            stream,
-            c.PW_DIRECTION_INPUT,
-            c.PW_ID_ANY,
-            c.PW_STREAM_FLAG_AUTOCONNECT | c.PW_STREAM_FLAG_MAP_BUFFERS | c.PW_STREAM_FLAG_RT_PROCESS,
-            &params,
-            params.len,
-        ) < 0) return error.OpeningDevice;
-
+        // Initialize recorder before pw_stream_connect, since callbacks
+        // (e.g. stateChangedCb) can fire during connect.
         recorder.* = .{
             .allocator = ctx.allocator,
             .thread = thread,
@@ -361,21 +277,53 @@ pub const Context = struct {
             .user_data = options.user_data,
             .channels = device.channels,
             .format = .f32,
-            .sample_rate = options.sample_rate orelse default_sample_rate,
+            .sample_rate = sample_rate,
         };
+
+        if (sysaudio_pw_stream_connect_capture(lib.pw_stream_connect, stream, sample_rate, 2) < 0)
+            return error.OpeningDevice;
         return .{ .pipewire = recorder };
     }
+};
+
+const player_stream_events = c.pw_stream_events{
+    .version = c.PW_VERSION_STREAM_EVENTS,
+    .process = Player.processCb,
+    .destroy = null,
+    .state_changed = stateChangedCb,
+    .control_info = null,
+    .io_changed = null,
+    .param_changed = null,
+    .add_buffer = null,
+    .remove_buffer = null,
+    .drained = null,
+    .command = null,
+    .trigger_done = null,
+};
+
+const recorder_stream_events = c.pw_stream_events{
+    .version = c.PW_VERSION_STREAM_EVENTS,
+    .process = Recorder.processCb,
+    .destroy = null,
+    .state_changed = stateChangedCb,
+    .control_info = null,
+    .io_changed = null,
+    .param_changed = null,
+    .add_buffer = null,
+    .remove_buffer = null,
+    .drained = null,
+    .command = null,
+    .trigger_done = null,
 };
 
 fn stateChangedCb(player_opaque: ?*anyopaque, old_state: c.pw_stream_state, state: c.pw_stream_state, err: [*c]const u8) callconv(.c) void {
     _ = old_state;
     _ = err;
+    _ = state;
 
     const player = @as(*Player, @ptrCast(@alignCast(player_opaque.?)));
 
-    if (state == c.PW_STREAM_STATE_STREAMING or state == c.PW_STREAM_STATE_ERROR) {
-        lib.pw_thread_loop_signal(player.thread, false);
-    }
+    lib.pw_thread_loop_signal(player.thread, false);
 }
 
 pub const Player = struct {
@@ -424,12 +372,16 @@ pub const Player = struct {
         if (lib.pw_thread_loop_start(player.thread) < 0) return error.SystemResources;
 
         lib.pw_thread_loop_lock(player.thread);
-        lib.pw_thread_loop_wait(player.thread);
-        lib.pw_thread_loop_unlock(player.thread);
-
+        while (true) {
+            const state = lib.pw_stream_get_state(player.stream, null);
+            if (state == c.PW_STREAM_STATE_PAUSED or state == c.PW_STREAM_STATE_STREAMING or state == c.PW_STREAM_STATE_ERROR) break;
+            lib.pw_thread_loop_wait(player.thread);
+        }
         if (lib.pw_stream_get_state(player.stream, null) == c.PW_STREAM_STATE_ERROR) {
+            lib.pw_thread_loop_unlock(player.thread);
             return error.CannotPlay;
         }
+        lib.pw_thread_loop_unlock(player.thread);
     }
 
     pub fn play(player: *Player) !void {
@@ -529,3 +481,5 @@ fn freeDevice(allocator: std.mem.Allocator, device: main.Device) void {
 }
 
 extern fn sysaudio_spa_format_audio_raw_build(builder: [*c]c.spa_pod_builder, id: u32, info: [*c]c.spa_audio_info_raw) callconv(.c) [*c]c.spa_pod;
+extern fn sysaudio_pw_stream_connect_playback(connect_fn: *const anyopaque, stream: ?*c.pw_stream, rate: u32, channels: u32) callconv(.c) c_int;
+extern fn sysaudio_pw_stream_connect_capture(connect_fn: *const anyopaque, stream: ?*c.pw_stream, rate: u32, channels: u32) callconv(.c) c_int;

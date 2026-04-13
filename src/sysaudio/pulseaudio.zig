@@ -59,8 +59,8 @@ const Lib = struct {
     pa_cvolume_set: *const fn ([*c]c.pa_cvolume, c_uint, c.pa_volume_t) callconv(.c) [*c]c.pa_cvolume,
     pa_sw_volume_from_linear: *const fn (f64) callconv(.c) c.pa_volume_t,
 
-    pa_usec_to_bytes: *const fn (t: c.pa_usec_t, spec: [*c]const c.pa_sample_spec) usize,
-    pa_stream_get_sample_spec: *const fn (s: ?*c.pa_stream) [*c]const c.pa_sample_spec,
+    pa_usec_to_bytes: *const fn (t: c.pa_usec_t, spec: [*c]const c.pa_sample_spec) callconv(.c) usize,
+    pa_stream_get_sample_spec: *const fn (s: ?*c.pa_stream) callconv(.c) [*c]const c.pa_sample_spec,
 
     pub fn load() !void {
         lib.handle = try mach.dynLibOpen(.{ "libpulse.so.0", "libpulse.so" });
