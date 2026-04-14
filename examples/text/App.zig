@@ -261,7 +261,7 @@ pub fn render(
 
     // Render text
     text.pipelines.set(app.pipeline_id, .render_pass, render_pass);
-    text_mod.call(.tick);
+    text_mod.call(.render);
 
     // Finish render pass
     render_pass.end();

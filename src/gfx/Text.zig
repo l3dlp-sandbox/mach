@@ -13,7 +13,7 @@ const Text = @This();
 
 pub const mach_module = .mach_gfx_text;
 
-pub const mach_systems = .{ .tick, .init };
+pub const mach_systems = .{ .render, .init };
 
 // TODO(text): currently not handling deinit properly
 
@@ -208,15 +208,15 @@ pipelines: mach.Objects(.{ .track_fields = true }, struct {
     layout: ?*gpu.PipelineLayout = null,
 
     /// Number of text objects this pipeline will render.
-    /// Read-only, updated as part of Text.tick
+    /// Read-only, updated as part of Text.render
     num_texts: u32 = 0,
 
     /// Number of text segments this pipeline will render.
-    /// Read-only, updated as part of Text.tick
+    /// Read-only, updated as part of Text.render
     num_segments: u32 = 0,
 
     /// Total number of glyphs this pipeline will render.
-    /// Read-only, updated as part of Text.tick
+    /// Read-only, updated as part of Text.render
     num_glyphs: u32 = 0,
 
     /// Internal pipeline state.
@@ -235,7 +235,7 @@ pub fn init(text: *Text) !void {
     };
 }
 
-pub fn tick(text: *Text, core: *mach.Core) !void {
+pub fn render(text: *Text, core: *mach.Core) !void {
     var pipelines = text.pipelines.slice();
     while (pipelines.next()) |pipeline_id| {
         // Is this pipeline usable for rendering? If not, no need to process it.

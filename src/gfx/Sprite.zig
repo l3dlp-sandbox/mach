@@ -17,7 +17,7 @@ const Sprite = @This();
 
 pub const mach_module = .mach_gfx_sprite;
 
-pub const mach_systems = .{.tick};
+pub const mach_systems = .{.render};
 
 // TODO(sprite): currently not handling deinit properly
 
@@ -158,14 +158,14 @@ pipelines: mach.Objects(.{ .track_fields = true }, struct {
     layout: ?*gpu.PipelineLayout = null,
 
     /// Number of sprites this pipeline will render.
-    /// Read-only, updated as part of Sprite.tick
+    /// Read-only, updated as part of Sprite.render
     num_sprites: u32 = 0,
 
     /// Internal pipeline state.
     built: ?BuiltPipeline = null,
 }),
 
-pub fn tick(sprite: *Sprite, core: *mach.Core) !void {
+pub fn render(sprite: *Sprite, core: *mach.Core) !void {
     var pipelines = sprite.pipelines.slice();
     while (pipelines.next()) |pipeline_id| {
         // Is this pipeline usable for rendering? If not, no need to process it.
