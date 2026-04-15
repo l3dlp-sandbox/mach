@@ -1016,7 +1016,6 @@ pub const vec4 = gpu_types.vec4;
 pub const mat3x3 = gpu_types.mat3x3;
 pub const mat4x4 = gpu_types.mat4x4;
 
-
 test {
     std.testing.refAllDecls(@This());
 }

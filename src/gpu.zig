@@ -4,7 +4,6 @@ const m = @import("math/main.zig");
 //
 /// @Vector does not have a guaranteed byte layout, so these types must be used
 /// for any data uploaded to the GPU (uniforms, storage buffers, vertex data, etc.)
-
 pub fn Vec2T(comptime Scalar: type) type {
     return extern struct {
         v: [2]Scalar,
