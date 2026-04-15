@@ -60,27 +60,9 @@ pub const RenderLoop = struct {
 
     fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.c) void {
         const self: *RenderLoop = @ptrCast(@alignCast(ctx));
-
-        // Snapshot global graph for the render thread before on_render runs.
-        self.core.render_graph.copyFrom(self.core.windows.internal.graph, self.core.allocator) catch {
+        self.core.renderFrame(self.core_mod) catch {
             self.core.oom.store(true, .release);
-            return;
         };
-
-        // Render all windows with vsync enabled, sequentially
-        var windows = self.core.windows.slice();
-        while (windows.next()) |window_id| {
-            const core_window = self.core.windows.getValue(window_id);
-            if (core_window.native == null) continue;
-            if (core_window.vsync_mode == .none) continue;
-
-            const on_render = core_window.on_render orelse @panic("on_render must be set on all windows");
-            self.core_mod.run(on_render);
-
-            mach.sysgpu.Impl.deviceTick(core_window.device);
-            core_window.swap_chain.present();
-        }
-        self.core.frame.tick();
     }
 
     fn displayLinkCallback(
@@ -139,9 +121,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 }
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
-    // Snapshot global graph for the render thread before on_render runs.
-    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
-
+    // Window management: create new windows, handle property changes.
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         const core_window = core.windows.getValue(window_id);
@@ -205,18 +185,15 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
             if (core.windows.updated(window_id, .vsync_mode)) {
                 try ensureRenderLoop(core, core_mod);
             }
-
-            // For vsync == .none, present every tick (unthrottled)
-            if (core_window.vsync_mode == .none) {
-                const on_render = core_window.on_render orelse @panic("on_render must be set on all windows");
-                core_mod.run(on_render);
-                mach.sysgpu.Impl.deviceTick(core_window.device);
-                core_window.swap_chain.present();
-                core.frame.tick();
-            }
         } else {
             try initWindow(core, core_mod, window_id);
         }
+    }
+
+    // When no display link is driving rendering (all windows are vsync=none),
+    // render from the main loop.
+    if (global_render_loop == null) {
+        try core.renderFrame(core_mod);
     }
 }
 

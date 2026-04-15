@@ -222,15 +222,32 @@ pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {
     core.pushEvent(.{ .window_open = .{ .window_id = window_id } });
 }
 
+/// Render all windows. Called on the render thread (main thread).
+///
+/// This is the single entry point for all rendering. Platform backends call this at the
+/// appropriate time (e.g. driven by CVDisplayLink on macOS, or inline on Windows/Linux).
+pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core)) !void {
+    // Snapshot global graph for the render thread before on_render runs.
+    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
+
+    var windows = core.windows.slice();
+    while (windows.next()) |window_id| {
+        const core_window = core.windows.getValue(window_id);
+        if (core_window.native == null) continue;
+
+        const on_render = core_window.on_render orelse @panic("on_render must be set on all windows");
+        core_mod.run(on_render);
+
+        mach.sysgpu.Impl.deviceTick(core_window.device);
+        core_window.swap_chain.present();
+    }
+    core.frame.tick();
+}
+
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
-    // TODO(core)(emidoots): consider execution order of mach.Core (e.g. creating a new window
-    // during application execution, rendering to multiple windows, etc.) and how
-    // that relates to Platform.tick being responsible for both handling window updates
-    // (like title/size changes) and window creation, plus multi-threaded rendering.
     try Platform.tick(core, core_mod);
 
     core_mod.run(core.on_tick.?);
-    core.frame.tick();
 
     switch (core.state) {
         .running => {},
@@ -250,7 +267,6 @@ pub fn main(core: *Core, core_mod: mach.Mod(Core)) !void {
 
     try Platform.tick(core, core_mod);
     core_mod.run(core.on_tick.?);
-    core.frame.tick();
 
     // Platform drives the main loop.
     Platform.run(platform_update_callback, .{ core, core_mod });
@@ -261,14 +277,9 @@ pub fn main(core: *Core, core_mod: mach.Mod(Core)) !void {
 }
 
 fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core)) !bool {
-    // TODO(core)(emidoots): consider execution order of mach.Core (e.g. creating a new window
-    // during application execution, rendering to multiple windows, etc.) and how
-    // that relates to Platform.tick being responsible for both handling window updates
-    // (like title/size changes) and window creation, plus multi-threaded rendering.
     try Platform.tick(core, core_mod);
 
     core_mod.run(core.on_tick.?);
-    core.frame.tick();
 
     switch (core.state) {
         .running => {},

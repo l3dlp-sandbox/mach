@@ -38,9 +38,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 }
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
-    // Snapshot global graph for the render thread before on_render runs.
-    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
-
+    // Window management: create new windows, handle property changes.
     {
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
@@ -56,14 +54,6 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
                         },
                     );
                 }
-
-                // Run render callback and present frame
-                const core_window = core.windows.getValue(window_id);
-                if (core_window.on_render) |on_render| {
-                    core_mod.run(on_render);
-                    mach.sysgpu.Impl.deviceTick(core_window.device);
-                    core_window.swap_chain.present();
-                }
             } else {
                 try initWindow(core, window_id);
                 std.debug.assert(core.windows.getValue(window_id).native != null);
@@ -71,6 +61,10 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
         }
     }
 
+    // Render all windows.
+    try core.renderFrame(core_mod);
+
+    // Process messages
     var msg: w.MSG = undefined;
     while (true) {
         const result = w.PeekMessageW(&msg, null, 0, 0, w.PM_REMOVE);

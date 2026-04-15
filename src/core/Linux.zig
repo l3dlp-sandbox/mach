@@ -62,9 +62,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 }
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
-    // Snapshot global graph for the render thread before on_render runs.
-    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
-
+    // Window management: create new windows, handle property changes, pump display server events.
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         const native_opt: ?Native = core.windows.get(window_id, .native);
@@ -84,16 +82,6 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
                 .wayland => try Wayland.tick(window_id),
             }
             renewSwapChain(core, window_id);
-
-            // Re-read after renewSwapChain may have replaced the swap chain
-            const updated_window = core.windows.getValue(window_id);
-
-            // Run render callback and present frame
-            if (updated_window.on_render) |on_render| {
-                core_mod.run(on_render);
-                mach.sysgpu.Impl.deviceTick(updated_window.device);
-                updated_window.swap_chain.present();
-            }
         } else {
             try initWindow(core, window_id);
             // Consume the initial updated flags so we don't spuriously
@@ -102,6 +90,9 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
             _ = core.windows.updated(window_id, .decorated);
         }
     }
+
+    // Render all windows.
+    try core.renderFrame(core_mod);
 }
 
 inline fn renewSwapChain(core: *Core, window_id: mach.ObjectID) void {
