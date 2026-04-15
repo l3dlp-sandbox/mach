@@ -150,6 +150,52 @@ pub fn Pool(comptime Node: type) type {
             };
         }
 
+        /// Copies src into dst. Both pools must have the same chunk_size.
+        /// May be called repeatedly to keep `dst` in sync with `src`.
+        /// Concurrent calls to acquire() or release() while copyFrom is executing are not safe.
+        ///
+        /// The copy is optimized for speed rather than memory efficiency, operating under the
+        /// assumption that src may be copied to dst in the future to update it frequently.
+        /// For example, additional capacity in arrays is also mirrored rather than resizing to
+        /// fit only what is needed, under the assumption that capacity may be needed in the next
+        /// copyFrom operation.
+        pub fn copyFrom(dst: *@This(), src: *@This(), allocator: std.mem.Allocator) !void {
+            std.debug.assert(dst.chunk_size == src.chunk_size);
+            // Mirror src's chunk allocation capacity so dst doesn't need to reallocate on
+            // future copyFrom calls.
+            const src_chunks = src.cleanup.items.len;
+            try dst.cleanup.ensureTotalCapacity(allocator, src_chunks);
+
+            // Allocate any missing chunks so dst has the same total node capacity as src
+            while (dst.cleanup.items.len < src_chunks) {
+                const new_nodes = try allocator.alloc(Node, dst.chunk_size);
+                dst.cleanup.appendAssumeCapacity(@ptrCast(new_nodes.ptr));
+            }
+
+            // Count free nodes in src, then link exactly that many from dst's chunks
+            var count: usize = 0;
+            var current = @atomicLoad(?*Node, &src.head, .acquire);
+            while (current) |curr| {
+                count += 1;
+                current = curr.next;
+            }
+
+            // Rebuild dst's free list from its chunk storage
+            dst.head = null;
+            var remaining = count;
+            var chunk_idx: usize = 0;
+            while (remaining > 0 and chunk_idx < dst.cleanup.items.len) {
+                const chunk: [*]Node = @ptrCast(dst.cleanup.items[chunk_idx]);
+                const batch = @min(remaining, dst.chunk_size);
+                var i: usize = 0;
+                while (i < batch - 1) : (i += 1) chunk[i].next = &chunk[i + 1];
+                chunk[batch - 1].next = dst.head;
+                dst.head = &chunk[0];
+                remaining -= batch;
+                chunk_idx += 1;
+            }
+        }
+
         /// Deinit all memory held by the pool
         pub fn deinit(pool: *@This(), allocator: std.mem.Allocator) void {
             for (pool.cleanup.items) |chunk| {
@@ -187,12 +233,12 @@ pub fn Queue(comptime Value: type) type {
         /// Initialize the queue with space preallocated for the given number of elements.
         ///
         /// If the queue runs out of space and needs to allocate, another chunk of elements of the
-        /// given size will be allocated.
-        pub fn init(q: *@This(), allocator: std.mem.Allocator, io: std.Io, size: usize) !void {
+        /// given chunk_size will be allocated.
+        pub fn init(q: *@This(), allocator: std.mem.Allocator, io: std.Io, chunk_size: usize) !void {
             q.empty = Node{ .next = null, .value = undefined };
             q.head = &q.empty;
             q.tail = &q.empty;
-            q.pool = try Pool(Node).init(allocator, io, size);
+            q.pool = try Pool(Node).init(allocator, io, chunk_size);
         }
 
         /// Push node to head of queue.
@@ -304,6 +350,61 @@ pub fn Queue(comptime Value: type) type {
             }
         }
 
+        /// Copies src into dst. Both queues must have the same chunk_size.
+        /// May be called repeatedly to keep `dst` in sync with `src`.
+        /// Concurrent calls to push() or pop() while copyFrom is executing are not safe.
+        ///
+        /// The copy is optimized for speed rather than memory efficiency, operating under the
+        /// assumption that src may be copied to dst in the future to update it frequently.
+        /// For example, additional capacity in arrays is also mirrored rather than resizing to
+        /// fit only what is needed, under the assumption that capacity may be needed in the next
+        /// copyFrom operation.
+        pub fn copyFrom(dst: *@This(), src: *@This(), allocator: std.mem.Allocator) !void {
+            std.debug.assert(dst.pool.chunk_size == src.pool.chunk_size);
+            // Release any previously-queued nodes back to dst's pool before copying,
+            var node = dst.tail;
+            while (true) {
+                const next = @atomicLoad(?*Node, &node.next, .acquire) orelse break;
+                if (node != &dst.empty) dst.pool.release(node);
+                node = next;
+            }
+            if (node != &dst.empty) dst.pool.release(node);
+            dst.empty.next = null;
+            dst.head = &dst.empty;
+            dst.tail = &dst.empty;
+
+            // copy pool
+            try dst.pool.copyFrom(&src.pool, allocator);
+
+            // Walk src from tail to head, acquiring nodes from dst's pool and linking directly
+            var tail = src.tail;
+            var next = @atomicLoad(?*Node, &tail.next, .acquire);
+
+            // Skip the empty sentinel if tail points to it
+            if (tail == &src.empty) {
+                if (next) |tail_next| {
+                    tail = tail_next;
+                    next = @atomicLoad(?*Node, &tail.next, .acquire);
+                } else return; // Queue is empty
+            }
+
+            // Bulk-copy values: acquire nodes from pool and link them directly (no atomics needed)
+            var prev = &dst.empty;
+            while (true) {
+                const dst_node = try dst.pool.acquire(allocator);
+                dst_node.value = tail.value;
+                dst_node.next = null;
+                prev.next = dst_node;
+                prev = dst_node;
+
+                if (next) |tail_next| {
+                    tail = tail_next;
+                    next = @atomicLoad(?*Node, &tail.next, .acquire);
+                } else break;
+            }
+            dst.head = prev;
+        }
+
         pub fn deinit(q: *@This(), allocator: std.mem.Allocator) void {
             q.pool.deinit(allocator);
         }
@@ -363,4 +464,69 @@ test "concurrent producers" {
         count += 1;
         if (count >= n_threads * n_entries) break;
     }
+}
+
+test "Pool.copyFrom" {
+    const allocator = std.testing.allocator;
+    const io = std.Options.debug_io;
+
+    var src = try Pool(Queue(u32).Node).init(allocator, io, 8);
+    defer src.deinit(allocator);
+
+    // Acquire some nodes to shrink the free list
+    const n1 = try src.acquire(allocator);
+    const n2 = try src.acquire(allocator);
+    const src_stats = src.stats();
+
+    var dst = try Pool(Queue(u32).Node).init(allocator, io, 8);
+    defer dst.deinit(allocator);
+    try dst.copyFrom(&src, allocator);
+
+    try std.testing.expectEqual(src_stats.nodes, dst.stats().nodes);
+
+    // Mutate src and copy again to verify repeated copyFrom works
+    src.release(n1);
+    src.release(n2);
+    try dst.copyFrom(&src, allocator);
+
+    try std.testing.expectEqual(src.stats().nodes, dst.stats().nodes);
+}
+
+test "Queue.copyFrom" {
+    const allocator = std.testing.allocator;
+    const io = std.Options.debug_io;
+
+    var src: Queue(u32) = undefined;
+    try src.init(allocator, io, 32);
+    defer src.deinit(allocator);
+
+    try src.push(allocator, 10);
+    try src.push(allocator, 20);
+    try src.push(allocator, 30);
+
+    var dst: Queue(u32) = undefined;
+    try dst.init(allocator, io, 32);
+    defer dst.deinit(allocator);
+
+    try dst.copyFrom(&src, allocator);
+
+    // dst should yield the same values in the same order
+    try std.testing.expectEqual(dst.pop(), 10);
+    try std.testing.expectEqual(dst.pop(), 20);
+    try std.testing.expectEqual(dst.pop(), 30);
+    try std.testing.expectEqual(dst.pop(), null);
+
+    // src should still be intact — mutate it and copy again
+    try std.testing.expectEqual(src.pop(), 10);
+    try src.push(allocator, 40);
+    try src.push(allocator, 50);
+
+    try dst.copyFrom(&src, allocator);
+
+    // dst should now reflect src's current state
+    try std.testing.expectEqual(dst.pop(), 20);
+    try std.testing.expectEqual(dst.pop(), 30);
+    try std.testing.expectEqual(dst.pop(), 40);
+    try std.testing.expectEqual(dst.pop(), 50);
+    try std.testing.expectEqual(dst.pop(), null);
 }
