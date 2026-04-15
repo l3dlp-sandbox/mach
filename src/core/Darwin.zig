@@ -61,6 +61,12 @@ pub const RenderLoop = struct {
     fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.c) void {
         const self: *RenderLoop = @ptrCast(@alignCast(ctx));
 
+        // Snapshot global graph for the render thread before on_render runs.
+        self.core.render_graph.copyFrom(self.core.windows.internal.graph, self.core.allocator) catch {
+            self.core.oom.store(true, .release);
+            return;
+        };
+
         // Render all windows with vsync enabled, sequentially
         var windows = self.core.windows.slice();
         while (windows.next()) |window_id| {
@@ -133,6 +139,9 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 }
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
+    // Snapshot global graph for the render thread before on_render runs.
+    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
+
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         const core_window = core.windows.getValue(window_id);

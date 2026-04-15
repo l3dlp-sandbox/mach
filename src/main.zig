@@ -29,6 +29,8 @@ pub const FunctionID = @import("module.zig").FunctionID;
 pub const Mod = @import("module.zig").Mod;
 pub const ObjectID = @import("module.zig").ObjectID;
 pub const Objects = @import("module.zig").Objects;
+pub const Graph = @import("graph.zig").Graph;
+pub const initGraph = @import("module.zig").initGraph;
 pub const Io = std.Io;
 
 // TODO(object): remove this?

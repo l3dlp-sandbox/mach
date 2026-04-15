@@ -188,7 +188,7 @@ pub fn init(sprite: *Sprite) !void {
     };
 }
 
-pub fn snapshot(sprite: *Sprite) !void {
+pub fn snapshot(sprite: *Sprite, core: *mach.Core) !void {
     const allocator = sprite.allocator;
 
     {
@@ -232,6 +232,11 @@ pub fn snapshot(sprite: *Sprite) !void {
     // Snapshot the sprite objects and pipelines.
     try sprite.render_objects.copyFrom(&sprite.objects);
     try sprite.render_pipelines.copyFrom(&sprite.pipelines);
+
+    // Point render-side graphs to the snapshotted render_graph so render-side
+    // getChildren queries use the snapshot rather than the live app graph.
+    sprite.render_objects.internal.graph = &core.render_graph;
+    sprite.render_pipelines.internal.graph = &core.render_graph;
 
     // Clear all dirty flags on app-side after copyFrom. The flags have already been copied to the
     // render side, so render() will see them. Clearing here ensures they don't re-propagate next frame.

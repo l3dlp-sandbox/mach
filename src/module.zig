@@ -3,6 +3,18 @@ const mach = @import("main.zig");
 const StringTable = @import("StringTable.zig");
 const Graph = @import("graph.zig").Graph;
 
+/// Initialize a graph with default preallocations for the given kind.
+pub fn initGraph(graph: *Graph, allocator: std.mem.Allocator, io: std.Io, comptime kind: anytype) !void {
+    // TODO(object): measured preallocations
+    _ = kind;
+    try graph.init(allocator, io, .{
+        .queue_size = 32,
+        .nodes_size = 32,
+        .num_result_lists = 8,
+        .result_list_size = 8,
+    });
+}
+
 /// An ID representing a mach object. This is an opaque identifier which effectively encodes:
 ///
 /// * An array index that can be used to O(1) lookup the actual data / struct fields of the object.
@@ -702,13 +714,7 @@ pub fn Modules(module_lists: anytype) type {
                 .graph = undefined,
                 .io = io,
             };
-            try m.graph.init(allocator, io, .{
-                // TODO(object): measured preallocations
-                .queue_size = 32,
-                .nodes_size = 32,
-                .num_result_lists = 8,
-                .result_list_size = 8,
-            });
+            try initGraph(&m.graph, allocator, io, .global);
 
             // TODO(object): errdefer release allocations made in this loop
             inline for (@typeInfo(@TypeOf(m.mods)).@"struct".fields) |field| {

@@ -120,6 +120,7 @@ allocator: std.mem.Allocator,
 events: EventQueue,
 input_state: InputState,
 oom: std.atomic.Value(bool) = .init(false),
+render_graph: mach.Graph,
 
 pub fn init(core: *Core, io: std.Io) !void {
     const allocator = std.heap.c_allocator;
@@ -137,10 +138,13 @@ pub fn init(core: *Core, io: std.Io) !void {
         .allocator = allocator,
         .events = events,
         .input_state = .{},
+        .render_graph = undefined,
 
         .input = .{ .target = 0 },
         .frame = .{ .target = 1 },
     };
+
+    try mach.initGraph(&core.render_graph, allocator, io, .render);
 
     core.frame.start(io);
     core.input.start(io);
@@ -298,6 +302,7 @@ pub fn deinit(core: *Core) !void {
         core_window.instance.release();
     }
 
+    core.render_graph.deinit(core.allocator);
     core.events.deinit(core.allocator);
 }
 

@@ -38,6 +38,9 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 }
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
+    // Snapshot global graph for the render thread before on_render runs.
+    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
+
     {
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {

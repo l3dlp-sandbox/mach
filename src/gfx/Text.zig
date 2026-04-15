@@ -246,7 +246,7 @@ pub fn init(text: *Text) !void {
     };
 }
 
-pub fn snapshot(text: *Text) !void {
+pub fn snapshot(text: *Text, core: *mach.Core) !void {
     {
         // Walk over all render snapshot pipelines.
         var render_it = text.render_pipelines.slice();
@@ -290,6 +290,11 @@ pub fn snapshot(text: *Text) !void {
     // Snapshot the text objects and pipelines.
     try text.render_objects.copyFrom(&text.objects);
     try text.render_pipelines.copyFrom(&text.pipelines);
+
+    // Point render-side graphs to the snapshotted render_graph so render-side
+    // getChildren queries use the snapshot rather than the live app graph.
+    text.render_objects.internal.graph = &core.render_graph;
+    text.render_pipelines.internal.graph = &core.render_graph;
 
     // Clear all dirty flags on app-side after copyFrom. The flags have already been copied to the
     // render side, so render() will see them. Clearing here ensures they don't re-propagate next frame.
