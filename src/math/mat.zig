@@ -3,6 +3,7 @@ const std = @import("std");
 const mach = @import("../main.zig");
 const testing = mach.testing;
 const math = mach.math;
+const gpu_types = @import("../gpu.zig");
 const vec = @import("vec.zig");
 const quat = @import("quat.zig");
 
@@ -263,6 +264,25 @@ pub fn Mat3x3(
         pub const mul = Shared.mul;
         pub const mulVec = Shared.mulVec;
         pub const format = Shared.format;
+
+        /// Converts to a 4x4 matrix with the 3x3 in the upper-left and 1 in the bottom-right.
+        pub inline fn mat4x4(v: *const Matrix) Mat4x4(Scalar) {
+            const Vec4 = vec.Vec4(Scalar);
+            return .{ .v = .{
+                Vec4.init(v.v[0].v[0], v.v[0].v[1], v.v[0].v[2], 0),
+                Vec4.init(v.v[1].v[0], v.v[1].v[1], v.v[1].v[2], 0),
+                Vec4.init(v.v[2].v[0], v.v[2].v[1], v.v[2].v[2], 0),
+                Vec4.init(0, 0, 0, 1),
+            } };
+        }
+
+        pub inline fn gpu(v: *const Matrix) gpu_types.Mat3x3T(Scalar) {
+            return .{ .v = .{
+                v.v[0].gpu(),
+                v.v[1].gpu(),
+                v.v[2].gpu(),
+            } };
+        }
     };
 }
 
@@ -507,6 +527,15 @@ pub fn Mat4x4(
         pub const eql = Shared.eql;
         pub const eqlApprox = Shared.eqlApprox;
         pub const format = Shared.format;
+
+        pub inline fn gpu(v: *const Matrix) gpu_types.Mat4x4T(Scalar) {
+            return .{ .v = .{
+                v.v[0].gpu(),
+                v.v[1].gpu(),
+                v.v[2].gpu(),
+                v.v[3].gpu(),
+            } };
+        }
     };
 }
 

@@ -4,12 +4,7 @@ const gpu = mach.gpu;
 const gfx = mach.gfx;
 
 const math = mach.math;
-const vec2 = math.vec2;
-const vec3 = math.vec3;
-const vec4 = math.vec4;
-const mat4x4 = math.mat4x4;
 const Vec2 = math.Vec2;
-const Vec3 = math.Vec3;
 const Mat3x3 = math.Mat3x3;
 const Mat4x4 = math.Mat4x4;
 
@@ -23,10 +18,10 @@ pub const mach_systems = .{ .init, .snapshot, .render };
 
 const Uniforms = extern struct {
     /// The view * orthographic projection matrix
-    view_projection: math.Mat4x4 align(16),
+    view_projection: gpu.Mat4x4 align(16),
 
     /// Total size of the sprite texture in pixels
-    texture_size: math.Vec2 align(16),
+    texture_size: gpu.Vec2 align(16),
 };
 
 const BuiltPipeline = struct {
@@ -37,12 +32,14 @@ const BuiltPipeline = struct {
     texture3: ?*gpu.Texture,
     texture4: ?*gpu.Texture,
     bind_group: *gpu.BindGroup,
+    bind_group_layout: ?*gpu.BindGroupLayout,
     uniforms: *gpu.Buffer,
 
     // Storage buffers
     transforms: *gpu.Buffer,
     uv_transforms: *gpu.Buffer,
     sizes: *gpu.Buffer,
+    buffer_cap: u32,
 
     fn deinit(p: *const BuiltPipeline) void {
         p.render.release();
@@ -52,19 +49,13 @@ const BuiltPipeline = struct {
         if (p.texture3) |tex| tex.release();
         if (p.texture4) |tex| tex.release();
         p.bind_group.release();
+        if (p.bind_group_layout) |l| l.release();
         p.uniforms.release();
         p.transforms.release();
         p.uv_transforms.release();
         p.sizes.release();
     }
 };
-
-const buffer_cap = 1024 * 512; // TODO(sprite): allow user to specify preallocation
-
-var cp_transforms: [buffer_cap]math.Mat4x4 = undefined;
-// TODO(d3d12): uv_transform should be a Mat3x3 but our D3D12/HLSL backend cannot handle it.
-var cp_uv_transforms: [buffer_cap]math.Mat4x4 = undefined;
-var cp_sizes: [buffer_cap]math.Vec2 = undefined;
 
 const Objects = mach.Objects(.{ .track_fields = true }, struct {
     /// The sprite model transformation matrix. A sprite is measured in pixel units, starting from
@@ -175,6 +166,11 @@ render_objects: Objects,
 render_pipelines: Pipelines,
 built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
 
+// Temporary buffers used during updatePipelineBuffers, retained to avoid re-allocation.
+cp_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
+cp_uv_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
+cp_sizes: std.ArrayListUnmanaged(gpu.Vec2) = .empty,
+
 pub fn init(sprite: *Sprite) !void {
     // TODO(allocator): find a better way to get an allocator here
     const allocator = std.heap.c_allocator;
@@ -284,7 +280,7 @@ pub fn render(sprite: *Sprite, core: *mach.Core) !void {
             }
             break :blk false;
         };
-        if (any_sprites_updated) updatePipelineBuffers(sprite, core, pipeline_id, pipeline_children.items);
+        if (any_sprites_updated) try updatePipelineBuffers(sprite, core, pipeline_id, pipeline_children.items);
 
         // Do we actually have any sprites to render?
         pipeline = sprite.render_pipelines.getValue(pipeline_id);
@@ -321,24 +317,26 @@ fn rebuildPipeline(
 
     const label = @tagName(mach_module) ++ ".rebuildPipeline";
 
+    const initial_buffer_cap: u32 = 64;
+
     // Storage buffers
     const transforms = device.createBuffer(&.{
         .label = label ++ " transforms",
         .usage = .{ .storage = true, .copy_dst = true },
-        .size = @sizeOf(math.Mat4x4) * buffer_cap,
+        .size = @sizeOf(gpu.Mat4x4) * initial_buffer_cap,
         .mapped_at_creation = .false,
     });
     const uv_transforms = device.createBuffer(&.{
         .label = label ++ " uv_transforms",
         .usage = .{ .storage = true, .copy_dst = true },
         // TODO(d3d12): uv_transform should be a Mat3x3 but our D3D12/HLSL backend cannot handle it.
-        .size = @sizeOf(math.Mat4x4) * buffer_cap,
+        .size = @sizeOf(gpu.Mat4x4) * initial_buffer_cap,
         .mapped_at_creation = .false,
     });
     const sizes = device.createBuffer(&.{
         .label = label ++ " sizes",
         .usage = .{ .storage = true, .copy_dst = true },
-        .size = @sizeOf(math.Vec2) * buffer_cap,
+        .size = @sizeOf(gpu.Vec2) * initial_buffer_cap,
         .mapped_at_creation = .false,
     });
 
@@ -353,6 +351,7 @@ fn rebuildPipeline(
         .size = @sizeOf(Uniforms),
         .mapped_at_creation = .false,
     });
+    const owns_bind_group_layout = pipeline.bind_group_layout == null;
     const bind_group_layout = pipeline.bind_group_layout orelse device.createBindGroupLayout(
         &gpu.BindGroupLayout.Descriptor.init(.{
             .label = label,
@@ -369,7 +368,6 @@ fn rebuildPipeline(
             },
         }),
     );
-    defer bind_group_layout.release();
 
     const texture_view = pipeline.texture.createView(&gpu.TextureView.Descriptor{ .label = label });
     const texture2_view = if (pipeline.texture2) |tex| tex.createView(&gpu.TextureView.Descriptor{ .label = label }) else texture_view;
@@ -384,9 +382,9 @@ fn rebuildPipeline(
             .layout = bind_group_layout,
             .entries = &.{
                 gpu.BindGroup.Entry.initBuffer(0, uniforms, 0, @sizeOf(Uniforms), @sizeOf(Uniforms)),
-                gpu.BindGroup.Entry.initBuffer(1, transforms, 0, @sizeOf(math.Mat4x4) * buffer_cap, @sizeOf(math.Mat4x4)),
-                gpu.BindGroup.Entry.initBuffer(2, uv_transforms, 0, @sizeOf(math.Mat3x3) * buffer_cap, @sizeOf(math.Mat3x3)),
-                gpu.BindGroup.Entry.initBuffer(3, sizes, 0, @sizeOf(math.Vec2) * buffer_cap, @sizeOf(math.Vec2)),
+                gpu.BindGroup.Entry.initBuffer(1, transforms, 0, @sizeOf(gpu.Mat4x4) * initial_buffer_cap, @sizeOf(gpu.Mat4x4)),
+                gpu.BindGroup.Entry.initBuffer(2, uv_transforms, 0, @sizeOf(gpu.Mat4x4) * initial_buffer_cap, @sizeOf(gpu.Mat4x4)),
+                gpu.BindGroup.Entry.initBuffer(3, sizes, 0, @sizeOf(gpu.Vec2) * initial_buffer_cap, @sizeOf(gpu.Vec2)),
                 gpu.BindGroup.Entry.initSampler(4, texture_sampler),
                 gpu.BindGroup.Entry.initTextureView(5, texture_view),
                 gpu.BindGroup.Entry.initTextureView(6, texture2_view),
@@ -447,10 +445,12 @@ fn rebuildPipeline(
         .texture3 = pipeline.texture3,
         .texture4 = pipeline.texture4,
         .bind_group = bind_group,
+        .bind_group_layout = if (owns_bind_group_layout) bind_group_layout else null,
         .uniforms = uniforms,
         .transforms = transforms,
         .uv_transforms = uv_transforms,
         .sizes = sizes,
+        .buffer_cap = initial_buffer_cap,
     };
     pipeline.num_sprites = 0;
     sprite.render_pipelines.setValueRaw(pipeline_id, pipeline);
@@ -461,9 +461,9 @@ fn updatePipelineBuffers(
     core: *mach.Core,
     pipeline_id: mach.ObjectID,
     pipeline_children: []const mach.ObjectID,
-) void {
+) !void {
     const pipeline = sprite.render_pipelines.getValue(pipeline_id);
-    const built = sprite.built_pipelines.items[pipeline.built_index.?].?;
+    var built = &sprite.built_pipelines.items[pipeline.built_index.?].?;
     const window = core.windows.getValue(pipeline.window.?);
     const device = window.device;
 
@@ -471,55 +471,118 @@ fn updatePipelineBuffers(
     const encoder = device.createCommandEncoder(&.{ .label = label });
     defer encoder.release();
 
-    var i: u32 = 0;
+    sprite.cp_transforms.clearRetainingCapacity();
+    sprite.cp_uv_transforms.clearRetainingCapacity();
+    sprite.cp_sizes.clearRetainingCapacity();
+
     for (pipeline_children) |sprite_id| {
         if (!sprite.render_objects.is(sprite_id)) continue;
         const s = sprite.render_objects.getValue(sprite_id);
 
-        cp_transforms[i] = s.transform;
+        try sprite.cp_transforms.append(sprite.allocator, gpu.mat4x4(s.transform));
 
         // TODO(d3d12): uv_transform should be a Mat3x3 but our D3D12/HLSL backend cannot handle it.
         const uv = s.uv_transform;
-        cp_uv_transforms[i].v[0] = vec4(uv.v[0].x(), uv.v[0].y(), uv.v[0].z(), 0.0);
-        cp_uv_transforms[i].v[1] = vec4(uv.v[1].x(), uv.v[1].y(), uv.v[1].z(), 0.0);
-        cp_uv_transforms[i].v[2] = vec4(uv.v[2].x(), uv.v[2].y(), uv.v[2].z(), 0.0);
-        cp_uv_transforms[i].v[3] = vec4(0.0, 0.0, 0.0, 0.0);
-        cp_sizes[i] = s.size;
-        i += 1;
+        try sprite.cp_uv_transforms.append(sprite.allocator, .{
+            @as([3]f32, uv.v[0].v) ++ .{0.0},
+            @as([3]f32, uv.v[1].v) ++ .{0.0},
+            @as([3]f32, uv.v[2].v) ++ .{0.0},
+            .{ 0.0, 0.0, 0.0, 0.0 },
+        });
+        try sprite.cp_sizes.append(sprite.allocator, gpu.vec2(s.size));
+    }
+
+    const count: u32 = @intCast(sprite.cp_transforms.items.len);
+
+    // Grow GPU storage buffers and recreate bind group if needed.
+    if (count > built.buffer_cap and built.bind_group_layout != null) {
+        var new_cap = built.buffer_cap;
+        while (new_cap < count) new_cap *= 2;
+
+        built.transforms.release();
+        built.uv_transforms.release();
+        built.sizes.release();
+        built.bind_group.release();
+
+        built.transforms = device.createBuffer(&.{
+            .label = label ++ " transforms",
+            .usage = .{ .storage = true, .copy_dst = true },
+            .size = @sizeOf(gpu.Mat4x4) * new_cap,
+            .mapped_at_creation = .false,
+        });
+        built.uv_transforms = device.createBuffer(&.{
+            .label = label ++ " uv_transforms",
+            .usage = .{ .storage = true, .copy_dst = true },
+            .size = @sizeOf(gpu.Mat4x4) * new_cap,
+            .mapped_at_creation = .false,
+        });
+        built.sizes = device.createBuffer(&.{
+            .label = label ++ " sizes",
+            .usage = .{ .storage = true, .copy_dst = true },
+            .size = @sizeOf(gpu.Vec2) * new_cap,
+            .mapped_at_creation = .false,
+        });
+
+        const texture_view = built.texture.createView(&gpu.TextureView.Descriptor{ .label = label });
+        const texture2_view = if (built.texture2) |tex| tex.createView(&gpu.TextureView.Descriptor{ .label = label }) else texture_view;
+        const texture3_view = if (built.texture3) |tex| tex.createView(&gpu.TextureView.Descriptor{ .label = label }) else texture_view;
+        const texture4_view = if (built.texture4) |tex| tex.createView(&gpu.TextureView.Descriptor{ .label = label }) else texture_view;
+        defer texture_view.release();
+        defer if (built.texture2 != null) texture2_view.release();
+        defer if (built.texture3 != null) texture3_view.release();
+        defer if (built.texture4 != null) texture4_view.release();
+
+        built.bind_group = device.createBindGroup(
+            &gpu.BindGroup.Descriptor.init(.{
+                .label = label,
+                .layout = built.bind_group_layout.?,
+                .entries = &.{
+                    gpu.BindGroup.Entry.initBuffer(0, built.uniforms, 0, @sizeOf(Uniforms), @sizeOf(Uniforms)),
+                    gpu.BindGroup.Entry.initBuffer(1, built.transforms, 0, @sizeOf(gpu.Mat4x4) * new_cap, @sizeOf(gpu.Mat4x4)),
+                    gpu.BindGroup.Entry.initBuffer(2, built.uv_transforms, 0, @sizeOf(gpu.Mat4x4) * new_cap, @sizeOf(gpu.Mat4x4)),
+                    gpu.BindGroup.Entry.initBuffer(3, built.sizes, 0, @sizeOf(gpu.Vec2) * new_cap, @sizeOf(gpu.Vec2)),
+                    gpu.BindGroup.Entry.initSampler(4, built.texture_sampler),
+                    gpu.BindGroup.Entry.initTextureView(5, texture_view),
+                    gpu.BindGroup.Entry.initTextureView(6, texture2_view),
+                    gpu.BindGroup.Entry.initTextureView(7, texture3_view),
+                    gpu.BindGroup.Entry.initTextureView(8, texture4_view),
+                },
+            }),
+        );
+        built.buffer_cap = new_cap;
     }
 
     // Sort sprites back-to-front for draw order, alpha blending
     const Context = struct {
-        // TODO(d3d12): uv_transform should be a Mat3x3 but our D3D12/HLSL backend cannot handle it.
-        transforms: []Mat4x4,
-        uv_transforms: []Mat4x4,
-        sizes: []Vec2,
+        transforms: []gpu.Mat4x4,
+        uv_transforms: []gpu.Mat4x4,
+        sizes: []gpu.Vec2,
 
         pub fn lessThan(ctx: @This(), a: usize, b: usize) bool {
-            const a_z = ctx.transforms[a].translation().z();
-            const b_z = ctx.transforms[b].translation().z();
+            // Translation z is column 3, row 2 in column-major storage.
+            const a_z = ctx.transforms[a][3][2];
+            const b_z = ctx.transforms[b][3][2];
             // Greater z values are further away, and thus should render/sort before those with lesser z values.
             return a_z > b_z;
         }
 
         pub fn swap(ctx: @This(), a: usize, b: usize) void {
-            std.mem.swap(Mat4x4, &ctx.transforms[a], &ctx.transforms[b]);
-            // TODO(d3d12): uv_transform should be a Mat3x3 but our D3D12/HLSL backend cannot handle it.
-            std.mem.swap(Mat4x4, &ctx.uv_transforms[a], &ctx.uv_transforms[b]);
-            std.mem.swap(Vec2, &ctx.sizes[a], &ctx.sizes[b]);
+            std.mem.swap(gpu.Mat4x4, &ctx.transforms[a], &ctx.transforms[b]);
+            std.mem.swap(gpu.Mat4x4, &ctx.uv_transforms[a], &ctx.uv_transforms[b]);
+            std.mem.swap(gpu.Vec2, &ctx.sizes[a], &ctx.sizes[b]);
         }
     };
-    std.sort.pdqContext(0, i, Context{
-        .transforms = cp_transforms[0..i],
-        .uv_transforms = cp_uv_transforms[0..i],
-        .sizes = cp_sizes[0..i],
+    std.sort.pdqContext(0, count, Context{
+        .transforms = sprite.cp_transforms.items,
+        .uv_transforms = sprite.cp_uv_transforms.items,
+        .sizes = sprite.cp_sizes.items,
     });
 
-    sprite.render_pipelines.set(pipeline_id, .num_sprites, i);
-    if (i > 0) {
-        encoder.writeBuffer(built.transforms, 0, cp_transforms[0..i]);
-        encoder.writeBuffer(built.uv_transforms, 0, cp_uv_transforms[0..i]);
-        encoder.writeBuffer(built.sizes, 0, cp_sizes[0..i]);
+    sprite.render_pipelines.set(pipeline_id, .num_sprites, @intCast(count));
+    if (count > 0) {
+        encoder.writeBuffer(built.transforms, 0, sprite.cp_transforms.items);
+        encoder.writeBuffer(built.uv_transforms, 0, sprite.cp_uv_transforms.items);
+        encoder.writeBuffer(built.sizes, 0, sprite.cp_sizes.items);
 
         var command = encoder.finish(&.{ .label = label });
         defer command.release();
@@ -555,12 +618,12 @@ fn renderPipeline(
         });
     };
     const uniforms = Uniforms{
-        .view_projection = view_projection,
+        .view_projection = gpu.mat4x4(view_projection),
         // TODO(sprite): dimensions of multi-textures, number of multi-textures present
-        .texture_size = math.vec2(
+        .texture_size = .{
             @as(f32, @floatFromInt(built.texture.getWidth())),
             @as(f32, @floatFromInt(built.texture.getHeight())),
-        ),
+        },
     };
     encoder.writeBuffer(built.uniforms, 0, &[_]Uniforms{uniforms});
     var command = encoder.finish(&.{ .label = label });

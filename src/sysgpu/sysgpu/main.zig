@@ -1004,6 +1004,19 @@ pub const CreateRenderPipelineAsyncCallback = *const fn (
     userdata: ?*anyopaque,
 ) callconv(.c) void;
 
+const gpu_types = @import("../../gpu.zig");
+pub const Vec2 = gpu_types.Vec2;
+pub const Vec3 = gpu_types.Vec3;
+pub const Vec4 = gpu_types.Vec4;
+pub const Mat3x3 = gpu_types.Mat3x3;
+pub const Mat4x4 = gpu_types.Mat4x4;
+pub const vec2 = gpu_types.vec2;
+pub const vec3 = gpu_types.vec3;
+pub const vec4 = gpu_types.vec4;
+pub const mat3x3 = gpu_types.mat3x3;
+pub const mat4x4 = gpu_types.mat4x4;
+
+
 test {
     std.testing.refAllDecls(@This());
 }

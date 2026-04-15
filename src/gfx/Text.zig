@@ -4,9 +4,7 @@ const gpu = mach.gpu;
 const gfx = mach.gfx;
 
 const math = mach.math;
-const vec2 = math.vec2;
 const vec4 = math.vec4;
-const Vec4 = math.Vec4;
 const Mat4x4 = math.Mat4x4;
 
 const Text = @This();
@@ -17,18 +15,12 @@ pub const mach_systems = .{ .init, .snapshot, .render };
 
 // TODO(text): currently not handling deinit properly
 
-const buffer_cap = 1024 * 512; // TODO(text): allow user to specify preallocation
-
-var cp_transforms: [buffer_cap]math.Mat4x4 = undefined;
-var cp_colors: [buffer_cap]math.Vec4 = undefined;
-var cp_glyphs: [buffer_cap]Glyph = undefined;
-
 const Uniforms = extern struct {
     /// The view * orthographic projection matrix
-    view_projection: math.Mat4x4 align(16),
+    view_projection: gpu.Mat4x4 align(16),
 
     /// Total size of the font atlas texture in pixels
-    texture_size: math.Vec2 align(16),
+    texture_size: gpu.Vec2 align(16),
 };
 
 const BuiltPipeline = struct {
@@ -36,6 +28,7 @@ const BuiltPipeline = struct {
     texture_sampler: *gpu.Sampler,
     texture: *gpu.Texture,
     bind_group: *gpu.BindGroup,
+    bind_group_layout: ?*gpu.BindGroupLayout,
     uniforms: *gpu.Buffer,
     texture_atlas: gfx.Atlas,
     regions: RegionMap = .{},
@@ -44,12 +37,14 @@ const BuiltPipeline = struct {
     transforms: *gpu.Buffer,
     colors: *gpu.Buffer,
     glyphs: *gpu.Buffer,
+    buffer_cap: u32,
 
     fn deinit(p: *BuiltPipeline, allocator: std.mem.Allocator) void {
         p.render.release();
         p.texture_sampler.release();
         p.texture.release();
         p.bind_group.release();
+        if (p.bind_group_layout) |l| l.release();
         p.uniforms.release();
         p.texture_atlas.deinit(allocator);
         p.regions.deinit(allocator);
@@ -65,13 +60,13 @@ const BuiltText = struct {
 
 const Glyph = extern struct {
     /// Position of this glyph (top-left corner.)
-    pos: math.Vec2,
+    pos: gpu.Vec2,
 
     /// Width of the glyph in pixels.
-    size: math.Vec2,
+    size: gpu.Vec2,
 
     /// Normalized position of the top-left UV coordinate
-    uv_pos: math.Vec2,
+    uv_pos: gpu.Vec2,
 
     /// Which text this glyph belongs to; this is the index for transforms[i], colors[i].
     text_index: u32,
@@ -80,7 +75,7 @@ const Glyph = extern struct {
     text_padding: u32,
 
     /// Color of the glyph
-    color: math.Vec4,
+    color: gpu.Vec4,
 };
 
 const GlyphKey = struct {
@@ -231,6 +226,9 @@ pipelines: TextPipelines,
 render_objects: TextObjects,
 render_pipelines: TextPipelines,
 built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
+
+// Temporary buffer used during updatePipelineBuffers, retained to avoid re-allocation.
+cp_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
 
 pub fn init(text: *Text) !void {
     // TODO(allocator): find a better way to get an allocator here
@@ -395,23 +393,25 @@ fn rebuildPipeline(
         .rgba,
     );
 
+    const initial_buffer_cap: u32 = 64;
+
     // Storage buffers
     const transforms = device.createBuffer(&.{
         .label = label ++ " transforms",
         .usage = .{ .storage = true, .copy_dst = true },
-        .size = @sizeOf(math.Mat4x4) * buffer_cap,
+        .size = @sizeOf(gpu.Mat4x4) * initial_buffer_cap,
         .mapped_at_creation = .false,
     });
     const colors = device.createBuffer(&.{
         .label = label ++ " colors",
         .usage = .{ .storage = true, .copy_dst = true },
-        .size = @sizeOf(math.Vec4) * buffer_cap,
+        .size = @sizeOf(gpu.Vec4) * initial_buffer_cap,
         .mapped_at_creation = .false,
     });
     const glyphs = device.createBuffer(&.{
         .label = label ++ " glyphs",
         .usage = .{ .storage = true, .copy_dst = true },
-        .size = @sizeOf(Glyph) * buffer_cap,
+        .size = @sizeOf(Glyph) * initial_buffer_cap,
         .mapped_at_creation = .false,
     });
 
@@ -426,6 +426,7 @@ fn rebuildPipeline(
         .size = @sizeOf(Uniforms),
         .mapped_at_creation = .false,
     });
+    const owns_bind_group_layout = pipeline.bind_group_layout == null;
     const bind_group_layout = pipeline.bind_group_layout orelse device.createBindGroupLayout(
         &gpu.BindGroupLayout.Descriptor.init(.{
             .label = label,
@@ -439,7 +440,6 @@ fn rebuildPipeline(
             },
         }),
     );
-    defer bind_group_layout.release();
 
     const texture_view = texture.createView(&gpu.TextureView.Descriptor{ .label = label });
     defer texture_view.release();
@@ -450,9 +450,9 @@ fn rebuildPipeline(
             .layout = bind_group_layout,
             .entries = &.{
                 gpu.BindGroup.Entry.initBuffer(0, uniforms, 0, @sizeOf(Uniforms), @sizeOf(Uniforms)),
-                gpu.BindGroup.Entry.initBuffer(1, transforms, 0, @sizeOf(math.Mat4x4) * buffer_cap, @sizeOf(math.Mat4x4)),
-                gpu.BindGroup.Entry.initBuffer(2, colors, 0, @sizeOf(math.Vec4) * buffer_cap, @sizeOf(math.Vec4)),
-                gpu.BindGroup.Entry.initBuffer(3, glyphs, 0, @sizeOf(Glyph) * buffer_cap, @sizeOf(Glyph)),
+                gpu.BindGroup.Entry.initBuffer(1, transforms, 0, @sizeOf(gpu.Mat4x4) * initial_buffer_cap, @sizeOf(gpu.Mat4x4)),
+                gpu.BindGroup.Entry.initBuffer(2, colors, 0, @sizeOf(gpu.Vec4) * initial_buffer_cap, @sizeOf(gpu.Vec4)),
+                gpu.BindGroup.Entry.initBuffer(3, glyphs, 0, @sizeOf(Glyph) * initial_buffer_cap, @sizeOf(Glyph)),
                 gpu.BindGroup.Entry.initSampler(4, texture_sampler),
                 gpu.BindGroup.Entry.initTextureView(5, texture_view),
             },
@@ -507,10 +507,12 @@ fn rebuildPipeline(
         .texture_sampler = texture_sampler,
         .texture = texture,
         .bind_group = bind_group,
+        .bind_group_layout = if (owns_bind_group_layout) bind_group_layout else null,
         .uniforms = uniforms,
         .transforms = transforms,
         .colors = colors,
         .glyphs = glyphs,
+        .buffer_cap = initial_buffer_cap,
         .texture_atlas = texture_atlas,
     };
     pipeline.num_texts = 0;
@@ -543,6 +545,7 @@ fn updatePipelineBuffers(
         break :blk &text.glyph_update_buffer.?;
     };
     glyphs.clearRetainingCapacity();
+    text.cp_transforms.clearRetainingCapacity();
 
     var texture_update = false;
     var num_segments: u32 = 0;
@@ -552,7 +555,7 @@ fn updatePipelineBuffers(
         var t = text.render_objects.getValue(text_id);
         num_segments += @intCast(t.segments.len);
 
-        cp_transforms[i] = t.transform;
+        try text.cp_transforms.append(text.allocator, gpu.mat4x4(t.transform));
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
         _ = text.render_objects.updated(text_id, .transform);
@@ -643,20 +646,23 @@ fn updatePipelineBuffers(
                 }
 
                 const r = region.value_ptr.*;
-                const size = vec2(@floatFromInt(r.width), @floatFromInt(r.height));
+                const glyph_w: f32 = @floatFromInt(r.width);
+                const glyph_h: f32 = @floatFromInt(r.height);
+                const off_x = glyph.offset.v[0];
+                const off_y = glyph.offset.v[1];
                 try built_text.glyphs.append(text.allocator, .{
-                    .pos = vec2(
-                        origin_x + glyph.offset.x(),
-                        origin_y - (size.y() - glyph.offset.y()),
-                    ).divScalar(px_density),
-                    .size = size.divScalar(px_density),
+                    .pos = .{
+                        (origin_x + off_x) / px_density,
+                        (origin_y - (glyph_h - off_y)) / px_density,
+                    },
+                    .size = .{ glyph_w / px_density, glyph_h / px_density },
                     .text_index = i,
                     // TODO(d3d12): this is a hack, having 7 floats before the color vec causes an error
                     .text_padding = 0,
-                    .uv_pos = vec2(@floatFromInt(r.x), @floatFromInt(r.y)),
-                    .color = style.color,
+                    .uv_pos = .{ @floatFromInt(r.x), @floatFromInt(r.y) },
+                    .color = gpu.vec4(style.color),
                 });
-                origin_x += glyph.advance.x();
+                origin_x += glyph.advance.v[0];
             }
         }
         // Update the text entity's built form on both render and app side, so that copyFrom
@@ -674,8 +680,59 @@ fn updatePipelineBuffers(
     pipeline.num_texts = i;
     pipeline.num_segments = num_segments;
     pipeline.num_glyphs = @intCast(glyphs.items.len);
+
+    // Grow GPU storage buffers and recreate bind group if needed.
+    const needed: u32 = @intCast(@max(i, glyphs.items.len));
+    if (needed > built.buffer_cap and built.bind_group_layout != null) {
+        var new_cap = built.buffer_cap;
+        while (new_cap < needed) new_cap *= 2;
+
+        built.transforms.release();
+        built.colors.release();
+        built.glyphs.release();
+        built.bind_group.release();
+
+        built.transforms = device.createBuffer(&.{
+            .label = label ++ " transforms",
+            .usage = .{ .storage = true, .copy_dst = true },
+            .size = @sizeOf(gpu.Mat4x4) * new_cap,
+            .mapped_at_creation = .false,
+        });
+        built.colors = device.createBuffer(&.{
+            .label = label ++ " colors",
+            .usage = .{ .storage = true, .copy_dst = true },
+            .size = @sizeOf(gpu.Vec4) * new_cap,
+            .mapped_at_creation = .false,
+        });
+        built.glyphs = device.createBuffer(&.{
+            .label = label ++ " glyphs",
+            .usage = .{ .storage = true, .copy_dst = true },
+            .size = @sizeOf(Glyph) * new_cap,
+            .mapped_at_creation = .false,
+        });
+
+        const texture_view = built.texture.createView(&gpu.TextureView.Descriptor{ .label = label });
+        defer texture_view.release();
+
+        built.bind_group = device.createBindGroup(
+            &gpu.BindGroup.Descriptor.init(.{
+                .label = label,
+                .layout = built.bind_group_layout.?,
+                .entries = &.{
+                    gpu.BindGroup.Entry.initBuffer(0, built.uniforms, 0, @sizeOf(Uniforms), @sizeOf(Uniforms)),
+                    gpu.BindGroup.Entry.initBuffer(1, built.transforms, 0, @sizeOf(gpu.Mat4x4) * new_cap, @sizeOf(gpu.Mat4x4)),
+                    gpu.BindGroup.Entry.initBuffer(2, built.colors, 0, @sizeOf(gpu.Vec4) * new_cap, @sizeOf(gpu.Vec4)),
+                    gpu.BindGroup.Entry.initBuffer(3, built.glyphs, 0, @sizeOf(Glyph) * new_cap, @sizeOf(Glyph)),
+                    gpu.BindGroup.Entry.initSampler(4, built.texture_sampler),
+                    gpu.BindGroup.Entry.initTextureView(5, texture_view),
+                },
+            }),
+        );
+        built.buffer_cap = new_cap;
+    }
+
     if (glyphs.items.len > 0) encoder.writeBuffer(built.glyphs, 0, glyphs.items);
-    if (i > 0) encoder.writeBuffer(built.transforms, 0, cp_transforms[0..i]);
+    if (i > 0) encoder.writeBuffer(built.transforms, 0, text.cp_transforms.items);
 
     if (texture_update) {
         // TODO(text): do not assume texture's data_layout and img_size here, instead get it from
@@ -730,11 +787,11 @@ fn renderPipeline(
         });
     };
     const uniforms = Uniforms{
-        .view_projection = view_projection,
-        .texture_size = math.vec2(
+        .view_projection = gpu.mat4x4(view_projection),
+        .texture_size = .{
             @as(f32, @floatFromInt(built.texture.getWidth())),
             @as(f32, @floatFromInt(built.texture.getHeight())),
-        ),
+        },
     };
     encoder.writeBuffer(built.uniforms, 0, &[_]Uniforms{uniforms});
     var command = encoder.finish(&.{ .label = label });

@@ -3,6 +3,7 @@ const std = @import("std");
 const mach = @import("../main.zig");
 const testing = mach.testing;
 const math = mach.math;
+const gpu_types = @import("../gpu.zig");
 const mat = @import("mat.zig");
 const quat = @import("quat.zig");
 
@@ -68,6 +69,10 @@ pub fn Vec2(comptime Scalar: type) type {
         pub const eqlApprox = Shared.eqlApprox;
         pub const eql = Shared.eql;
         pub const format = Shared.format;
+
+        pub inline fn gpu(v: *const VecN) gpu_types.Vec2T(Scalar) {
+            return .{ .v = @as([n]Scalar, v.v) };
+        }
     };
 }
 
@@ -178,6 +183,10 @@ pub fn Vec3(comptime Scalar: type) type {
         pub const eqlApprox = Shared.eqlApprox;
         pub const eql = Shared.eql;
         pub const format = Shared.format;
+
+        pub inline fn gpu(v: *const VecN) gpu_types.Vec3T(Scalar) {
+            return .{ .v = @as([n]Scalar, v.v) };
+        }
     };
 }
 
@@ -271,6 +280,10 @@ pub fn Vec4(comptime Scalar: type) type {
         pub const eqlApprox = Shared.eqlApprox;
         pub const eql = Shared.eql;
         pub const format = Shared.format;
+
+        pub inline fn gpu(v: *const VecN) gpu_types.Vec4T(Scalar) {
+            return .{ .v = @as([n]Scalar, v.v) };
+        }
     };
 }
 
