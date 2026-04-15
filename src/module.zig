@@ -474,6 +474,85 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             return objs.internal.graph.removeChild(objs.internal.allocator, id, child);
         }
 
+        /// Copies all object data from src into this Objects instance.
+        ///
+        /// All objects' fields are copied (not a deep copy, so beware of pointer fields!)
+        ///
+        /// src.graph is not copied, and dst.graph is not modified. Tags are copied. Note that
+        /// tags and the graph store object IDs, effectively array indices, not object pointers
+        /// or values.
+        ///
+        /// The copy is optimized for speed rather than memory efficiency, operating under the
+        /// assumption that the objects to be copied may be frequently copied from src to dst.
+        /// For example, dead to-be-recycled objects are copied too rather than being garbage
+        /// collected during the copy process. Additional capacity in arrays is also mirrored
+        /// rather than resizing to fit only what is needed, under the assumption that capacity
+        /// may be needed in the next copy.
+        pub fn copyFrom(dst: *@This(), src: *const @This()) std.mem.Allocator.Error!void {
+            // allocator, io, and mu fields are not copied.
+            const allocator = dst.internal.allocator;
+
+            // copy type_id
+            dst.internal.type_id = src.internal.type_id;
+
+            // copy data
+            const src_len = src.internal.data.len;
+            try dst.internal.data.ensureTotalCapacity(allocator, src.internal.data.capacity);
+            dst.internal.data.len = src_len;
+            if (has_fields) {
+                const src_slice = src.internal.data.slice();
+                const dst_slice = dst.internal.data.slice();
+                inline for (0..@typeInfo(StorageT).@"struct".fields.len) |i| {
+                    const field_tag: std.meta.FieldEnum(StorageT) = @enumFromInt(i);
+                    @memcpy(dst_slice.items(field_tag)[0..src_len], src_slice.items(field_tag)[0..src_len]);
+                }
+            }
+
+            // copy dead
+            try dst.internal.dead.resize(allocator, src.internal.dead.bit_length, false);
+            const MaskInt = std.bit_set.DynamicBitSetUnmanaged.MaskInt;
+            const dead_masks = (src.internal.dead.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
+            if (dead_masks > 0) {
+                @memcpy(dst.internal.dead.masks[0..dead_masks], src.internal.dead.masks[0..dead_masks]);
+            }
+
+            // copy generation
+            try dst.internal.generation.ensureTotalCapacity(allocator, src.internal.generation.capacity);
+            dst.internal.generation.items.len = src_len;
+            if (src_len > 0) {
+                @memcpy(dst.internal.generation.items[0..src_len], src.internal.generation.items[0..src_len]);
+            }
+
+            // copy recycling_bin
+            try dst.internal.recycling_bin.ensureTotalCapacity(allocator, src.internal.recycling_bin.capacity);
+            dst.internal.recycling_bin.items.len = src.internal.recycling_bin.items.len;
+            if (src.internal.recycling_bin.items.len > 0) {
+                @memcpy(dst.internal.recycling_bin.items, src.internal.recycling_bin.items);
+            }
+
+            // copy thrown_on_the_floor
+            dst.internal.thrown_on_the_floor = src.internal.thrown_on_the_floor;
+
+            // copy updated
+            if (options.track_fields) {
+                if (src.internal.updated) |src_updated| {
+                    try dst.internal.updated.?.resize(allocator, src_updated.bit_length, false);
+                    const updated_masks = (src_updated.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
+                    if (updated_masks > 0) {
+                        @memcpy(dst.internal.updated.?.masks[0..updated_masks], src_updated.masks[0..updated_masks]);
+                    }
+                }
+            }
+
+            // copy tags
+            dst.internal.tags.clearRetainingCapacity();
+            try dst.internal.tags.ensureTotalCapacity(allocator, src.internal.tags.capacity());
+            var tag_iter = src.internal.tags.iterator();
+            while (tag_iter.next()) |entry| {
+                dst.internal.tags.putAssumeCapacity(entry.key_ptr.*, entry.value_ptr.*);
+            }
+        }
+
         /// Queries the children of the given object ID (which may be any object, including one not
         /// in this list of objects - and finds the first child which would be from this list of
         /// objects.
