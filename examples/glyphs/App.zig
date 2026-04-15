@@ -74,6 +74,7 @@ regions: RegionMap = .{},
 
 pub const main = mach.schedule(.{
     .{ mach.Core, .init },
+    .{ gfx.Sprite, .init },
     .{ App, .init },
     .{ mach.Core, .main },
 });
@@ -355,6 +356,7 @@ pub fn render(
 
     // Render sprites
     sprite.pipelines.set(app.pipeline_id, .render_pass, render_pass);
+    sprite_mod.call(.snapshot);
     sprite_mod.call(.render);
 
     // Finish render pass

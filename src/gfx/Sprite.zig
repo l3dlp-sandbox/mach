@@ -17,7 +17,7 @@ const Sprite = @This();
 
 pub const mach_module = .mach_gfx_sprite;
 
-pub const mach_systems = .{.render};
+pub const mach_systems = .{ .init, .snapshot, .render };
 
 // TODO(sprite): currently not handling deinit properly
 
@@ -66,7 +66,7 @@ var cp_transforms: [buffer_cap]math.Mat4x4 = undefined;
 var cp_uv_transforms: [buffer_cap]math.Mat4x4 = undefined;
 var cp_sizes: [buffer_cap]math.Vec2 = undefined;
 
-objects: mach.Objects(.{ .track_fields = true }, struct {
+const Objects = mach.Objects(.{ .track_fields = true }, struct {
     /// The sprite model transformation matrix. A sprite is measured in pixel units, starting from
     /// (0, 0) at the top-left corner and extending to the size of the sprite. By default, the world
     /// origin (0, 0) lives at the center of the window.
@@ -80,10 +80,10 @@ objects: mach.Objects(.{ .track_fields = true }, struct {
 
     /// The size of the sprite, in pixels.
     size: Vec2,
-}),
+});
 
 /// A sprite pipeline renders all sprites that are parented to it.
-pipelines: mach.Objects(.{ .track_fields = true }, struct {
+const Pipelines = mach.Objects(.{ .track_fields = true }, struct {
     /// Which window (device/queue) to use. If not set, this pipeline will not be rendered.
     window: ?mach.ObjectID = null,
 
@@ -158,48 +158,131 @@ pipelines: mach.Objects(.{ .track_fields = true }, struct {
     layout: ?*gpu.PipelineLayout = null,
 
     /// Number of sprites this pipeline will render.
-    /// Read-only, updated as part of Sprite.render
+    /// Read-only, updated as part of Sprite.snapshot
     num_sprites: u32 = 0,
 
     /// Internal pipeline state.
-    built: ?BuiltPipeline = null,
-}),
+    built_index: ?u32 = null,
+});
+
+allocator: std.mem.Allocator,
+
+objects: Objects,
+pipelines: Pipelines,
+
+// Internal render copy of objects and pipelines.
+render_objects: Objects,
+render_pipelines: Pipelines,
+built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
+
+pub fn init(sprite: *Sprite) !void {
+    // TODO(allocator): find a better way to get an allocator here
+    const allocator = std.heap.c_allocator;
+
+    sprite.* = .{
+        .allocator = allocator,
+        .objects = sprite.objects,
+        .pipelines = sprite.pipelines,
+        .render_objects = sprite.render_objects,
+        .render_pipelines = sprite.render_pipelines,
+    };
+}
+
+pub fn snapshot(sprite: *Sprite) !void {
+    const allocator = sprite.allocator;
+
+    {
+        // Walk over all render snapshot pipelines.
+        var render_it = sprite.render_pipelines.slice();
+        while (render_it.next()) |render_pid| {
+            // Does the app side still have the pipeline object alive, or was it deleted?
+            const alive = blk: {
+                var app_it = sprite.pipelines.slice();
+                while (app_it.next()) |app_pid| {
+                    if (render_pid == app_pid) break :blk true;
+                }
+                break :blk false;
+            };
+            if (alive) {
+                // The app pipeline is still alive, so update it with stats from the last .render.
+                sprite.pipelines.setRaw(render_pid, .num_sprites, sprite.render_pipelines.get(render_pid, .num_sprites));
+            } else {
+                // The app wants to delete the pipeline, so deinit it.
+                const pipeline = sprite.render_pipelines.getValue(render_pid);
+                if (pipeline.built_index) |built_idx| {
+                    if (sprite.built_pipelines.items[built_idx]) |*b| b.deinit();
+                    sprite.built_pipelines.items[built_idx] = null;
+                }
+            }
+        }
+    }
+
+    // Ensure every app-side pipeline has a built_pipelines slot allocated where we'll store the pipeline.
+    {
+        var app_it = sprite.pipelines.slice();
+        while (app_it.next()) |app_pid| {
+            if (sprite.pipelines.get(app_pid, .built_index) == null) {
+                const idx: u32 = @intCast(sprite.built_pipelines.items.len);
+                try sprite.built_pipelines.append(allocator, null);
+                sprite.pipelines.setRaw(app_pid, .built_index, idx);
+            }
+        }
+    }
+
+    // Snapshot the sprite objects and pipelines.
+    try sprite.render_objects.copyFrom(&sprite.objects);
+    try sprite.render_pipelines.copyFrom(&sprite.pipelines);
+
+    // Clear all dirty flags on app-side after copyFrom. The flags have already been copied to the
+    // render side, so render() will see them. Clearing here ensures they don't re-propagate next frame.
+    {
+        var object_it = sprite.objects.slice();
+        while (object_it.next()) |sid| {
+            _ = sprite.objects.anyUpdated(sid);
+        }
+        var pipeline_it = sprite.pipelines.slice();
+        while (pipeline_it.next()) |pid| {
+            _ = sprite.pipelines.anyUpdated(pid);
+        }
+    }
+}
 
 pub fn render(sprite: *Sprite, core: *mach.Core) !void {
-    var pipelines = sprite.pipelines.slice();
+    var pipelines = sprite.render_pipelines.slice();
     while (pipelines.next()) |pipeline_id| {
         // Is this pipeline usable for rendering? If not, no need to process it.
-        var pipeline = sprite.pipelines.getValue(pipeline_id);
+        var pipeline = sprite.render_pipelines.getValue(pipeline_id);
         if (pipeline.window == null or pipeline.render_pass == null) continue;
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
-        _ = sprite.pipelines.updated(pipeline_id, .window);
-        _ = sprite.pipelines.updated(pipeline_id, .render_pass);
-        _ = sprite.pipelines.updated(pipeline_id, .view_projection);
-        _ = sprite.pipelines.updated(pipeline_id, .num_sprites);
+        _ = sprite.render_pipelines.updated(pipeline_id, .window);
+        _ = sprite.render_pipelines.updated(pipeline_id, .render_pass);
+        _ = sprite.render_pipelines.updated(pipeline_id, .view_projection);
+        _ = sprite.render_pipelines.updated(pipeline_id, .num_sprites);
+        _ = sprite.render_pipelines.updated(pipeline_id, .built_index);
 
         // If any other fields of the pipeline have been updated, a pipeline rebuild is required.
-        if (sprite.pipelines.anyUpdated(pipeline_id)) {
+        if (sprite.render_pipelines.anyUpdated(pipeline_id)) {
             rebuildPipeline(core, sprite, pipeline_id);
         }
 
         // Find sprites parented to this pipeline.
-        var pipeline_children = try sprite.pipelines.getChildren(pipeline_id);
+        var pipeline_children = try sprite.render_pipelines.getChildren(pipeline_id);
         defer pipeline_children.deinit();
 
         // If any sprites were updated, we update the pipeline's storage buffers to have the new
         // information for all its sprites.
         const any_sprites_updated = blk: {
             for (pipeline_children.items) |sprite_id| {
-                if (!sprite.objects.is(sprite_id)) continue;
-                if (sprite.objects.anyUpdated(sprite_id)) break :blk true;
+                if (!sprite.render_objects.is(sprite_id)) continue;
+                if (sprite.render_objects.anyUpdated(sprite_id)) break :blk true;
             }
             break :blk false;
         };
         if (any_sprites_updated) updatePipelineBuffers(sprite, core, pipeline_id, pipeline_children.items);
 
         // Do we actually have any sprites to render?
-        pipeline = sprite.pipelines.getValue(pipeline_id);
+        pipeline = sprite.render_pipelines.getValue(pipeline_id);
         if (pipeline.num_sprites == 0) continue;
 
         // TODO(sprite): need a way to specify order of rendering with multiple pipelines
@@ -213,9 +296,9 @@ fn rebuildPipeline(
     pipeline_id: mach.ObjectID,
 ) void {
     // Destroy the current pipeline, if built.
-    var pipeline = sprite.pipelines.getValue(pipeline_id);
-    defer sprite.pipelines.setValueRaw(pipeline_id, pipeline);
-    if (pipeline.built) |built| built.deinit();
+    var pipeline = sprite.render_pipelines.getValue(pipeline_id);
+    const built_idx = pipeline.built_index.?;
+    if (sprite.built_pipelines.items[built_idx]) |built| built.deinit();
 
     // Reference any user-provided objects.
     pipeline.texture.reference();
@@ -351,7 +434,7 @@ fn rebuildPipeline(
         },
     });
 
-    pipeline.built = BuiltPipeline{
+    sprite.built_pipelines.items[built_idx] = BuiltPipeline{
         .render = render_pipeline,
         .texture_sampler = texture_sampler,
         .texture = pipeline.texture,
@@ -365,6 +448,7 @@ fn rebuildPipeline(
         .sizes = sizes,
     };
     pipeline.num_sprites = 0;
+    sprite.render_pipelines.setValueRaw(pipeline_id, pipeline);
 }
 
 fn updatePipelineBuffers(
@@ -373,7 +457,8 @@ fn updatePipelineBuffers(
     pipeline_id: mach.ObjectID,
     pipeline_children: []const mach.ObjectID,
 ) void {
-    const pipeline = sprite.pipelines.getValue(pipeline_id);
+    const pipeline = sprite.render_pipelines.getValue(pipeline_id);
+    const built = sprite.built_pipelines.items[pipeline.built_index.?].?;
     const window = core.windows.getValue(pipeline.window.?);
     const device = window.device;
 
@@ -383,8 +468,8 @@ fn updatePipelineBuffers(
 
     var i: u32 = 0;
     for (pipeline_children) |sprite_id| {
-        if (!sprite.objects.is(sprite_id)) continue;
-        const s = sprite.objects.getValue(sprite_id);
+        if (!sprite.render_objects.is(sprite_id)) continue;
+        const s = sprite.render_objects.getValue(sprite_id);
 
         cp_transforms[i] = s.transform;
 
@@ -425,11 +510,11 @@ fn updatePipelineBuffers(
         .sizes = cp_sizes[0..i],
     });
 
-    sprite.pipelines.set(pipeline_id, .num_sprites, i);
+    sprite.render_pipelines.set(pipeline_id, .num_sprites, i);
     if (i > 0) {
-        encoder.writeBuffer(pipeline.built.?.transforms, 0, cp_transforms[0..i]);
-        encoder.writeBuffer(pipeline.built.?.uv_transforms, 0, cp_uv_transforms[0..i]);
-        encoder.writeBuffer(pipeline.built.?.sizes, 0, cp_sizes[0..i]);
+        encoder.writeBuffer(built.transforms, 0, cp_transforms[0..i]);
+        encoder.writeBuffer(built.uv_transforms, 0, cp_uv_transforms[0..i]);
+        encoder.writeBuffer(built.sizes, 0, cp_sizes[0..i]);
 
         var command = encoder.finish(&.{ .label = label });
         defer command.release();
@@ -442,7 +527,8 @@ fn renderPipeline(
     core: *mach.Core,
     pipeline_id: mach.ObjectID,
 ) void {
-    const pipeline = sprite.pipelines.getValue(pipeline_id);
+    const pipeline = sprite.render_pipelines.getValue(pipeline_id);
+    const built = sprite.built_pipelines.items[pipeline.built_index.?].?;
     const window = core.windows.getValue(pipeline.window.?);
     const device = window.device;
 
@@ -467,19 +553,19 @@ fn renderPipeline(
         .view_projection = view_projection,
         // TODO(sprite): dimensions of multi-textures, number of multi-textures present
         .texture_size = math.vec2(
-            @as(f32, @floatFromInt(pipeline.built.?.texture.getWidth())),
-            @as(f32, @floatFromInt(pipeline.built.?.texture.getHeight())),
+            @as(f32, @floatFromInt(built.texture.getWidth())),
+            @as(f32, @floatFromInt(built.texture.getHeight())),
         ),
     };
-    encoder.writeBuffer(pipeline.built.?.uniforms, 0, &[_]Uniforms{uniforms});
+    encoder.writeBuffer(built.uniforms, 0, &[_]Uniforms{uniforms});
     var command = encoder.finish(&.{ .label = label });
     defer command.release();
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
 
     // Draw the sprite batch
     const total_vertices = pipeline.num_sprites * 6;
-    pipeline.render_pass.?.setPipeline(pipeline.built.?.render);
+    pipeline.render_pass.?.setPipeline(built.render);
     // TODO(sprite): can we remove unused dynamic offsets?
-    pipeline.render_pass.?.setBindGroup(0, pipeline.built.?.bind_group, &.{});
+    pipeline.render_pass.?.setBindGroup(0, built.bind_group, &.{});
     pipeline.render_pass.?.draw(total_vertices, 1, 0, 0);
 }

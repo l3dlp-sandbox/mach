@@ -39,6 +39,7 @@ pub const main = mach.schedule(.{
     .{ mach.Core, .init },
     .{ mach.Audio, .init },
     .{ gfx.Text, .init },
+    .{ gfx.Sprite, .init },
     .{ App, .init },
     .{ mach.Core, .main },
 });
@@ -345,10 +346,12 @@ pub fn render(
 
     // Render sprites
     sprite.pipelines.set(app.sprite_pipeline_id, .render_pass, render_pass);
+    sprite_mod.call(.snapshot);
     sprite_mod.call(.render);
 
     // Render text
     text.pipelines.set(app.text_pipeline_id, .render_pass, render_pass);
+    text_mod.call(.snapshot);
     text_mod.call(.render);
 
     // Finish render pass

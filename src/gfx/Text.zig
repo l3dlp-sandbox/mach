@@ -13,7 +13,7 @@ const Text = @This();
 
 pub const mach_module = .mach_gfx_text;
 
-pub const mach_systems = .{ .render, .init };
+pub const mach_systems = .{ .init, .snapshot, .render };
 
 // TODO(text): currently not handling deinit properly
 
@@ -99,11 +99,7 @@ pub const Segment = struct {
     style: mach.ObjectID,
 };
 
-allocator: std.mem.Allocator,
-glyph_update_buffer: ?std.ArrayListUnmanaged(Glyph) = null,
-font_once: ?gfx.Font = null,
-
-styles: mach.Objects(.{ .track_fields = true }, struct {
+const Styles = mach.Objects(.{ .track_fields = true }, struct {
     // TODO(text): not currently implemented
     // TODO(text): ship a default font
     /// Desired font to render text with
@@ -126,9 +122,9 @@ styles: mach.Objects(.{ .track_fields = true }, struct {
     italic: bool = false,
 
     // TODO(text): allow user to specify projection matrix (3d-space flat text etc.)
-}),
+});
 
-objects: mach.Objects(.{ .track_fields = true }, struct {
+const TextObjects = mach.Objects(.{ .track_fields = true }, struct {
     /// The text model transformation matrix. Text is measured in pixel units, starting from
     /// (0, 0) at the top-left corner and extending to the size of the text. By default, the world
     /// origin (0, 0) lives at the center of the window.
@@ -139,10 +135,10 @@ objects: mach.Objects(.{ .track_fields = true }, struct {
 
     /// Internal text object state.
     built: ?BuiltText = null,
-}),
+});
 
 /// A text pipeline renders all text objects that are parented to it.
-pipelines: mach.Objects(.{ .track_fields = true }, struct {
+const TextPipelines = mach.Objects(.{ .track_fields = true }, struct {
     /// Which window (device/queue) to use. If not set, this pipeline will not be rendered.
     window: ?mach.ObjectID = null,
 
@@ -208,20 +204,33 @@ pipelines: mach.Objects(.{ .track_fields = true }, struct {
     layout: ?*gpu.PipelineLayout = null,
 
     /// Number of text objects this pipeline will render.
-    /// Read-only, updated as part of Text.render
+    /// Read-only, updated as part of Text.snapshot
     num_texts: u32 = 0,
 
     /// Number of text segments this pipeline will render.
-    /// Read-only, updated as part of Text.render
+    /// Read-only, updated as part of Text.snapshot
     num_segments: u32 = 0,
 
     /// Total number of glyphs this pipeline will render.
-    /// Read-only, updated as part of Text.render
+    /// Read-only, updated as part of Text.snapshot
     num_glyphs: u32 = 0,
 
     /// Internal pipeline state.
-    built: ?BuiltPipeline = null,
-}),
+    built_index: ?u32 = null,
+});
+
+allocator: std.mem.Allocator,
+glyph_update_buffer: ?std.ArrayListUnmanaged(Glyph) = null,
+font_once: ?gfx.Font = null,
+
+styles: Styles,
+objects: TextObjects,
+pipelines: TextPipelines,
+
+// Internal render copy of objects and pipelines.
+render_objects: TextObjects,
+render_pipelines: TextPipelines,
+built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
 
 pub fn init(text: *Text) !void {
     // TODO(allocator): find a better way to get an allocator here
@@ -232,41 +241,106 @@ pub fn init(text: *Text) !void {
         .styles = text.styles,
         .objects = text.objects,
         .pipelines = text.pipelines,
+        .render_objects = text.render_objects,
+        .render_pipelines = text.render_pipelines,
     };
 }
 
+pub fn snapshot(text: *Text) !void {
+    {
+        // Walk over all render snapshot pipelines.
+        var render_it = text.render_pipelines.slice();
+        while (render_it.next()) |render_pid| {
+            // Does the app side still have the pipeline object alive, or was it deleted?
+            const alive = blk: {
+                var app_it = text.pipelines.slice();
+                while (app_it.next()) |app_pid| {
+                    if (render_pid == app_pid) break :blk true;
+                }
+                break :blk false;
+            };
+            if (alive) {
+                // The app pipeline is still alive, so update it with stats from the last .render.
+                text.pipelines.setRaw(render_pid, .num_texts, text.render_pipelines.get(render_pid, .num_texts));
+                text.pipelines.setRaw(render_pid, .num_segments, text.render_pipelines.get(render_pid, .num_segments));
+                text.pipelines.setRaw(render_pid, .num_glyphs, text.render_pipelines.get(render_pid, .num_glyphs));
+            } else {
+                // The app wants to delete the pipeline, so deinit it.
+                const pipeline = text.render_pipelines.getValue(render_pid);
+                if (pipeline.built_index) |built_idx| {
+                    if (text.built_pipelines.items[built_idx]) |*b| b.deinit(text.allocator);
+                    text.built_pipelines.items[built_idx] = null;
+                }
+            }
+        }
+    }
+
+    // Ensure every app-side pipeline has a built_pipelines slot allocated where we'll store the pipeline.
+    {
+        var app_it = text.pipelines.slice();
+        while (app_it.next()) |app_pid| {
+            if (text.pipelines.get(app_pid, .built_index) == null) {
+                const idx: u32 = @intCast(text.built_pipelines.items.len);
+                try text.built_pipelines.append(text.allocator, null);
+                text.pipelines.setRaw(app_pid, .built_index, idx);
+            }
+        }
+    }
+
+    // Snapshot the text objects and pipelines.
+    try text.render_objects.copyFrom(&text.objects);
+    try text.render_pipelines.copyFrom(&text.pipelines);
+
+    // Clear all dirty flags on app-side after copyFrom. The flags have already been copied to the
+    // render side, so render() will see them. Clearing here ensures they don't re-propagate next frame.
+    {
+        var object_it = text.objects.slice();
+        while (object_it.next()) |text_id| {
+            _ = text.objects.anyUpdated(text_id);
+        }
+        var pipeline_it = text.pipelines.slice();
+        while (pipeline_it.next()) |pid| {
+            _ = text.pipelines.anyUpdated(pid);
+        }
+    }
+}
+
 pub fn render(text: *Text, core: *mach.Core) !void {
-    var pipelines = text.pipelines.slice();
+    var pipelines = text.render_pipelines.slice();
     while (pipelines.next()) |pipeline_id| {
         // Is this pipeline usable for rendering? If not, no need to process it.
-        const pipeline = text.pipelines.getValue(pipeline_id);
+        const pipeline = text.render_pipelines.getValue(pipeline_id);
         if (pipeline.window == null or pipeline.render_pass == null) continue;
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
-        _ = text.pipelines.updated(pipeline_id, .window);
-        _ = text.pipelines.updated(pipeline_id, .render_pass);
-        _ = text.pipelines.updated(pipeline_id, .view_projection);
+        _ = text.render_pipelines.updated(pipeline_id, .window);
+        _ = text.render_pipelines.updated(pipeline_id, .render_pass);
+        _ = text.render_pipelines.updated(pipeline_id, .view_projection);
+        _ = text.render_pipelines.updated(pipeline_id, .num_texts);
+        _ = text.render_pipelines.updated(pipeline_id, .num_segments);
+        _ = text.render_pipelines.updated(pipeline_id, .num_glyphs);
+        _ = text.render_pipelines.updated(pipeline_id, .built_index);
 
         // If any other fields of the pipeline have been updated, a pipeline rebuild is required.
-        if (text.pipelines.anyUpdated(pipeline_id)) try rebuildPipeline(core, text, pipeline_id);
+        if (text.render_pipelines.anyUpdated(pipeline_id)) try rebuildPipeline(core, text, pipeline_id);
 
         // Find text objects parented to this pipeline.
-        var pipeline_children = try text.pipelines.getChildren(pipeline_id);
+        var pipeline_children = try text.render_pipelines.getChildren(pipeline_id);
         defer pipeline_children.deinit();
 
         // If any text objects were updated, we update the pipeline's storage buffers to have the new
         // information.
         const any_updated = blk: {
             for (pipeline_children.items) |text_id| {
-                if (!text.objects.is(text_id)) continue;
-                if (text.objects.peekAnyUpdated(text_id)) break :blk true;
+                if (!text.render_objects.is(text_id)) continue;
+                if (text.render_objects.peekAnyUpdated(text_id)) break :blk true;
             }
             break :blk false;
         };
         if (any_updated) try updatePipelineBuffers(text, core, pipeline_id, pipeline_children.items);
 
         // // Do we actually have any sprites to render?
-        // pipeline = text.pipelines.getValue(pipeline_id);
+        // pipeline = text.render_pipelines.getValue(pipeline_id);
         // if (pipeline.num_sprites == 0) continue;
 
         // TODO(text): need a way to specify order of rendering with multiple pipelines
@@ -280,9 +354,10 @@ fn rebuildPipeline(
     pipeline_id: mach.ObjectID,
 ) !void {
     // Destroy the current pipeline, if built.
-    var pipeline = text.pipelines.getValue(pipeline_id);
-    defer text.pipelines.setValueRaw(pipeline_id, pipeline);
-    if (pipeline.built) |*built| built.deinit(text.allocator);
+    var pipeline = text.render_pipelines.getValue(pipeline_id);
+    defer text.render_pipelines.setValueRaw(pipeline_id, pipeline);
+    const built_idx = pipeline.built_index.?;
+    if (text.built_pipelines.items[built_idx]) |*built| built.deinit(text.allocator);
 
     // Reference any user-provided objects.
     if (pipeline.shader) |v| v.reference();
@@ -422,7 +497,7 @@ fn rebuildPipeline(
         },
     });
 
-    pipeline.built = BuiltPipeline{
+    text.built_pipelines.items[built_idx] = BuiltPipeline{
         .render = render_pipeline,
         .texture_sampler = texture_sampler,
         .texture = texture,
@@ -444,8 +519,10 @@ fn updatePipelineBuffers(
     pipeline_id: mach.ObjectID,
     pipeline_children: []const mach.ObjectID,
 ) !void {
-    var pipeline = text.pipelines.getValue(pipeline_id);
-    defer text.pipelines.setValueRaw(pipeline_id, pipeline);
+    var pipeline = text.render_pipelines.getValue(pipeline_id);
+    defer text.render_pipelines.setValueRaw(pipeline_id, pipeline);
+    const built_idx = pipeline.built_index.?;
+    const built = &text.built_pipelines.items[built_idx].?;
     const window = core.windows.getValue(pipeline.window.?);
     const device = window.device;
     const queue = window.queue;
@@ -466,18 +543,18 @@ fn updatePipelineBuffers(
     var num_segments: u32 = 0;
     var i: u32 = 0;
     for (pipeline_children) |text_id| {
-        if (!text.objects.is(text_id)) continue;
-        var t = text.objects.getValue(text_id);
+        if (!text.render_objects.is(text_id)) continue;
+        var t = text.render_objects.getValue(text_id);
         num_segments += @intCast(t.segments.len);
 
         cp_transforms[i] = t.transform;
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
-        _ = text.objects.updated(text_id, .transform);
+        _ = text.render_objects.updated(text_id, .transform);
 
         // If the text has been built before, and nothing about it has changed, then we can just use
         // what we built already.
-        if (t.built != null and !text.objects.anyUpdated(text_id)) {
+        if (t.built != null and !text.render_objects.anyUpdated(text_id)) {
             for (t.built.?.glyphs.items) |*glyph| glyph.text_index = i;
             try glyphs.appendSlice(text.allocator, t.built.?.glyphs.items);
             i += 1;
@@ -528,7 +605,7 @@ fn updatePipelineBuffers(
                     continue;
                 }
 
-                const region = try pipeline.built.?.regions.getOrPut(text.allocator, .{
+                const region = try built.regions.getOrPut(text.allocator, .{
                     .index = glyph.glyph_index,
                     .size = @bitCast(style.font_size),
                 });
@@ -537,8 +614,8 @@ fn updatePipelineBuffers(
                         .font_size_px = run.font_size_px,
                     });
                     if (rendered_glyph.bitmap) |bitmap| {
-                        var glyph_atlas_region = try pipeline.built.?.texture_atlas.reserve(text.allocator, rendered_glyph.width, rendered_glyph.height);
-                        pipeline.built.?.texture_atlas.set(glyph_atlas_region, @as([*]const u8, @ptrCast(bitmap.ptr))[0 .. bitmap.len * 4]);
+                        var glyph_atlas_region = try built.texture_atlas.reserve(text.allocator, rendered_glyph.width, rendered_glyph.height);
+                        built.texture_atlas.set(glyph_atlas_region, @as([*]const u8, @ptrCast(bitmap.ptr))[0 .. bitmap.len * 4]);
                         texture_update = true;
 
                         // Exclude the 1px blank space margin when describing the region of the texture
@@ -577,9 +654,11 @@ fn updatePipelineBuffers(
                 origin_x += glyph.advance.x();
             }
         }
-        // Update the text entity's built form
+        // Update the text entity's built form on both render and app side, so that copyFrom
+        // preserves it (same pattern as built_index on pipelines).
         t.built = built_text;
-        text.objects.setValueRaw(text_id, t);
+        text.render_objects.setValueRaw(text_id, t);
+        text.objects.setRaw(text_id, .built, built_text);
 
         // Add to the entire set of glyphs for this pipeline
         try glyphs.appendSlice(text.allocator, built_text.glyphs.items);
@@ -590,8 +669,8 @@ fn updatePipelineBuffers(
     pipeline.num_texts = i;
     pipeline.num_segments = num_segments;
     pipeline.num_glyphs = @intCast(glyphs.items.len);
-    if (glyphs.items.len > 0) encoder.writeBuffer(pipeline.built.?.glyphs, 0, glyphs.items);
-    if (i > 0) encoder.writeBuffer(pipeline.built.?.transforms, 0, cp_transforms[0..i]);
+    if (glyphs.items.len > 0) encoder.writeBuffer(built.glyphs, 0, glyphs.items);
+    if (i > 0) encoder.writeBuffer(built.transforms, 0, cp_transforms[0..i]);
 
     if (texture_update) {
         // TODO(text): do not assume texture's data_layout and img_size here, instead get it from
@@ -604,10 +683,10 @@ fn updatePipelineBuffers(
             .rows_per_image = @as(u32, @intCast(img_size.height)),
         };
         queue.writeTexture(
-            &.{ .texture = pipeline.built.?.texture },
+            &.{ .texture = built.texture },
             &data_layout,
             &img_size,
-            pipeline.built.?.texture_atlas.data,
+            built.texture_atlas.data,
         );
     }
 
@@ -623,7 +702,8 @@ fn renderPipeline(
     core: *mach.Core,
     pipeline_id: mach.ObjectID,
 ) void {
-    const pipeline = text.pipelines.getValue(pipeline_id);
+    const pipeline = text.render_pipelines.getValue(pipeline_id);
+    const built = text.built_pipelines.items[pipeline.built_index.?].?;
     const window = core.windows.getValue(pipeline.window.?);
     const device = window.device;
 
@@ -647,19 +727,19 @@ fn renderPipeline(
     const uniforms = Uniforms{
         .view_projection = view_projection,
         .texture_size = math.vec2(
-            @as(f32, @floatFromInt(pipeline.built.?.texture.getWidth())),
-            @as(f32, @floatFromInt(pipeline.built.?.texture.getHeight())),
+            @as(f32, @floatFromInt(built.texture.getWidth())),
+            @as(f32, @floatFromInt(built.texture.getHeight())),
         ),
     };
-    encoder.writeBuffer(pipeline.built.?.uniforms, 0, &[_]Uniforms{uniforms});
+    encoder.writeBuffer(built.uniforms, 0, &[_]Uniforms{uniforms});
     var command = encoder.finish(&.{ .label = label });
     defer command.release();
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
 
     // Draw the text batch
     const total_vertices = pipeline.num_glyphs * 6;
-    pipeline.render_pass.?.setPipeline(pipeline.built.?.render);
+    pipeline.render_pass.?.setPipeline(built.render);
     // TODO(text): can we remove unused dynamic offsets?
-    pipeline.render_pass.?.setBindGroup(0, pipeline.built.?.bind_group, &.{});
+    pipeline.render_pass.?.setBindGroup(0, built.bind_group, &.{});
     pipeline.render_pass.?.draw(total_vertices, 1, 0, 0);
 }
