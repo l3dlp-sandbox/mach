@@ -138,6 +138,13 @@ pub const Graph = struct {
     /// Flag to signal the processing thread to stop
     should_stop: std.atomic.Value(bool) = .init(false),
 
+    /// Lock held while processing queue operations. Acquired during copyFrom to pause both
+    /// src and dst processing threads while the snapshot is taken.
+    process_mu: std.Io.Mutex = .init,
+
+    /// Set by copyFrom to signal the processing thread to release process_mu promptly.
+    copy_pending: std.atomic.Value(bool) = .init(false),
+
     /// Initialize the graph with the given pre-allocated space for nodes and operations.
     ///
     /// Spawns a backgroound thread for processing operations to the graph.
@@ -212,8 +219,12 @@ pub const Graph = struct {
     /// The thread that runs continuously in the background to process queue submissions.
     fn processThread(graph: *Graph, allocator: std.mem.Allocator) void {
         while (!graph.should_stop.load(.acquire)) {
-            // Process the entire queue
-            while (graph.queue.pop()) |op| graph.processOp(allocator, op);
+            graph.process_mu.lockUncancelable(graph.io);
+            while (graph.queue.pop()) |op| {
+                graph.processOp(allocator, op);
+                if (graph.copy_pending.load(.acquire)) break;
+            }
+            graph.process_mu.unlock(graph.io);
             std.Thread.yield() catch {};
         }
     }
@@ -427,6 +438,80 @@ pub const Graph = struct {
         graph.result_lists.lock.lockUncancelable(graph.io);
         defer graph.result_lists.lock.unlock(graph.io);
         graph.result_lists.available.appendAssumeCapacity(list);
+    }
+
+    /// Copies src into dst, using the current state of the graph at the time the operation
+    /// is processed. Queued operations are not copied.
+    /// May be called repeatedly to keep `dst` in sync with `src`.
+    ///
+    /// The copy is optimized for speed rather than memory efficiency, operating under the
+    /// assumption that src may be copied to dst in the future to update it frequently.
+    /// For example, additional capacity in arrays is also mirrored rather than resizing to
+    /// fit only what is needed, under the assumption that capacity may be needed in the next
+    /// copyFrom operation.
+    pub fn copyFrom(dst: *Graph, src: *Graph, allocator: std.mem.Allocator) Error!void {
+        // Signal both processing threads to release their locks promptly.
+        src.copy_pending.store(true, .release);
+        dst.copy_pending.store(true, .release);
+
+        // Lock both processing threads so neither graph is mutated during the copy.
+        // Always lock in pointer order to prevent deadlocks.
+        const first, const second = if (@intFromPtr(src) < @intFromPtr(dst))
+            .{ &src.process_mu, &dst.process_mu }
+        else
+            .{ &dst.process_mu, &src.process_mu };
+
+        first.lockUncancelable(src.io);
+        second.lockUncancelable(src.io);
+        defer second.unlock(src.io);
+        defer first.unlock(src.io);
+
+        // Clear the signals now that we hold both locks.
+        src.copy_pending.store(false, .release);
+        dst.copy_pending.store(false, .release);
+
+        // Copy src into dst
+        src.copyInto(dst, allocator) catch |err| {
+            return err;
+        };
+    }
+
+    /// Snapshots the current graph state into dst. Called by the processing thread
+    /// so no concurrent mutations are possible.
+    fn copyInto(src: *Graph, dst: *Graph, allocator: std.mem.Allocator) !void {
+        // copy nodes
+        try dst.nodes.copyFrom(&src.nodes, allocator);
+
+        // copy id_to_node
+        try dst.id_to_node.map.ensureTotalCapacity(allocator, src.id_to_node.map.capacity());
+        dst.id_to_node.map.clearRetainingCapacity();
+        var it = src.id_to_node.map.iterator();
+        while (it.next()) |entry| {
+            const dst_node = try dst.nodes.acquire(allocator);
+            dst_node.* = .{ .id = entry.value_ptr.*.id };
+            dst.id_to_node.map.putAssumeCapacity(entry.key_ptr.*, dst_node);
+        }
+        // Rebuild parent/child pointers using dst's own nodes
+        it = src.id_to_node.map.iterator();
+        while (it.next()) |entry| {
+            const src_node = entry.value_ptr.*;
+            const dst_node = dst.id_to_node.map.get(entry.key_ptr.*).?;
+            dst_node.parent = if (src_node.parent) |p| dst.id_to_node.map.get(p.id) else null;
+            dst_node.first_child = if (src_node.first_child) |c| dst.id_to_node.map.get(c.id) else null;
+            dst_node.next = if (src_node.next) |n| dst.id_to_node.map.get(n.id) else null;
+        }
+
+        // copy result_lists
+        try dst.result_lists.available.ensureTotalCapacity(allocator, src.result_lists.available.capacity);
+        while (dst.result_lists.available.items.len < src.result_lists.available.items.len) {
+            var list = try allocator.create(std.ArrayListUnmanaged(u64));
+            list.* = .empty;
+            try list.ensureTotalCapacity(allocator, dst.preallocate_result_list_size);
+            dst.result_lists.available.appendAssumeCapacity(list);
+        }
+
+        // copy preallocate_result_list_size
+        dst.preallocate_result_list_size = src.preallocate_result_list_size;
     }
 
     pub fn getParent(graph: *Graph, allocator: std.mem.Allocator, id: u64) Error!?u64 {
@@ -671,4 +756,40 @@ test "graph - multiple operations consistency" {
     try testing.expectEqual(results.items[0], 3);
 
     try testing.expectEqual(try graph.getParent(allocator, 4), null);
+}
+
+test "graph - copyFrom" {
+    const allocator = testing.allocator;
+    const io = std.Options.debug_io;
+
+    var src: Graph = undefined;
+    try src.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    defer src.deinit(allocator);
+
+    // Build a small hierarchy: 1 -> 2, 1 -> 3, 2 -> 4
+    try src.addChild(allocator, 1, 2);
+    try src.addChild(allocator, 1, 3);
+    try src.addChild(allocator, 2, 4);
+
+    var dst: Graph = undefined;
+    try dst.init(allocator, io, .{ .queue_size = 32, .nodes_size = 32, .num_result_lists = 8, .result_list_size = 8 });
+    defer dst.deinit(allocator);
+
+    // copyFrom enqueues onto src's queue, so all prior ops are processed first
+    try dst.copyFrom(&src, allocator);
+
+    // Verify the copied graph has the same structure
+    {
+        const children_1 = try dst.getChildren(allocator, 1);
+        defer children_1.deinit();
+        try testing.expectEqual(children_1.items.len, 2);
+    }
+    {
+        const children_2 = try dst.getChildren(allocator, 2);
+        defer children_2.deinit();
+        try testing.expectEqual(children_2.items.len, 1);
+        try testing.expectEqual(children_2.items[0], 4);
+    }
+    try testing.expectEqual((try dst.getParent(allocator, 2)).?, 1);
+    try testing.expectEqual((try dst.getParent(allocator, 4)).?, 2);
 }
