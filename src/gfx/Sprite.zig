@@ -479,17 +479,11 @@ fn updatePipelineBuffers(
         if (!sprite.render_objects.is(sprite_id)) continue;
         const s = sprite.render_objects.getValue(sprite_id);
 
-        try sprite.cp_transforms.append(sprite.allocator, gpu.mat4x4(s.transform));
+        try sprite.cp_transforms.append(sprite.allocator, s.transform.gpu());
 
         // TODO(d3d12): uv_transform should be a Mat3x3 but our D3D12/HLSL backend cannot handle it.
-        const uv = s.uv_transform;
-        try sprite.cp_uv_transforms.append(sprite.allocator, .{
-            @as([3]f32, uv.v[0].v) ++ .{0.0},
-            @as([3]f32, uv.v[1].v) ++ .{0.0},
-            @as([3]f32, uv.v[2].v) ++ .{0.0},
-            .{ 0.0, 0.0, 0.0, 0.0 },
-        });
-        try sprite.cp_sizes.append(sprite.allocator, gpu.vec2(s.size));
+        try sprite.cp_uv_transforms.append(sprite.allocator, s.uv_transform.mat4x4().gpu());
+        try sprite.cp_sizes.append(sprite.allocator, s.size.gpu());
     }
 
     const count: u32 = @intCast(sprite.cp_transforms.items.len);
@@ -559,9 +553,8 @@ fn updatePipelineBuffers(
         sizes: []gpu.Vec2,
 
         pub fn lessThan(ctx: @This(), a: usize, b: usize) bool {
-            // Translation z is column 3, row 2 in column-major storage.
-            const a_z = ctx.transforms[a][3][2];
-            const b_z = ctx.transforms[b][3][2];
+            const a_z = ctx.transforms[a].math().translation().z();
+            const b_z = ctx.transforms[b].math().translation().z();
             // Greater z values are further away, and thus should render/sort before those with lesser z values.
             return a_z > b_z;
         }
@@ -618,12 +611,12 @@ fn renderPipeline(
         });
     };
     const uniforms = Uniforms{
-        .view_projection = gpu.mat4x4(view_projection),
+        .view_projection = view_projection.gpu(),
         // TODO(sprite): dimensions of multi-textures, number of multi-textures present
-        .texture_size = .{
+        .texture_size = gpu.vec2(
             @as(f32, @floatFromInt(built.texture.getWidth())),
             @as(f32, @floatFromInt(built.texture.getHeight())),
-        },
+        ),
     };
     encoder.writeBuffer(built.uniforms, 0, &[_]Uniforms{uniforms});
     var command = encoder.finish(&.{ .label = label });

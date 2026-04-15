@@ -555,7 +555,7 @@ fn updatePipelineBuffers(
         var t = text.render_objects.getValue(text_id);
         num_segments += @intCast(t.segments.len);
 
-        try text.cp_transforms.append(text.allocator, gpu.mat4x4(t.transform));
+        try text.cp_transforms.append(text.allocator, t.transform.gpu());
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
         _ = text.render_objects.updated(text_id, .transform);
@@ -646,23 +646,21 @@ fn updatePipelineBuffers(
                 }
 
                 const r = region.value_ptr.*;
-                const glyph_w: f32 = @floatFromInt(r.width);
-                const glyph_h: f32 = @floatFromInt(r.height);
-                const off_x = glyph.offset.v[0];
-                const off_y = glyph.offset.v[1];
+                const size = math.vec2(@floatFromInt(r.width), @floatFromInt(r.height));
+                const pos = math.vec2(
+                    origin_x + glyph.offset.x(),
+                    origin_y - (size.y() - glyph.offset.y()),
+                ).divScalar(px_density);
                 try built_text.glyphs.append(text.allocator, .{
-                    .pos = .{
-                        (origin_x + off_x) / px_density,
-                        (origin_y - (glyph_h - off_y)) / px_density,
-                    },
-                    .size = .{ glyph_w / px_density, glyph_h / px_density },
+                    .pos = pos.gpu(),
+                    .size = size.divScalar(px_density).gpu(),
                     .text_index = i,
                     // TODO(d3d12): this is a hack, having 7 floats before the color vec causes an error
                     .text_padding = 0,
-                    .uv_pos = .{ @floatFromInt(r.x), @floatFromInt(r.y) },
-                    .color = gpu.vec4(style.color),
+                    .uv_pos = gpu.vec2(@floatFromInt(r.x), @floatFromInt(r.y)),
+                    .color = style.color.gpu(),
                 });
-                origin_x += glyph.advance.v[0];
+                origin_x += glyph.advance.x();
             }
         }
         // Update the text entity's built form on both render and app side, so that copyFrom
@@ -787,11 +785,11 @@ fn renderPipeline(
         });
     };
     const uniforms = Uniforms{
-        .view_projection = gpu.mat4x4(view_projection),
-        .texture_size = .{
+        .view_projection = view_projection.gpu(),
+        .texture_size = gpu.vec2(
             @as(f32, @floatFromInt(built.texture.getWidth())),
             @as(f32, @floatFromInt(built.texture.getHeight())),
-        },
+        ),
     };
     encoder.writeBuffer(built.uniforms, 0, &[_]Uniforms{uniforms});
     var command = encoder.finish(&.{ .label = label });
