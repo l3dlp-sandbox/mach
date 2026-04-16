@@ -1,7 +1,38 @@
 const std = @import("std");
 const mach = @import("main.zig");
+const Core = @import("Core.zig");
 const StringTable = @import("StringTable.zig");
 const Graph = @import("graph.zig").Graph;
+
+/// A handle to a spawned thread.
+pub const Thread = struct {
+    thread: std.Thread,
+
+    pub fn join(self: Thread) void {
+        self.thread.join();
+    }
+};
+
+/// Spawn a thread that runs the given function in a loop until the application exits.
+pub fn startThread(
+    core: *Core,
+    on_tick: FunctionID,
+    core_mod: Mod(Core),
+    comptime kind: anytype,
+) error{ThreadSpawnFailed}!Thread {
+    // TODO(thread): use kind for measured preallocations, thread naming, etc.
+    _ = kind;
+    return .{
+        .thread = std.Thread.spawn(.{}, runThread, .{ core, on_tick, core_mod }) catch
+            return error.ThreadSpawnFailed,
+    };
+}
+
+fn runThread(core: *Core, on_tick: FunctionID, core_mod: Mod(Core)) void {
+    while (core.state.load(.acquire) == .running) {
+        core_mod.run(on_tick);
+    }
+}
 
 /// Initialize a graph with default preallocations for the given kind.
 pub fn initGraph(graph: *Graph, allocator: std.mem.Allocator, io: std.Io, comptime kind: anytype) !void {

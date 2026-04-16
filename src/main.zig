@@ -22,6 +22,8 @@ pub const sysgpu = if (build_options.want_sysgpu) @import("sysgpu/main.zig") els
 pub const gpu = if (build_options.want_sysgpu) @import("sysgpu/main.zig").sysgpu else struct {};
 
 pub const Modules = @import("module.zig").Modules;
+pub const Thread = @import("module.zig").Thread;
+pub const startThread = @import("module.zig").startThread;
 
 pub const ModuleID = @import("module.zig").ModuleID;
 pub const ModuleFunctionID = @import("module.zig").ModuleFunctionID;

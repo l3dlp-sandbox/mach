@@ -41,6 +41,7 @@ pub const main = mach.schedule(.{
 });
 
 allocator: std.mem.Allocator,
+app_thread: mach.Thread,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
@@ -69,9 +70,9 @@ pub fn init(
     core: *mach.Core,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -84,6 +85,7 @@ pub fn init(
 
     app.* = .{
         .allocator = allocator,
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
@@ -292,6 +294,7 @@ pub fn deinit(
     app: *App,
     text: *gfx.Text,
 ) void {
+    app.app_thread.join();
     // Cleanup here, if desired.
     text.objects.delete(app.player_id);
 }

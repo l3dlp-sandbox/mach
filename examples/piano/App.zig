@@ -33,6 +33,7 @@ pub const mach_systems = .{
     .tick,
     .render,
     .deinit,
+    .deinitApp,
     .audioStateChange,
 };
 
@@ -44,8 +45,13 @@ pub const main = mach.schedule(.{
 });
 
 pub const deinit = mach.schedule(.{
+    .{ App, .deinitApp },
     .{ mach.Audio, .deinit },
 });
+
+pub fn deinitApp(app: *App) void {
+    app.app_thread.join();
+}
 
 /// Tag object we set as a child of mach.Audio objects to indicate they are background music.
 // TODO(object): consider adding a better object 'tagging' system?
@@ -53,6 +59,7 @@ play_after: mach.Objects(.{}, struct {
     frequency: f32,
 }),
 
+app_thread: mach.Thread,
 allocator: std.mem.Allocator,
 window: mach.ObjectID,
 ghost_key_mode: bool = false,
@@ -62,8 +69,8 @@ pub fn init(
     audio: *mach.Audio,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -79,6 +86,7 @@ pub fn init(
     const allocator = std.heap.c_allocator;
 
     app.* = .{
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .allocator = allocator,
         .play_after = app.play_after,
         .window = window,

@@ -98,19 +98,11 @@ windows: mach.Objects(
     },
 ),
 
-/// Callback system invoked per tick (e.g. per-frame)
-on_tick: ?mach.FunctionID = null,
-
-/// Callback system invoked when application is exiting
+/// Callback system invoked when application is exiting (called on render thread).
 on_exit: ?mach.FunctionID = null,
 
-/// Current state of the application
-state: enum {
-    running,
-    exiting,
-    deinitializing,
-    exited,
-} = .running,
+/// Current state of the application.
+state: std.atomic.Value(State) = .init(.running),
 
 frame: mach.time.Frequency,
 input: mach.time.Frequency,
@@ -121,6 +113,12 @@ events: EventQueue,
 input_state: InputState,
 oom: std.atomic.Value(bool) = .init(false),
 render_graph: mach.Graph,
+
+pub const State = enum(u8) {
+    running,
+    exiting,
+    exited,
+};
 
 pub fn init(core: *Core, io: std.Io) !void {
     const allocator = std.heap.c_allocator;
@@ -246,29 +244,20 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core)) !void {
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
     try Platform.tick(core, core_mod);
-
-    core_mod.run(core.on_tick.?);
-
-    switch (core.state) {
-        .running => {},
-        .exiting => {
-            core.state = .deinitializing;
-            core_mod.run(core.on_exit.?);
-            core_mod.call(.deinit);
-        },
-        .deinitializing => {},
-        .exited => @panic("application not running"),
-    }
+    try core.handleExit(core_mod);
 }
 
+/// Core.main enters the platform's main loop, which drives rendering on the main thread.
+///
+/// The app is responsible for running its own tick logic, either:
+/// * In `on_render` for single-threaded apps, or
+/// * On a separate app thread via `mach.AppThread`.
 pub fn main(core: *Core, core_mod: mach.Mod(Core)) !void {
-    if (core.on_tick == null) @panic("core.on_tick callback must be set");
     if (core.on_exit == null) @panic("core.on_exit callback must be set");
 
     try Platform.tick(core, core_mod);
-    core_mod.run(core.on_tick.?);
 
-    // Platform drives the main loop.
+    // Platform drives the main loop (render thread).
     Platform.run(platform_update_callback, .{ core, core_mod });
 
     // Platform.run is marked noreturn on some platforms, but not all, so this is here for the
@@ -278,29 +267,24 @@ pub fn main(core: *Core, core_mod: mach.Mod(Core)) !void {
 
 fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core)) !bool {
     try Platform.tick(core, core_mod);
-
-    core_mod.run(core.on_tick.?);
-
-    switch (core.state) {
-        .running => {},
-        .exiting => {
-            core.state = .deinitializing;
-            core_mod.run(core.on_exit.?);
-            core_mod.call(.deinit);
-        },
-        .deinitializing => {},
-        .exited => @panic("application not running"),
-    }
-
-    return core.state != .exited;
+    try core.handleExit(core_mod);
+    return core.state.load(.acquire) != .exited;
 }
 
+fn handleExit(core: *Core, core_mod: mach.Mod(Core)) !void {
+    if (core.state.load(.acquire) == .exiting) {
+        if (core.on_exit) |on_exit| core_mod.run(on_exit);
+        core_mod.call(.deinit);
+    }
+}
+
+/// Signal that the application should exit. Thread-safe.
 pub fn exit(core: *Core) void {
-    core.state = .exiting;
+    core.state.store(.exiting, .release);
 }
 
 pub fn deinit(core: *Core) !void {
-    core.state = .exited;
+    core.state.store(.exited, .release);
 
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {

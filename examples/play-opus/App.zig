@@ -28,6 +28,7 @@ pub const mach_systems = .{
     .tick,
     .render,
     .deinit,
+    .deinitApp,
     .audioStateChange,
 };
 
@@ -39,9 +40,11 @@ pub const main = mach.schedule(.{
 });
 
 pub const deinit = mach.schedule(.{
+    .{ App, .deinitApp },
     .{ mach.Audio, .deinit },
 });
 
+app_thread: mach.Thread,
 window: mach.ObjectID,
 /// Tag object we set as a child of mach.Audio objects to indicate they are background music.
 // TODO(object): consider adding a better object 'tagging' system?
@@ -51,6 +54,7 @@ sfx: mach.Audio.Opus,
 
 pub fn init(
     core: *mach.Core,
+    core_mod: mach.Mod(mach.Core),
     audio: *mach.Audio,
     app: *App,
     app_mod: mach.Mod(App),
@@ -58,7 +62,6 @@ pub fn init(
     // TODO(allocator): find a better way to get an allocator here
     const allocator = std.heap.c_allocator;
 
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -77,7 +80,7 @@ pub fn init(
     const sfx = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.sfx.sword1 });
 
     // Initialize module state
-    app.* = .{ .sfx = sfx, .bgm = app.bgm, .window = window };
+    app.* = .{ .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app), .sfx = sfx, .bgm = app.bgm, .window = window };
 
     const bgm_buffer = blk: {
         audio.buffers.lock();
@@ -95,6 +98,10 @@ pub fn init(
     std.debug.print("[typing]     Play SFX\n", .{});
     std.debug.print("[arrow up]   increase volume 10%\n", .{});
     std.debug.print("[arrow down] decrease volume 10%\n", .{});
+}
+
+pub fn deinitApp(app: *App) void {
+    app.app_thread.join();
 }
 
 /// Called on the high-priority audio OS thread when the audio driver needs more audio samples, so

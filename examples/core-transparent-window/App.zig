@@ -26,6 +26,7 @@ pub const main = mach.schedule(.{
     .{ mach.Core, .main },
 });
 
+app_thread: mach.Thread,
 window: mach.ObjectID,
 title_timer: mach.time.Timer,
 color_timer: mach.time.Timer,
@@ -37,9 +38,9 @@ pub fn init(
     core: *mach.Core,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -51,6 +52,7 @@ pub fn init(
 
     // Store our render pipeline in our module's state, so we can access it later on.
     app.* = .{
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .window = window,
         .title_timer = mach.time.Timer.start(io),
         .color_timer = mach.time.Timer.start(io),
@@ -198,5 +200,6 @@ pub fn render(app: *App, core: *mach.Core) void {
 }
 
 pub fn deinit(app: *App) void {
+    app.app_thread.join();
     app.pipeline.release();
 }

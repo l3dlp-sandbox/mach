@@ -16,7 +16,6 @@ pub const mach_systems = .{
     .main,
     .init,
     .deinit,
-    .tick,
     .render,
 };
 
@@ -40,7 +39,6 @@ pub fn init(
     app_mod: mach.Mod(App),
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -59,8 +57,7 @@ pub fn init(
     // try updateWindowTitle(core);
 }
 
-fn setupPipeline(core: *mach.Core, app: *App, window_id: mach.ObjectID) !void {
-    _ = window_id; // autofix
+fn setupPipeline(core: *mach.Core, app: *App) !void {
     const window = core.windows.getValue(app.window);
 
     // Create our shader module
@@ -97,21 +94,17 @@ fn setupPipeline(core: *mach.Core, app: *App, window_id: mach.ObjectID) !void {
     app.pipeline = window.device.createRenderPipeline(&pipeline_descriptor);
 }
 
-pub fn tick(core: *mach.Core, app: *App) !void {
-    const label = @tagName(mach_module) ++ ".tick";
-    _ = label;
+/// Single-threaded example: all tick + render logic runs in on_render on the main thread.
+pub fn render(core: *mach.Core, app: *App) !void {
+    // Handle events inline (no separate app thread).
     while (core.nextEvent()) |event| {
         switch (event) {
-            .window_open => |ev| {
-                try setupPipeline(core, app, ev.window_id);
-            },
+            .window_open => try setupPipeline(core, app),
             .close => core.exit(),
             else => {},
         }
     }
-}
 
-pub fn render(core: *mach.Core, app: *App) !void {
     const label = @tagName(mach_module) ++ ".render";
     const window = core.windows.getValue(app.window);
 

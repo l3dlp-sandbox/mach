@@ -52,6 +52,7 @@ pub const mach_systems = .{
 
 const RegionMap = std.AutoArrayHashMapUnmanaged(u21, mach.gfx.Atlas.Region);
 
+app_thread: mach.Thread,
 allocator: std.mem.Allocator,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
@@ -83,9 +84,9 @@ pub fn init(
     app: *App,
     core: *mach.Core,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -97,6 +98,7 @@ pub fn init(
     const allocator = std.heap.c_allocator;
 
     app.* = .{
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .allocator = allocator,
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
@@ -107,6 +109,7 @@ pub fn init(
 }
 
 pub fn deinit(app: *App) void {
+    app.app_thread.join();
     app.texture_atlas.deinit(app.allocator);
     app.texture.release();
     _ = c.FT_Done_Face(app.face);

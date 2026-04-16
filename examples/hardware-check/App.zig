@@ -49,6 +49,7 @@ pub const deinit = mach.schedule(.{
     .{ App, .deinit2 },
 });
 
+app_thread: mach.Thread,
 allocator: std.mem.Allocator,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
@@ -76,9 +77,9 @@ pub fn init(
     audio: *mach.Audio,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     // Configure the audio module to call our App.audioStateChange function when a sound buffer
@@ -95,6 +96,7 @@ pub fn init(
     const allocator = std.heap.c_allocator;
 
     app.* = .{
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .allocator = allocator,
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
@@ -108,6 +110,7 @@ pub fn deinit2(
     app: *App,
     text: *gfx.Text,
 ) void {
+    app.app_thread.join();
     // Cleanup here, if desired.
     text.objects.delete(app.info_text_id);
 }

@@ -23,11 +23,13 @@ pub const mach_systems = .{
     .main,
     .init,
     .deinit,
+    .deinitApp,
     .tick,
     .render,
 };
 
 // Global state for our app module.
+app_thread: mach.Thread,
 tick_timer: mach.time.Timer,
 player: mach.ObjectID,
 direction: Vec2 = vec2(0, 0),
@@ -41,17 +43,22 @@ pub const main = mach.schedule(.{
 });
 
 pub const deinit = mach.schedule(.{
+    .{ App, .deinitApp },
     .{ Renderer, .deinit },
 });
+
+pub fn deinitApp(app: *App) void {
+    app.app_thread.join();
+}
 
 pub fn init(
     core: *mach.Core,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     renderer: *Renderer,
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -67,6 +74,7 @@ pub fn init(
     });
 
     app.* = .{
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
         .player = player,

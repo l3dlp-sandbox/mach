@@ -29,14 +29,15 @@ pub const main = mach.schedule(.{
 window: mach.ObjectID,
 title_timer: mach.time.Timer,
 pipeline: *gpu.RenderPipeline,
+app_thread: mach.Thread,
 
 pub fn init(
     core: *mach.Core,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -49,6 +50,7 @@ pub fn init(
         .window = window,
         .title_timer = mach.time.Timer.start(io),
         .pipeline = undefined,
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
     };
 }
 
@@ -154,6 +156,7 @@ pub fn render(app: *App, core: *mach.Core) void {
 }
 
 pub fn deinit(app: *App) void {
+    app.app_thread.join();
     app.pipeline.release();
 }
 

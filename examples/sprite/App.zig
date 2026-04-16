@@ -45,6 +45,7 @@ tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
 fps_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
+app_thread: mach.Thread,
 
 frame_count: usize = 0,
 sprites: usize = 0,
@@ -58,6 +59,7 @@ pub fn init(
     core: *mach.Core,
     app: *App,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
     // You should use mach.Timer in general, but here we call std.Io.Timestamp.now() to show that
@@ -66,7 +68,6 @@ pub fn init(
     const timestamp = std.Io.Timestamp.now(io, .awake);
     std.debug.print("sprite: init at timestamp {d}ns\n", .{timestamp.nanoseconds});
 
-    core.on_tick = app_mod.id.tick;
     core.on_exit = app_mod.id.deinit;
 
     const window = try core.windows.new(.{
@@ -84,6 +85,7 @@ pub fn init(
         .spawn_timer = mach.time.Timer.start(io),
         .fps_timer = mach.time.Timer.start(io),
         .rand = std.Random.DefaultPrng.init(1337),
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
     };
 }
 
@@ -263,6 +265,7 @@ pub fn deinit(
     app: *App,
     sprite: *gfx.Sprite,
 ) void {
+    app.app_thread.join();
     // Cleanup here, if desired.
     sprite.objects.delete(app.player_id);
 }
