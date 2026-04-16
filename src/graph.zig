@@ -491,11 +491,13 @@ pub const Graph = struct {
             dst_node.* = .{ .id = entry.value_ptr.*.id };
             dst.id_to_node.map.putAssumeCapacity(entry.key_ptr.*, dst_node);
         }
-        // Rebuild parent/child pointers using dst's own nodes
+        // Rebuild parent/child pointers using dst's own nodes.
+        // A node's parent/child/next may reference an ID that was removed from the map
+        // (e.g. by cleanupIsolatedNode) but not yet unlinked from the tree — treat as null.
         it = src.id_to_node.map.iterator();
         while (it.next()) |entry| {
             const src_node = entry.value_ptr.*;
-            const dst_node = dst.id_to_node.map.get(entry.key_ptr.*).?;
+            const dst_node = dst.id_to_node.map.get(entry.key_ptr.*) orelse continue;
             dst_node.parent = if (src_node.parent) |p| dst.id_to_node.map.get(p.id) else null;
             dst_node.first_child = if (src_node.first_child) |c| dst.id_to_node.map.get(c.id) else null;
             dst_node.next = if (src_node.next) |n| dst.id_to_node.map.get(n.id) else null;
