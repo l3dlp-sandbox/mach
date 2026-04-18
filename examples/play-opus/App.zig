@@ -45,7 +45,6 @@ pub const deinit = mach.schedule(.{
 });
 
 app_thread: mach.Thread,
-window: mach.ObjectID,
 /// Tag object we set as a child of mach.Audio objects to indicate they are background music.
 // TODO(object): consider adding a better object 'tagging' system?
 bgm: mach.Objects(.{}, struct {}),
@@ -64,7 +63,7 @@ pub fn init(
 
     core.on_exit = app_mod.id.deinit;
 
-    const window = try core.windows.new(.{
+    _ = try core.windows.new(.{
         .title = "play-opus",
         .on_render = app_mod.id.render,
     });
@@ -80,7 +79,7 @@ pub fn init(
     const sfx = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.sfx.sword1 });
 
     // Initialize module state
-    app.* = .{ .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app), .sfx = sfx, .bgm = app.bgm, .window = window };
+    app.* = .{ .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app), .sfx = sfx, .bgm = app.bgm };
 
     const bgm_buffer = blk: {
         audio.buffers.lock();
@@ -169,10 +168,9 @@ pub fn tick(
 
 pub fn render(
     core: *mach.Core,
-    app: *App,
 ) !void {
     const label = @tagName(mach_module) ++ ".render";
-    var window = core.windows.getValue(app.window);
+    var window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser

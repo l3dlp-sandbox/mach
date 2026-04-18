@@ -32,7 +32,7 @@ title_timer: mach.time.Timer,
 color_timer: mach.time.Timer,
 color_time: f32 = 0.0,
 flip: bool = false,
-pipeline: *gpu.RenderPipeline = undefined,
+pipeline: ?*gpu.RenderPipeline = null,
 
 pub fn init(
     core: *mach.Core,
@@ -59,9 +59,9 @@ pub fn init(
     };
 }
 
-fn setupPipeline(core: *mach.Core, app: *App, window_id: mach.ObjectID) !void {
-    var window = core.windows.getValue(window_id);
-    defer core.windows.setValueRaw(window_id, window);
+fn setupPipeline(core: *mach.Core, app: *App) !void {
+    var window = core.windows.getValue(core.window);
+    defer core.windows.setValueRaw(core.window, window);
 
     // Create our shader module
     const shader_module = window.device.createShaderModuleWGSL("shader.wgsl", @embedFile("shader.wgsl"));
@@ -104,9 +104,6 @@ pub fn tick(app: *App, core: *mach.Core) void {
     _ = label;
     while (core.nextEvent()) |event| {
         switch (event) {
-            .window_open => |ev| {
-                try setupPipeline(core, app, ev.window_id);
-            },
             .key_repeat, .key_press => |ev| {
                 switch (ev.key) {
                     .right => {
@@ -152,9 +149,13 @@ pub fn tick(app: *App, core: *mach.Core) void {
     );
 }
 
-pub fn render(app: *App, core: *mach.Core) void {
+pub fn render(app: *App, core: *mach.Core) !void {
+    const pipeline = app.pipeline orelse {
+        try setupPipeline(core, app);
+        return;
+    };
     const label = @tagName(mach_module) ++ ".render";
-    var window = core.windows.getValue(app.window);
+    var window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -180,7 +181,7 @@ pub fn render(app: *App, core: *mach.Core) void {
     defer render_pass.release();
 
     // Draw
-    render_pass.setPipeline(app.pipeline);
+    render_pass.setPipeline(pipeline);
     render_pass.draw(3, 1, 0, 0);
 
     // Finish render pass
@@ -201,5 +202,5 @@ pub fn render(app: *App, core: *mach.Core) void {
 
 pub fn deinit(app: *App) void {
     app.app_thread.join();
-    app.pipeline.release();
+    if (app.pipeline) |p| p.release();
 }

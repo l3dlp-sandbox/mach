@@ -253,7 +253,12 @@ pub fn render(sprite: *Sprite, core: *mach.Core) !void {
     while (pipelines.next()) |pipeline_id| {
         // Is this pipeline usable for rendering? If not, no need to process it.
         var pipeline = sprite.render_pipelines.getValue(pipeline_id);
-        if (pipeline.window == null or pipeline.render_pass == null) continue;
+        if (pipeline.window == null) continue;
+        std.debug.assert(pipeline.built_index != null);
+
+        // render_pass is a transient GPU resource set by the render thread each frame
+        // directly on the app-side pipelines — read it from there, not the snapshot.
+        const render_pass = sprite.pipelines.get(pipeline_id, .render_pass) orelse continue;
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
         _ = sprite.render_pipelines.updated(pipeline_id, .window);
@@ -262,18 +267,19 @@ pub fn render(sprite: *Sprite, core: *mach.Core) !void {
         _ = sprite.render_pipelines.updated(pipeline_id, .num_sprites);
         _ = sprite.render_pipelines.updated(pipeline_id, .built_index);
 
-        // If any other fields of the pipeline have been updated, a pipeline rebuild is required.
-        if (sprite.render_pipelines.anyUpdated(pipeline_id)) {
-            rebuildPipeline(core, sprite, pipeline_id);
-        }
+        // A pipeline rebuild is required if the slot hasn't been built yet, or if any
+        // pipeline fields (texture, shader, blend state, etc.) have been updated.
+        const needs_rebuild = sprite.built_pipelines.items[pipeline.built_index.?] == null or
+            sprite.render_pipelines.anyUpdated(pipeline_id);
+        if (needs_rebuild) rebuildPipeline(core, sprite, pipeline_id);
 
         // Find sprites parented to this pipeline.
         var pipeline_children = try sprite.render_pipelines.getChildren(pipeline_id);
         defer pipeline_children.deinit();
 
-        // If any sprites were updated, we update the pipeline's storage buffers to have the new
-        // information for all its sprites.
-        const any_sprites_updated = blk: {
+        // If the pipeline was just rebuilt, or any sprites were updated, we need to
+        // upload all sprite data to the GPU storage buffers.
+        const any_sprites_updated = needs_rebuild or blk: {
             for (pipeline_children.items) |sprite_id| {
                 if (!sprite.render_objects.is(sprite_id)) continue;
                 if (sprite.render_objects.anyUpdated(sprite_id)) break :blk true;
@@ -287,7 +293,7 @@ pub fn render(sprite: *Sprite, core: *mach.Core) !void {
         if (pipeline.num_sprites == 0) continue;
 
         // TODO(sprite): need a way to specify order of rendering with multiple pipelines
-        renderPipeline(sprite, core, pipeline_id);
+        renderPipeline(sprite, core, pipeline_id, render_pass);
     }
 }
 
@@ -587,6 +593,7 @@ fn renderPipeline(
     sprite: *Sprite,
     core: *mach.Core,
     pipeline_id: mach.ObjectID,
+    render_pass: *gpu.RenderPassEncoder,
 ) void {
     const pipeline = sprite.render_pipelines.getValue(pipeline_id);
     const built = sprite.built_pipelines.items[pipeline.built_index.?].?;
@@ -625,8 +632,8 @@ fn renderPipeline(
 
     // Draw the sprite batch
     const total_vertices = pipeline.num_sprites * 6;
-    pipeline.render_pass.?.setPipeline(built.render);
+    render_pass.setPipeline(built.render);
     // TODO(sprite): can we remove unused dynamic offsets?
-    pipeline.render_pass.?.setBindGroup(0, built.bind_group, &.{});
-    pipeline.render_pass.?.draw(total_vertices, 1, 0, 0);
+    render_pass.setBindGroup(0, built.bind_group, &.{});
+    render_pass.draw(total_vertices, 1, 0, 0);
 }

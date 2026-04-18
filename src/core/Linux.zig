@@ -61,7 +61,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
     while (@call(.auto, on_each_update_fn, args_tuple) catch false) {}
 }
 
-pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
+pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // Window management: create new windows, handle property changes, pump display server events.
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
@@ -92,7 +92,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
     }
 
     // Render all windows.
-    try core.renderFrame(core_mod);
+    try core.renderFrame(core_mod, io);
 }
 
 inline fn renewSwapChain(core: *Core, window_id: mach.ObjectID) void {

@@ -32,6 +32,7 @@ pub const RenderLoop = struct {
     display_source: objc.system.dispatch_source_t = undefined,
     core: *Core = undefined,
     core_mod: mach.Mod(Core) = undefined,
+    io: std.Io = undefined,
 
     pub fn start(self: *RenderLoop) error{CVDisplayLinkFailed}!void {
         self.display_source = objc.system.dispatch_source_create(
@@ -60,7 +61,7 @@ pub const RenderLoop = struct {
 
     fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.c) void {
         const self: *RenderLoop = @ptrCast(@alignCast(ctx));
-        self.core.renderFrame(self.core_mod) catch {
+        self.core.renderFrame(self.core_mod, self.io) catch {
             self.core.oom.store(true, .release);
         };
     }
@@ -120,7 +121,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
     // TODO: support UIKit.
 }
 
-pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
+pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // Window management: create new windows, handle property changes.
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
@@ -183,7 +184,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
             }
 
             if (core.windows.updated(window_id, .vsync_mode)) {
-                try ensureRenderLoop(core, core_mod);
+                try ensureRenderLoop(core, core_mod, io);
             }
         } else {
             try initWindow(core, core_mod, window_id);
@@ -193,7 +194,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
     // When no display link is driving rendering (all windows are vsync=none),
     // render from the main loop.
     if (global_render_loop == null) {
-        try core.renderFrame(core_mod);
+        try core.renderFrame(core_mod, io);
     }
 }
 
@@ -412,12 +413,12 @@ fn initWindow(
         try core.initWindow(window_id);
 
         // Start or update the global render loop if needed
-        try ensureRenderLoop(core, core_mod);
+        try ensureRenderLoop(core, core_mod, core.windows.internal.io);
     } else std.debug.panic("mach: window failed to initialize", .{});
 }
 
 /// Starts, stops, or restarts the global render loop based on whether any window needs vsync.
-fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core)) !void {
+fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // Check if any window needs vsync
     var needs_vsync = false;
     var windows = core.windows.slice();
@@ -431,7 +432,7 @@ fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core)) !void {
 
     if (needs_vsync and global_render_loop == null) {
         const rl = try core.allocator.create(RenderLoop);
-        rl.* = .{ .core = core, .core_mod = core_mod };
+        rl.* = .{ .core = core, .core_mod = core_mod, .io = io };
         try rl.start();
         global_render_loop = rl;
     } else if (!needs_vsync and global_render_loop != null) {

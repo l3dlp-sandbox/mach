@@ -26,9 +26,8 @@ pub const main = mach.schedule(.{
     .{ mach.Core, .main },
 });
 
-window: mach.ObjectID,
 title_timer: mach.time.Timer,
-pipeline: *gpu.RenderPipeline,
+pipeline: ?*gpu.RenderPipeline = null,
 app_thread: mach.Thread,
 
 pub fn init(
@@ -40,23 +39,21 @@ pub fn init(
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    const window = try core.windows.new(.{
+    _ = try core.windows.new(.{
         .title = "core-triangle",
         .on_render = app_mod.id.render,
     });
 
     // Store our render pipeline in our module's state, so we can access it later on.
     app.* = .{
-        .window = window,
         .title_timer = mach.time.Timer.start(io),
-        .pipeline = undefined,
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
     };
 }
 
-fn setupPipeline(core: *mach.Core, app: *App, window_id: mach.ObjectID) !void {
-    var window = core.windows.getValue(window_id);
-    defer core.windows.setValueRaw(window_id, window);
+fn setupPipeline(core: *mach.Core, app: *App) !void {
+    var window = core.windows.getValue(core.window);
+    defer core.windows.setValueRaw(core.window, window);
 
     // Create our shader module
     const shader_module = window.device.createShaderModuleWGSL("shader.wgsl", @embedFile("shader.wgsl"));
@@ -94,23 +91,22 @@ fn setupPipeline(core: *mach.Core, app: *App, window_id: mach.ObjectID) !void {
 // TODO(object): window-title
 // try updateWindowTitle(core);
 
-pub fn tick(app: *App, core: *mach.Core) void {
-    const label = @tagName(mach_module) ++ ".tick";
-    _ = label;
+pub fn tick(core: *mach.Core) void {
     while (core.nextEvent()) |event| {
         switch (event) {
-            .window_open => |ev| {
-                try setupPipeline(core, app, ev.window_id);
-            },
             .close => core.exit(),
             else => {},
         }
     }
 }
 
-pub fn render(app: *App, core: *mach.Core) void {
+pub fn render(app: *App, core: *mach.Core) !void {
+    const pipeline = app.pipeline orelse {
+        try setupPipeline(core, app);
+        return;
+    };
     const label = @tagName(mach_module) ++ ".render";
-    const window = core.windows.getValue(app.window);
+    const window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -136,7 +132,7 @@ pub fn render(app: *App, core: *mach.Core) void {
     defer render_pass.release();
 
     // Draw
-    render_pass.setPipeline(app.pipeline);
+    render_pass.setPipeline(pipeline);
     render_pass.draw(3, 1, 0, 0);
 
     // Finish render pass
@@ -157,7 +153,7 @@ pub fn render(app: *App, core: *mach.Core) void {
 
 pub fn deinit(app: *App) void {
     app.app_thread.join();
-    app.pipeline.release();
+    if (app.pipeline) |p| p.release();
 }
 
 // TODO(object): window-title

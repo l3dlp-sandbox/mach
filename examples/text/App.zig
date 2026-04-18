@@ -28,6 +28,7 @@ pub const mach_module = .app;
 pub const mach_systems = .{
     .main,
     .init,
+    .appTick,
     .tick,
     .render,
     .deinit,
@@ -54,7 +55,7 @@ direction: Vec2 = vec2(0, 0),
 spawning: bool = false,
 player_id: mach.ObjectID = undefined,
 style1_id: mach.ObjectID = undefined,
-pipeline_id: mach.ObjectID = undefined,
+pipeline_id: ?mach.ObjectID = null,
 
 const upscale = 1.0;
 
@@ -97,11 +98,11 @@ pub fn init(
 fn setupPipeline(
     app: *App,
     text: *gfx.Text,
-    window_id: mach.ObjectID,
+    core: *mach.Core,
 ) !void {
     // Create a text rendering pipeline
     app.pipeline_id = try text.pipelines.new(.{
-        .window = window_id,
+        .window = core.window,
         .render_pass = undefined,
     });
 
@@ -130,10 +131,17 @@ fn setupPipeline(
         .segments = player_segments,
     });
     // Attach the text object to our text rendering pipeline.
-    try text.pipelines.setParent(app.player_id, app.pipeline_id);
+    try text.pipelines.setParent(app.player_id, app.pipeline_id.?);
 }
 
-pub fn tick(
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Core, .snapshotStart },
+    .{ gfx.Text, .snapshot },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(
     core: *mach.Core,
     app: *App,
     text: *gfx.Text,
@@ -165,7 +173,6 @@ pub fn tick(
                     else => {},
                 }
             },
-            .window_open => |ev| try setupPipeline(app, text, ev.window_id),
             .close => core.exit(),
             else => {},
         }
@@ -173,7 +180,10 @@ pub fn tick(
     app.direction = direction;
     app.spawning = spawning;
 
-    var player = text.objects.getValue(app.player_id);
+    if (app.pipeline_id == null) return;
+    const player_id = app.player_id;
+    const pipeline_id = app.pipeline_id.?;
+    var player = text.objects.getValue(player_id);
     var player_pos = player.transform.translation();
     if (spawning and app.spawn_timer.read() > 1.0 / 60.0) {
         // Spawn new entities
@@ -197,7 +207,7 @@ pub fn tick(
                 .transform = Mat4x4.scaleScalar(upscale).mul(&Mat4x4.translate(new_pos)),
                 .segments = new_segments,
             });
-            try text.pipelines.setParent(new_text_id, app.pipeline_id);
+            try text.pipelines.setParent(new_text_id, pipeline_id);
         }
     }
 
@@ -205,11 +215,11 @@ pub fn tick(
     const delta_time = app.tick_timer.lap();
 
     // Rotate all text objects in the pipeline.
-    var pipeline_children = try text.pipelines.getChildren(app.pipeline_id);
+    var pipeline_children = try text.pipelines.getChildren(pipeline_id);
     defer pipeline_children.deinit();
     for (pipeline_children.items) |text_id| {
         if (!text.objects.is(text_id)) continue;
-        if (text_id == app.player_id) continue; // don't rotate the player
+        if (text_id == player_id) continue; // don't rotate the player
         var s = text.objects.getValue(text_id);
 
         const location = s.transform.translation();
@@ -225,7 +235,7 @@ pub fn tick(
     const speed = 200.0;
     player_pos.v[0] += direction.x() * speed * delta_time;
     player_pos.v[1] += direction.y() * speed * delta_time;
-    text.objects.set(app.player_id, .transform, Mat4x4.translate(player_pos));
+    text.objects.set(player_id, .transform, Mat4x4.translate(player_pos));
 
     app.anim_time += delta_time;
 }
@@ -236,8 +246,13 @@ pub fn render(
     text: *gfx.Text,
     text_mod: mach.Mod(gfx.Text),
 ) !void {
+    if (app.pipeline_id == null) {
+        try setupPipeline(app, text, core);
+        return;
+    }
+
     const label = @tagName(mach_module) ++ ".render";
-    const window = core.windows.getValue(app.window);
+    const window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -262,8 +277,7 @@ pub fn render(
     }));
 
     // Render text
-    text.pipelines.set(app.pipeline_id, .render_pass, render_pass);
-    text_mod.call(.snapshot);
+    text.pipelines.set(app.pipeline_id.?, .render_pass, render_pass);
     text_mod.call(.render);
 
     // Finish render pass
@@ -296,5 +310,5 @@ pub fn deinit(
 ) void {
     app.app_thread.join();
     // Cleanup here, if desired.
-    text.objects.delete(app.player_id);
+    if (app.pipeline_id != null) text.objects.delete(app.player_id);
 }

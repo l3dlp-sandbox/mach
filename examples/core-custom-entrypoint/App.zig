@@ -19,9 +19,8 @@ pub const mach_systems = .{
     .render,
 };
 
-window: mach.ObjectID,
 title_timer: mach.time.Timer,
-pipeline: *gpu.RenderPipeline,
+pipeline: ?*gpu.RenderPipeline = null,
 
 pub const main = mach.schedule(.{
     .{ mach.Core, .init },
@@ -30,7 +29,7 @@ pub const main = mach.schedule(.{
 });
 
 pub fn deinit(app: *App) void {
-    app.pipeline.release();
+    if (app.pipeline) |p| p.release();
 }
 
 pub fn init(
@@ -41,16 +40,14 @@ pub fn init(
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    const window = try core.windows.new(.{
+    _ = try core.windows.new(.{
         .title = "core-custom-entrypoint",
         .on_render = app_mod.id.render,
     });
 
     // Store our render pipeline in our module's state, so we can access it later on.
     app.* = .{
-        .window = window,
         .title_timer = mach.time.Timer.start(io),
-        .pipeline = undefined,
     };
 
     // TODO(object): window-title
@@ -58,7 +55,7 @@ pub fn init(
 }
 
 fn setupPipeline(core: *mach.Core, app: *App) !void {
-    const window = core.windows.getValue(app.window);
+    const window = core.windows.getValue(core.window);
 
     // Create our shader module
     const shader_module = window.device.createShaderModuleWGSL("shader.wgsl", @embedFile("shader.wgsl"));
@@ -99,14 +96,17 @@ pub fn render(core: *mach.Core, app: *App) !void {
     // Handle events inline (no separate app thread).
     while (core.nextEvent()) |event| {
         switch (event) {
-            .window_open => try setupPipeline(core, app),
             .close => core.exit(),
             else => {},
         }
     }
 
+    const pipeline = app.pipeline orelse {
+        try setupPipeline(core, app);
+        return;
+    };
     const label = @tagName(mach_module) ++ ".render";
-    const window = core.windows.getValue(app.window);
+    const window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -132,7 +132,7 @@ pub fn render(core: *mach.Core, app: *App) !void {
     defer render_pass.release();
 
     // Draw
-    render_pass.setPipeline(app.pipeline);
+    render_pass.setPipeline(pipeline);
     render_pass.draw(3, 1, 0, 0);
 
     // Finish render pass

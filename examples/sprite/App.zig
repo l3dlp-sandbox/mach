@@ -27,6 +27,7 @@ pub const mach_module = .app;
 pub const mach_systems = .{
     .main,
     .init,
+    .appTick,
     .tick,
     .render,
     .deinit,
@@ -53,7 +54,7 @@ anim_time: f32 = 0,
 direction: Vec2 = vec2(0, 0),
 spawning: bool = false,
 player_id: mach.ObjectID = undefined,
-pipeline_id: mach.ObjectID = undefined,
+pipeline_id: ?mach.ObjectID = null,
 
 pub fn init(
     core: *mach.Core,
@@ -93,13 +94,12 @@ fn setupPipeline(
     core: *mach.Core,
     app: *App,
     sprite: *gfx.Sprite,
-    window_id: mach.ObjectID,
 ) !void {
-    const window = core.windows.getValue(window_id);
+    const window = core.windows.getValue(core.window);
 
     // Create a sprite rendering pipeline
     app.pipeline_id = try sprite.pipelines.new(.{
-        .window = window_id,
+        .window = core.window,
         .render_pass = undefined,
         .texture = try loadTexture(window.device, window.queue, app.allocator),
     });
@@ -111,10 +111,17 @@ fn setupPipeline(
         .uv_transform = Mat3x3.translate(vec2(0, 0)),
     });
     // Attach the sprite to our sprite rendering pipeline.
-    try sprite.pipelines.setParent(app.player_id, app.pipeline_id);
+    try sprite.pipelines.setParent(app.player_id, app.pipeline_id.?);
 }
 
-pub fn tick(
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Core, .snapshotStart },
+    .{ gfx.Sprite, .snapshot },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(
     core: *mach.Core,
     app: *App,
     sprite: *gfx.Sprite,
@@ -146,7 +153,6 @@ pub fn tick(
                     else => {},
                 }
             },
-            .window_open => |ev| try setupPipeline(core, app, sprite, ev.window_id),
             .close => core.exit(),
             else => {},
         }
@@ -154,7 +160,10 @@ pub fn tick(
     app.direction = direction;
     app.spawning = spawning;
 
-    var player = sprite.objects.getValue(app.player_id);
+    if (app.pipeline_id == null) return;
+    const player_id = app.player_id;
+    const pipeline_id = app.pipeline_id.?;
+    var player = sprite.objects.getValue(player_id);
     var player_pos = player.transform.translation();
     if (spawning and app.spawn_timer.read() > 1.0 / 60.0) {
         // Spawn new entities
@@ -169,7 +178,7 @@ pub fn tick(
                 .size = vec2(32, 32),
                 .uv_transform = Mat3x3.translate(vec2(0, 0)),
             });
-            try sprite.pipelines.setParent(new_sprite_id, app.pipeline_id);
+            try sprite.pipelines.setParent(new_sprite_id, pipeline_id);
             app.sprites += 1;
         }
     }
@@ -178,11 +187,11 @@ pub fn tick(
     const delta_time = app.tick_timer.lap();
 
     // Rotate all sprites in the pipeline.
-    var pipeline_children = try sprite.pipelines.getChildren(app.pipeline_id);
+    var pipeline_children = try sprite.pipelines.getChildren(pipeline_id);
     defer pipeline_children.deinit();
     for (pipeline_children.items) |sprite_id| {
         if (!sprite.objects.is(sprite_id)) continue;
-        if (sprite_id == app.player_id) continue; // don't rotate the player
+        if (sprite_id == player_id) continue; // don't rotate the player
         var s = sprite.objects.getValue(sprite_id);
         const location = s.transform.translation();
         var transform = Mat4x4.ident;
@@ -197,7 +206,7 @@ pub fn tick(
     const speed = 200.0;
     player_pos.v[0] += direction.x() * speed * delta_time;
     player_pos.v[1] += direction.y() * speed * delta_time;
-    sprite.objects.set(app.player_id, .transform, Mat4x4.translate(player_pos));
+    sprite.objects.set(player_id, .transform, Mat4x4.translate(player_pos));
 
     app.anim_time += delta_time;
 }
@@ -208,8 +217,12 @@ pub fn render(
     sprite: *gfx.Sprite,
     sprite_mod: mach.Mod(gfx.Sprite),
 ) !void {
+    if (app.pipeline_id == null) {
+        try setupPipeline(core, app, sprite);
+        return;
+    }
     const label = @tagName(mach_module) ++ ".render";
-    const window = core.windows.getValue(app.window);
+    const window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -234,8 +247,7 @@ pub fn render(
     }));
 
     // Render sprites
-    sprite.pipelines.set(app.pipeline_id, .render_pass, render_pass);
-    sprite_mod.call(.snapshot);
+    sprite.pipelines.set(app.pipeline_id.?, .render_pass, render_pass);
     sprite_mod.call(.render);
 
     // Finish render pass
@@ -267,7 +279,7 @@ pub fn deinit(
 ) void {
     app.app_thread.join();
     // Cleanup here, if desired.
-    sprite.objects.delete(app.player_id);
+    if (app.pipeline_id != null) sprite.objects.delete(app.player_id);
 }
 
 // TODO(sprite): don't require users to copy / write this helper themselves

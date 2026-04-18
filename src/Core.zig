@@ -11,7 +11,7 @@ const EventQueue = std.Deque(Event);
 
 pub const mach_module = .mach_core;
 
-pub const mach_systems = .{ .main, .init, .tick, .deinit };
+pub const mach_systems = .{ .main, .init, .tick, .deinit, .snapshotStart, .snapshotEnd };
 
 // Set track_fields to true so that when these field values change, we know about it
 // and can update the platform windows.
@@ -98,6 +98,9 @@ windows: mach.Objects(
     },
 ),
 
+/// The current window being rendered. Only valid during an on_render() callback.
+window: mach.ObjectID = undefined,
+
 /// Callback system invoked when application is exiting (called on render thread).
 on_exit: ?mach.FunctionID = null,
 
@@ -106,6 +109,12 @@ state: std.atomic.Value(State) = .init(.running),
 
 frame: mach.time.Frequency,
 input: mach.time.Frequency,
+
+/// Mutex protecting the render snapshot itself (e.g. render_graph or snapshotted objects.)
+/// The app thread holds this between snapshotStart and snapshotEnd, and the render thread
+/// holds this during the whole render to prevent the app thread from getting ahead duplicate
+/// frames.
+render_mu: std.Io.Mutex = .init,
 
 // Internal module state
 allocator: std.mem.Allocator,
@@ -224,17 +233,19 @@ pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {
 ///
 /// This is the single entry point for all rendering. Platform backends call this at the
 /// appropriate time (e.g. driven by CVDisplayLink on macOS, or inline on Windows/Linux).
-pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core)) !void {
-    // Snapshot global graph for the render thread before on_render runs.
-    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
+pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
+    core.render_mu.lockUncancelable(io);
+    defer core.render_mu.unlock(io);
 
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         const core_window = core.windows.getValue(window_id);
         if (core_window.native == null) continue;
 
+        core.window = window_id;
         const on_render = core_window.on_render orelse @panic("on_render must be set on all windows");
         core_mod.run(on_render);
+        core.window = undefined;
 
         mach.sysgpu.Impl.deviceTick(core_window.device);
         core_window.swap_chain.present();
@@ -242,9 +253,20 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core)) !void {
     core.frame.tick();
 }
 
-pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
-    try Platform.tick(core, core_mod);
+pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
+    try Platform.tick(core, core_mod, io);
     try core.handleExit(core_mod);
+}
+
+/// Begin submitting a snapshot for rendering the next frame.
+pub fn snapshotStart(core: *Core, io: std.Io) !void {
+    core.render_mu.lockUncancelable(io);
+    try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
+}
+
+/// End submission of a snapshot for rendering the next frame.
+pub fn snapshotEnd(core: *Core, io: std.Io) void {
+    core.render_mu.unlock(io);
 }
 
 /// Core.main enters the platform's main loop, which drives rendering on the main thread.
@@ -252,21 +274,21 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
 /// The app is responsible for running its own tick logic, either:
 /// * In `on_render` for single-threaded apps, or
 /// * On a separate app thread via `mach.AppThread`.
-pub fn main(core: *Core, core_mod: mach.Mod(Core)) !void {
+pub fn main(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     if (core.on_exit == null) @panic("core.on_exit callback must be set");
 
-    try Platform.tick(core, core_mod);
+    try Platform.tick(core, core_mod, io);
 
     // Platform drives the main loop (render thread).
-    Platform.run(platform_update_callback, .{ core, core_mod });
+    Platform.run(platform_update_callback, .{ core, core_mod, io });
 
     // Platform.run is marked noreturn on some platforms, but not all, so this is here for the
     // platforms that do return
     std.process.exit(0);
 }
 
-fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core)) !bool {
-    try Platform.tick(core, core_mod);
+fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !bool {
+    try Platform.tick(core, core_mod, io);
     try core.handleExit(core_mod);
     return core.state.load(.acquire) != .exited;
 }

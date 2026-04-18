@@ -37,7 +37,7 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
     while (@call(.auto, on_each_update_fn, args_tuple) catch false) {}
 }
 
-pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
+pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // Window management: create new windows, handle property changes.
     {
         var windows = core.windows.slice();
@@ -62,7 +62,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core)) !void {
     }
 
     // Render all windows.
-    try core.renderFrame(core_mod);
+    try core.renderFrame(core_mod, io);
 
     // Process messages
     var msg: w.MSG = undefined;

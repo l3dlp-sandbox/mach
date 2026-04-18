@@ -313,7 +313,12 @@ pub fn render(text: *Text, core: *mach.Core) !void {
     while (pipelines.next()) |pipeline_id| {
         // Is this pipeline usable for rendering? If not, no need to process it.
         const pipeline = text.render_pipelines.getValue(pipeline_id);
-        if (pipeline.window == null or pipeline.render_pass == null) continue;
+        if (pipeline.window == null) continue;
+        std.debug.assert(pipeline.built_index != null);
+
+        // render_pass is a transient GPU resource set by the render thread each frame
+        // directly on the app-side pipelines — read it from there, not the snapshot.
+        const render_pass = text.pipelines.get(pipeline_id, .render_pass) orelse continue;
 
         // Changing these fields shouldn't trigger a pipeline rebuild, so clear their update values:
         _ = text.render_pipelines.updated(pipeline_id, .window);
@@ -324,16 +329,19 @@ pub fn render(text: *Text, core: *mach.Core) !void {
         _ = text.render_pipelines.updated(pipeline_id, .num_glyphs);
         _ = text.render_pipelines.updated(pipeline_id, .built_index);
 
-        // If any other fields of the pipeline have been updated, a pipeline rebuild is required.
-        if (text.render_pipelines.anyUpdated(pipeline_id)) try rebuildPipeline(core, text, pipeline_id);
+        // A pipeline rebuild is required if the slot hasn't been built yet, or if any
+        // pipeline fields (texture, shader, blend state, etc.) have been updated.
+        const needs_rebuild = text.built_pipelines.items[pipeline.built_index.?] == null or
+            text.render_pipelines.anyUpdated(pipeline_id);
+        if (needs_rebuild) try rebuildPipeline(core, text, pipeline_id);
 
         // Find text objects parented to this pipeline.
         var pipeline_children = try text.render_pipelines.getChildren(pipeline_id);
         defer pipeline_children.deinit();
 
-        // If any text objects were updated, we update the pipeline's storage buffers to have the new
-        // information.
-        const any_updated = blk: {
+        // If the pipeline was just rebuilt, or any text objects were updated, we need to
+        // upload all text data to the GPU storage buffers.
+        const any_updated = needs_rebuild or blk: {
             for (pipeline_children.items) |text_id| {
                 if (!text.render_objects.is(text_id)) continue;
                 if (text.render_objects.peekAnyUpdated(text_id)) break :blk true;
@@ -342,12 +350,11 @@ pub fn render(text: *Text, core: *mach.Core) !void {
         };
         if (any_updated) try updatePipelineBuffers(text, core, pipeline_id, pipeline_children.items);
 
-        // // Do we actually have any sprites to render?
-        // pipeline = text.render_pipelines.getValue(pipeline_id);
-        // if (pipeline.num_sprites == 0) continue;
+        // Do we actually have any glyphs to render?
+        if (text.render_pipelines.get(pipeline_id, .num_glyphs) == 0) continue;
 
         // TODO(text): need a way to specify order of rendering with multiple pipelines
-        renderPipeline(text, core, pipeline_id);
+        renderPipeline(text, core, pipeline_id, render_pass);
     }
 }
 
@@ -761,6 +768,7 @@ fn renderPipeline(
     text: *Text,
     core: *mach.Core,
     pipeline_id: mach.ObjectID,
+    render_pass: *gpu.RenderPassEncoder,
 ) void {
     const pipeline = text.render_pipelines.getValue(pipeline_id);
     const built = text.built_pipelines.items[pipeline.built_index.?].?;
@@ -798,8 +806,8 @@ fn renderPipeline(
 
     // Draw the text batch
     const total_vertices = pipeline.num_glyphs * 6;
-    pipeline.render_pass.?.setPipeline(built.render);
+    render_pass.setPipeline(built.render);
     // TODO(text): can we remove unused dynamic offsets?
-    pipeline.render_pass.?.setBindGroup(0, built.bind_group, &.{});
-    pipeline.render_pass.?.draw(total_vertices, 1, 0, 0);
+    render_pass.setBindGroup(0, built.bind_group, &.{});
+    render_pass.draw(total_vertices, 1, 0, 0);
 }

@@ -24,6 +24,7 @@ pub const mach_systems = .{
     .init,
     .deinit,
     .deinitApp,
+    .appTick,
     .tick,
     .render,
 };
@@ -38,6 +39,7 @@ spawn_timer: mach.time.Timer,
 
 pub const main = mach.schedule(.{
     .{ mach.Core, .init },
+    .{ Renderer, .init },
     .{ App, .init },
     .{ mach.Core, .main },
 });
@@ -61,11 +63,10 @@ pub fn init(
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    const window = try core.windows.new(.{
+    _ = try core.windows.new(.{
         .title = "custom renderer",
         .on_render = app_mod.id.render,
     });
-    renderer.window = window;
 
     // Create our player entity.
     const player = try renderer.objects.new(.{
@@ -81,10 +82,16 @@ pub fn init(
     };
 }
 
-pub fn tick(
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Core, .snapshotStart },
+    .{ Renderer, .snapshot },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(
     core: *mach.Core,
     renderer: *Renderer,
-    renderer_mod: mach.Mod(Renderer),
     app: *App,
 ) !void {
     var direction = app.direction;
@@ -110,9 +117,6 @@ pub fn tick(
                     .space => spawning = false,
                     else => {},
                 }
-            },
-            .window_open => {
-                renderer_mod.call(.init);
             },
             .close => core.exit(),
             else => {},

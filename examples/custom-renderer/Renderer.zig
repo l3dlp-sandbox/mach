@@ -1,3 +1,4 @@
+const std = @import("std");
 const mach = @import("mach");
 const gpu = mach.gpu;
 const math = mach.math;
@@ -6,7 +7,7 @@ const Vec3 = math.Vec3;
 
 pub const mach_module = .renderer;
 
-pub const mach_systems = .{ .init, .deinit, .renderFrame };
+pub const mach_systems = .{ .init, .deinit, .snapshot, .renderFrame };
 
 const Renderer = @This();
 
@@ -20,21 +21,25 @@ const UniformBufferObject = extern struct {
     scale: f32,
 };
 
-window: mach.ObjectID,
-pipeline: *gpu.RenderPipeline,
-bind_groups: [num_bind_groups]*gpu.BindGroup,
-uniform_buffer: *gpu.Buffer,
-
-objects: mach.Objects(.{}, struct {
+const Objects = mach.Objects(.{}, struct {
     position: Vec3,
     scale: f32,
-}),
+});
 
-pub fn init(
+pipeline: ?*gpu.RenderPipeline = null,
+bind_groups: [num_bind_groups]*gpu.BindGroup = undefined,
+uniform_buffer: ?*gpu.Buffer = null,
+
+objects: Objects,
+
+// Internal render-thread copy of objects, updated by snapshot().
+render_objects: Objects,
+
+fn setupPipeline(
     core: *mach.Core,
     renderer: *Renderer,
 ) !void {
-    const window = core.windows.getValue(renderer.window);
+    const window = core.windows.getValue(core.window);
     const device = window.device;
     const shader_module = device.createShaderModuleWGSL("shader.wgsl", @embedFile("shader.wgsl"));
     defer shader_module.release();
@@ -87,7 +92,7 @@ pub fn init(
     }));
     defer pipeline_layout.release();
 
-    const pipeline = device.createRenderPipeline(&gpu.RenderPipeline.Descriptor{
+    renderer.pipeline = device.createRenderPipeline(&gpu.RenderPipeline.Descriptor{
         .label = label,
         .fragment = &fragment,
         .layout = pipeline_layout,
@@ -96,29 +101,44 @@ pub fn init(
             .entry_point = "vertex_main",
         },
     });
+    renderer.bind_groups = bind_groups;
+    renderer.uniform_buffer = uniform_buffer;
+}
 
+pub fn init(renderer: *Renderer) !void {
     renderer.* = .{
-        .window = renderer.window,
         .objects = renderer.objects,
-        .pipeline = pipeline,
-        .bind_groups = bind_groups,
-        .uniform_buffer = uniform_buffer,
+        .render_objects = renderer.render_objects,
     };
 }
 
 pub fn deinit(
     renderer: *Renderer,
 ) !void {
-    renderer.pipeline.release();
-    for (renderer.bind_groups) |bind_group| bind_group.release();
-    renderer.uniform_buffer.release();
+    if (renderer.pipeline) |p| {
+        p.release();
+        for (renderer.bind_groups) |bind_group| bind_group.release();
+    }
+    if (renderer.uniform_buffer) |b| b.release();
+}
+
+/// Called on the app thread (inside render_mu) to snapshot objects for the render thread.
+pub fn snapshot(renderer: *Renderer, core: *mach.Core) !void {
+    try renderer.render_objects.copyFrom(&renderer.objects);
+    // Point render-side graph to the snapshotted render_graph so render-side
+    // parent/child queries use the snapshot rather than the live app graph.
+    renderer.render_objects.internal.graph = &core.render_graph;
 }
 
 pub fn renderFrame(
     core: *mach.Core,
     renderer: *Renderer,
 ) !void {
-    const window = core.windows.getValue(renderer.window);
+    const pipeline = renderer.pipeline orelse {
+        try setupPipeline(core, renderer);
+        return;
+    };
+    const window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -130,16 +150,16 @@ pub fn renderFrame(
     const encoder = window.device.createCommandEncoder(&.{ .label = label });
     defer encoder.release();
 
-    // Update uniform buffer
+    // Update uniform buffer — read from render_objects (snapshot copy)
     var num_objects: usize = 0;
-    var objs = renderer.objects.slice();
+    var objs = renderer.render_objects.slice();
     while (objs.next()) |obj_id| {
-        const obj = renderer.objects.getValue(obj_id);
+        const obj = renderer.render_objects.getValue(obj_id);
         const ubo = UniformBufferObject{
             .offset = obj.position,
             .scale = obj.scale,
         };
-        encoder.writeBuffer(renderer.uniform_buffer, uniform_offset * num_objects, &[_]UniformBufferObject{ubo});
+        encoder.writeBuffer(renderer.uniform_buffer.?, uniform_offset * num_objects, &[_]UniformBufferObject{ubo});
         num_objects += 1;
     }
 
@@ -159,7 +179,7 @@ pub fn renderFrame(
 
     // Draw
     for (renderer.bind_groups[0..num_objects]) |bind_group| {
-        render_pass.setPipeline(renderer.pipeline);
+        render_pass.setPipeline(pipeline);
         render_pass.setBindGroup(0, bind_group, &.{0});
         render_pass.draw(3, 1, 0, 0);
     }

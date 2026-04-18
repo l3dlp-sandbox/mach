@@ -61,7 +61,6 @@ play_after: mach.Objects(.{}, struct {
 
 app_thread: mach.Thread,
 allocator: std.mem.Allocator,
-window: mach.ObjectID,
 ghost_key_mode: bool = false,
 
 pub fn init(
@@ -73,7 +72,7 @@ pub fn init(
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    const window = try core.windows.new(.{
+    _ = try core.windows.new(.{
         .title = "piano",
         .on_render = app_mod.id.render,
     });
@@ -89,7 +88,6 @@ pub fn init(
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .allocator = allocator,
         .play_after = app.play_after,
-        .window = window,
     };
 
     std.debug.print("controls:\n", .{});
@@ -192,10 +190,9 @@ pub fn tick(
 
 pub fn render(
     core: *mach.Core,
-    app: *App,
 ) !void {
     const label = @tagName(mach_module) ++ ".render";
-    var window = core.windows.getValue(app.window);
+    var window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser

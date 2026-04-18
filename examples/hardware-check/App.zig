@@ -28,6 +28,7 @@ pub const mach_module = .app;
 pub const mach_systems = .{
     .main,
     .init,
+    .appTick,
     .tick,
     .render,
     .deinit,
@@ -68,7 +69,7 @@ gotta_go_fast: bool = false,
 info_text: []u8 = undefined,
 info_text_id: mach.ObjectID = undefined,
 info_text_style_id: mach.ObjectID = undefined,
-sprite_pipeline_id: mach.ObjectID = undefined,
+sprite_pipeline_id: ?mach.ObjectID = null,
 text_pipeline_id: mach.ObjectID = undefined,
 sfx: mach.Audio.Opus = undefined,
 
@@ -138,23 +139,22 @@ fn setupPipeline(
     app: *App,
     sprite: *gfx.Sprite,
     text: *gfx.Text,
-    window_id: mach.ObjectID,
 ) !void {
-    const window = core.windows.getValue(window_id);
+    const window = core.windows.getValue(core.window);
 
     // Load sfx
     app.sfx = try mach.Audio.Opus.decodeStream(app.allocator, .{ .data = assets.sfx.scifi_gun });
 
     // Create a sprite rendering pipeline
     app.sprite_pipeline_id = try sprite.pipelines.new(.{
-        .window = window_id,
+        .window = core.window,
         .render_pass = undefined,
         .texture = try loadTexture(window.device, window.queue, app.allocator),
     });
 
     // Create a text rendering pipeline
     app.text_pipeline_id = try text.pipelines.new(.{
-        .window = window_id,
+        .window = core.window,
         .render_pass = undefined,
     });
 
@@ -208,19 +208,25 @@ fn setupPipeline(
             .segments = segments,
         });
         // Attach the text object to our text rendering pipeline.
-        try text.pipelines.setParent(app.info_text_id, app.sprite_pipeline_id);
+        try text.pipelines.setParent(app.info_text_id, app.sprite_pipeline_id.?);
     }
 }
 
-pub fn tick(
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Core, .snapshotStart },
+    .{ gfx.Sprite, .snapshot },
+    .{ gfx.Text, .snapshot },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(
     core: *mach.Core,
     app: *App,
     sprite: *gfx.Sprite,
     text: *gfx.Text,
     audio: *mach.Audio,
 ) !void {
-    const label = @tagName(mach_module) ++ ".tick";
-    _ = label;
     const window = core.windows.getValue(app.window);
 
     while (core.nextEvent()) |event| {
@@ -237,11 +243,13 @@ pub fn tick(
                     else => {},
                 }
             },
-            .window_open => |ev| try setupPipeline(core, app, sprite, text, ev.window_id),
+
             .close => core.exit(),
             else => {},
         }
     }
+
+    if (app.sprite_pipeline_id == null) return;
 
     // TODO(text): make updating text easier
     app.allocator.free(app.info_text);
@@ -272,7 +280,7 @@ pub fn tick(
             .size = vec2(32, 32),
             .uv_transform = Mat3x3.translate(vec2(0, 0)),
         });
-        try sprite.pipelines.setParent(new_sprite_id, app.sprite_pipeline_id);
+        try sprite.pipelines.setParent(new_sprite_id, app.sprite_pipeline_id.?);
         app.num_sprites_spawned += 1;
     }
 
@@ -280,7 +288,7 @@ pub fn tick(
     const delta_time = app.tick_timer.lap();
 
     // Move sprites to the right, and make them smaller the further they travel
-    var pipeline_children = try sprite.pipelines.getChildren(app.sprite_pipeline_id);
+    var pipeline_children = try sprite.pipelines.getChildren(app.sprite_pipeline_id.?);
     defer pipeline_children.deinit();
     for (pipeline_children.items) |sprite_id| {
         if (!sprite.objects.is(sprite_id)) continue;
@@ -291,7 +299,7 @@ pub fn tick(
         const progression = std.math.clamp((location.v[0] + (@as(f32, @floatFromInt(window.height)) / 2.0)) / @as(f32, @floatFromInt(window.height)), 0, 1);
         const scale = mach.math.lerp(2, 0, progression);
         if (progression >= 0.6) {
-            try sprite.pipelines.removeChild(app.sprite_pipeline_id, sprite_id);
+            try sprite.pipelines.removeChild(app.sprite_pipeline_id.?, sprite_id);
             sprite.objects.delete(sprite_id);
 
             // Play a new sound
@@ -312,6 +320,7 @@ pub fn tick(
             sprite.objects.set(sprite_id, .transform, transform);
         }
     }
+
 }
 
 pub fn render(
@@ -322,8 +331,13 @@ pub fn render(
     text: *gfx.Text,
     text_mod: mach.Mod(gfx.Text),
 ) !void {
+    if (app.sprite_pipeline_id == null) {
+        try setupPipeline(core, app, sprite, text);
+        return;
+    }
+
     const label = @tagName(mach_module) ++ ".render";
-    const window = core.windows.getValue(app.window);
+    const window = core.windows.getValue(core.window);
 
     // Grab the back buffer of the swapchain
     // TODO(core): this wouldn't exist in browser
@@ -348,13 +362,11 @@ pub fn render(
     }));
 
     // Render sprites
-    sprite.pipelines.set(app.sprite_pipeline_id, .render_pass, render_pass);
-    sprite_mod.call(.snapshot);
+    sprite.pipelines.set(app.sprite_pipeline_id.?, .render_pass, render_pass);
     sprite_mod.call(.render);
 
     // Render text
     text.pipelines.set(app.text_pipeline_id, .render_pass, render_pass);
-    text_mod.call(.snapshot);
     text_mod.call(.render);
 
     // Finish render pass
