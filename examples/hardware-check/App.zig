@@ -55,18 +55,16 @@ allocator: std.mem.Allocator,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
-fps_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
 
-frame_count: usize = 0,
-fps: usize = 0,
 score: usize = 0,
 num_sprites_spawned: usize = 0,
 direction: Vec2 = vec2(0, 0),
 spawning: bool = false,
 gotta_go_fast: bool = false,
 
-info_text: []u8 = undefined,
+info_text_buf: [128]u8 = undefined,
+info_text: []u8 = &.{},
 info_text_id: mach.ObjectID = undefined,
 info_text_style_id: mach.ObjectID = undefined,
 sprite_pipeline_id: ?mach.ObjectID = null,
@@ -102,7 +100,6 @@ pub fn init(
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
-        .fps_timer = mach.time.Timer.start(io),
         .rand = std.Random.DefaultPrng.init(1337),
     };
 }
@@ -192,10 +189,9 @@ fn setupPipeline(
 
     // Create info text to be updated dynamically later
     {
-        // TODO(text): release this memory somewhere
         const text_value = "[info]";
-        app.info_text = try app.allocator.alloc(u8, text_value.len);
-        @memcpy(app.info_text, text_value);
+        @memcpy(app.info_text_buf[0..text_value.len], text_value);
+        app.info_text = app.info_text_buf[0..text_value.len];
         const segments = try app.allocator.alloc(gfx.Text.Segment, 1);
         segments[0] = .{
             .text = app.info_text,
@@ -208,7 +204,7 @@ fn setupPipeline(
             .segments = segments,
         });
         // Attach the text object to our text rendering pipeline.
-        try text.pipelines.setParent(app.info_text_id, app.sprite_pipeline_id.?);
+        try text.pipelines.setParent(app.info_text_id, app.text_pipeline_id);
     }
 }
 
@@ -229,7 +225,8 @@ pub fn appTick(
 ) !void {
     const window = core.windows.getValue(app.window);
 
-    while (core.nextEvent()) |event| {
+    var iter = core.events(.adaptive);
+    while (iter.next()) |event| {
         switch (event) {
             .key_press => |ev| {
                 switch (ev.key) {
@@ -252,12 +249,11 @@ pub fn appTick(
     if (app.sprite_pipeline_id == null) return;
 
     // TODO(text): make updating text easier
-    app.allocator.free(app.info_text);
-    app.info_text = try std.fmt.allocPrint(
-        app.allocator,
-        "[ FPS: {d} ]\n[ Sprites spawned: {d} ]",
-        .{ app.fps, app.num_sprites_spawned },
-    );
+    app.info_text = std.fmt.bufPrint(
+        &app.info_text_buf,
+        "[ render: {d}hz | input: {d}hz ]\n[ Sprites spawned: {d} ]",
+        .{ core.frame.rate, core.input.rate, app.num_sprites_spawned },
+    ) catch &.{};
     var segments: []gfx.Text.Segment = @constCast(text.objects.get(app.info_text_id, .segments));
     segments[0] = .{
         .text = app.info_text,
@@ -376,14 +372,6 @@ pub fn render(
     command.release();
     render_pass.release();
 
-    app.frame_count += 1;
-
-    // Every second, update the window title with the FPS
-    if (app.fps_timer.read() >= 1.0) {
-        app.fps_timer.reset();
-        app.fps = app.frame_count;
-        app.frame_count = 0;
-    }
 }
 
 // TODO(sprite): don't require users to copy / write this helper themselves

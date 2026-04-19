@@ -131,7 +131,8 @@ pub fn appTick(
 
     var direction = app.direction;
     var spawning = app.spawning;
-    while (core.nextEvent()) |event| {
+    var iter = core.events(.adaptive);
+    while (iter.next()) |event| {
         switch (event) {
             .key_press => |ev| {
                 switch (ev.key) {

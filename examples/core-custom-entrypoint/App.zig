@@ -94,7 +94,9 @@ fn setupPipeline(core: *mach.Core, app: *App) !void {
 /// Single-threaded example: all tick + render logic runs in on_render on the main thread.
 pub fn render(core: *mach.Core, app: *App) !void {
     // Handle events inline (no separate app thread).
-    while (core.nextEvent()) |event| {
+    // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
+    var iter = core.events(.poll);
+    while (iter.next()) |event| {
         switch (event) {
             .close => core.exit(),
             else => {},

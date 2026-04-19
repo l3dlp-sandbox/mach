@@ -7,8 +7,6 @@ const log = std.log.scoped(.mach);
 
 const Core = @This();
 
-const EventQueue = std.Deque(Event);
-
 pub const mach_module = .mach_core;
 
 pub const mach_systems = .{ .main, .init, .tick, .deinit, .snapshotStart, .snapshotEnd };
@@ -118,7 +116,13 @@ render_mu: std.Io.Mutex = .init,
 
 // Internal module state
 allocator: std.mem.Allocator,
-events: EventQueue,
+io: std.Io,
+
+backend_events_mu: std.Io.Mutex = .init,
+backend_events: std.ArrayList(Event) = .empty,
+
+events_ready: std.Io.Event = .unset,
+iter_events: std.ArrayList(Event) = .empty,
 input_state: InputState,
 oom: std.atomic.Value(bool) = .init(false),
 render_graph: mach.Graph,
@@ -130,20 +134,19 @@ pub const State = enum(u8) {
 };
 
 pub fn init(core: *Core, io: std.Io) !void {
+    // TODO(allocator)
     const allocator = std.heap.c_allocator;
 
     // TODO: fix all leaks and use options.allocator
+    // TODO(leak)
     try mach.sysgpu.Impl.init(allocator, .{});
-
-    var events: EventQueue = .empty;
-    try events.ensureTotalCapacity(allocator, 8192);
 
     core.* = .{
         // Note: since core.windows is initialized for us already, we just copy the pointer.
         .windows = core.windows,
 
         .allocator = allocator,
-        .events = events,
+        .io = io,
         .input_state = .{},
         .render_graph = undefined,
 
@@ -151,6 +154,11 @@ pub fn init(core: *Core, io: std.Io) !void {
         .frame = .{ .target = 1 },
     };
 
+    // TODO(leak)
+    try core.backend_events.ensureTotalCapacity(allocator, 8192);
+    try core.iter_events.ensureTotalCapacity(allocator, 8192);
+
+    // TODO(leak)
     try mach.initGraph(&core.render_graph, allocator, io, .render);
 
     core.frame.start(io);
@@ -303,6 +311,7 @@ fn handleExit(core: *Core, core_mod: mach.Mod(Core)) !void {
 /// Signal that the application should exit. Thread-safe.
 pub fn exit(core: *Core) void {
     core.state.store(.exiting, .release);
+    core.events_ready.set(core.io);
 }
 
 pub fn deinit(core: *Core) !void {
@@ -320,39 +329,135 @@ pub fn deinit(core: *Core) !void {
     }
 
     core.render_graph.deinit(core.allocator);
-    core.events.deinit(core.allocator);
+    core.backend_events.deinit(core.allocator);
+    core.iter_events.deinit(core.allocator);
 }
 
-/// Returns the next event until there are no more available. You should check for events during
-/// every on_tick()
-pub inline fn nextEvent(core: *@This()) ?Event {
-    return core.events.popFront();
-}
+pub const EventMode = union(enum) {
+    /// Never blocks.
+    poll,
+    /// Blocks until there is at least one event.
+    wait,
+    /// Alias for .adaptive_frequency = .{ .min = 120 }
+    adaptive,
+    /// Blocks as needed to run at the target minimum frequency, but immediately unblocks if at
+    /// an event is available.
+    ///
+    /// Use this to e.g. run your event handling loop at 120hz, but allow the loop to run faster
+    /// (e.g. at 1000hz) if the user has a very fast gaming mouse producing events quickly.
+    adaptive_frequency: struct {
+        min: u32,
+    },
+    /// Blocks as needed to run at the target frequency.
+    ///
+    /// Use this to e.g. run your event handling loop at 120hz, and generally not allow it to run
+    /// faster even if the user has a very fast input device producing events quickly.
+    fixed_frequency: struct {
+        target: u32,
+    },
+};
 
-/// Push an event onto the event queue, or set OOM if no space is available.
+pub const EventIterator = struct {
+    events: []const Event,
+    index: usize = 0,
+
+    pub fn next(self: *EventIterator) ?Event {
+        if (self.index >= self.events.len) return null;
+        const event = self.events[self.index];
+        self.index += 1;
+        return event;
+    }
+};
+
+/// Returns an iterator over events using the specified mode for pacing/blocking.
 ///
-/// Updates the input_state tracker.
+/// Events are always buffered between calls to events() so none are lost, the mode strictly
+/// controls pacing of your event handling loop itself.
+pub fn events(core: *@This(), mode_arg: EventMode) EventIterator {
+    const mode = if (mode_arg == .adaptive) EventMode{ .adaptive_frequency = .{ .min = 120 } } else mode_arg;
+
+    // Set target before tick so delay_ns is computed correctly.
+    switch (mode) {
+        .adaptive_frequency => |f| core.input.target = f.min,
+        .fixed_frequency => |f| core.input.target = f.target,
+        else => {},
+    }
+    core.input.tick();
+
+    // Handle pacing, and ensure we have core.backend_events_mu locked.
+    switch (mode) {
+        .poll => {
+            core.backend_events_mu.lockUncancelable(core.io);
+        },
+        .wait => {
+            core.backend_events_mu.lockUncancelable(core.io);
+            if (core.backend_events.items.len == 0) {
+                // No events yet — release the mutex and block until an event is pushed.
+                core.backend_events_mu.unlock(core.io);
+                core.events_ready.waitUncancelable(core.io);
+                core.backend_events_mu.lockUncancelable(core.io);
+            }
+        },
+        .adaptive_frequency => {
+            // Wait until an event arrives OR we've waited for delay_ns, whichever comes first.
+            if (core.input.delay_ns > 0) {
+                core.events_ready.waitTimeout(core.io, .{
+                    .duration = .{
+                        .raw = .{ .nanoseconds = @intCast(core.input.delay_ns) },
+                        .clock = .awake,
+                    },
+                }) catch {};
+            }
+            core.backend_events_mu.lockUncancelable(core.io);
+        },
+        .fixed_frequency => {
+            if (core.input.delay_ns > 0) {
+                core.io.sleep(.{ .nanoseconds = @intCast(core.input.delay_ns) }, .awake) catch {};
+            }
+            core.backend_events_mu.lockUncancelable(core.io);
+        },
+        .adaptive => unreachable,
+    }
+
+    // Reset the event now that we hold the mutex and are about to drain all events.
+    // Any events pushed after this point will re-set it via pushEvent.
+    core.events_ready.reset();
+
+    // With the mutex held from above, swap the backend_events (new events) and iter_events (handled events) buffers.
+    std.mem.swap(std.ArrayList(Event), &core.backend_events, &core.iter_events);
+    core.backend_events.clearRetainingCapacity();
+    core.backend_events_mu.unlock(core.io);
+
+    // Update input_state from swapped events.
+    for (core.iter_events.items) |event| {
+        switch (event) {
+            .key_press => |ev| core.input_state.keys.setValue(@intFromEnum(ev.key), true),
+            .key_release => |ev| core.input_state.keys.setValue(@intFromEnum(ev.key), false),
+            .mouse_press => |ev| core.input_state.mouse_buttons.setValue(@intFromEnum(ev.button), true),
+            .mouse_release => |ev| core.input_state.mouse_buttons.setValue(@intFromEnum(ev.button), false),
+            .mouse_motion => |ev| core.input_state.mouse_position = ev.pos,
+            .focus_lost => {
+                // Clear input state that may be 'stuck' when focus is regained.
+                core.input_state.keys = InputState.KeyBitSet.initEmpty();
+                core.input_state.mouse_buttons = InputState.MouseButtonSet.initEmpty();
+            },
+            else => {},
+        }
+    }
+
+    return .{ .events = core.iter_events.items };
+}
+
+/// Push an event onto the event queue. Thread-safe.
 pub inline fn pushEvent(core: *@This(), event: Event) void {
-    // Write event
-    core.events.pushBack(core.allocator, event) catch {
+    core.backend_events_mu.lockUncancelable(core.io);
+    core.backend_events.append(core.allocator, event) catch {
+        core.backend_events_mu.unlock(core.io);
         core.oom.store(true, .release);
         return;
     };
-
-    // Update input state
-    switch (event) {
-        .key_press => |ev| core.input_state.keys.setValue(@intFromEnum(ev.key), true),
-        .key_release => |ev| core.input_state.keys.setValue(@intFromEnum(ev.key), false),
-        .mouse_press => |ev| core.input_state.mouse_buttons.setValue(@intFromEnum(ev.button), true),
-        .mouse_release => |ev| core.input_state.mouse_buttons.setValue(@intFromEnum(ev.button), false),
-        .mouse_motion => |ev| core.input_state.mouse_position = ev.pos,
-        .focus_lost => {
-            // Clear input state that may be 'stuck' when focus is regained.
-            core.input_state.keys = InputState.KeyBitSet.initEmpty();
-            core.input_state.mouse_buttons = InputState.MouseButtonSet.initEmpty();
-        },
-        else => {},
-    }
+    core.backend_events_mu.unlock(core.io);
+    core.events_ready.set(core.io);
 }
 
 /// Reports whether mach.Core ran out of memory, indicating events may have been dropped.

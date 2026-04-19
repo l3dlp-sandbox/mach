@@ -102,7 +102,9 @@ fn setupPipeline(core: *mach.Core, app: *App) !void {
 pub fn tick(app: *App, core: *mach.Core) void {
     const label = @tagName(mach_module) ++ ".tick";
     _ = label;
-    while (core.nextEvent()) |event| {
+    // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
+    var iter = core.events(.poll);
+    while (iter.next()) |event| {
         switch (event) {
             .key_repeat, .key_press => |ev| {
                 switch (ev.key) {

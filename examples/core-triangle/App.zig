@@ -92,7 +92,9 @@ fn setupPipeline(core: *mach.Core, app: *App) !void {
 // try updateWindowTitle(core);
 
 pub fn tick(core: *mach.Core) void {
-    while (core.nextEvent()) |event| {
+    // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
+    var iter = core.events(.poll);
+    while (iter.next()) |event| {
         switch (event) {
             .close => core.exit(),
             else => {},
