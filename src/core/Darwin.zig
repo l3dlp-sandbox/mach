@@ -191,6 +191,17 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         }
     }
 
+    const state = core.state.load(.acquire);
+
+    if (state == .exiting or state == .exited) {
+        // Stop the render loop before GPU resources are released.
+        if (global_render_loop) |rl| {
+            rl.stop();
+            core.allocator.destroy(rl);
+            global_render_loop = null;
+        }
+    }
+
     // When no display link is driving rendering (all windows are vsync=none),
     // render from the main loop.
     if (global_render_loop == null) {
@@ -483,11 +494,6 @@ const WindowDelegateCallbacks = struct {
     pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*Context)) callconv(.c) bool {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
-        if (global_render_loop) |render_loop| {
-            render_loop.stop();
-            global_render_loop = null;
-        }
 
         core.pushEvent(.{ .close = .{ .window_id = window_id } });
 
