@@ -27,12 +27,23 @@ pub const Native = struct {
 
 var global_render_loop: ?*RenderLoop = null;
 
+pub const PendingResize = struct {
+    window_id: mach.ObjectID,
+    width: u32,
+    height: u32,
+    framebuffer_width: u32,
+    framebuffer_height: u32,
+};
+
 pub const RenderLoop = struct {
     display_link: *objc.core_video.CVDisplayLinkRef = undefined,
     display_source: objc.system.dispatch_source_t = undefined,
     core: *Core = undefined,
     core_mod: mach.Mod(Core) = undefined,
     io: std.Io = undefined,
+
+    pending_resizes: std.ArrayList(PendingResize) = .empty,
+    resize_mu: std.Io.Mutex = .init,
 
     pub fn start(self: *RenderLoop) error{CVDisplayLinkFailed}!void {
         self.display_source = objc.system.dispatch_source_create(
@@ -61,9 +72,31 @@ pub const RenderLoop = struct {
 
     fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.c) void {
         const self: *RenderLoop = @ptrCast(@alignCast(ctx));
+
+        // Apply any pending resizes before rendering.
+        {
+            self.resize_mu.lockUncancelable(self.io);
+            defer self.resize_mu.unlock(self.io);
+            for (self.pending_resizes.items) |r| self.applyResize(r);
+            self.pending_resizes.clearRetainingCapacity();
+        }
+
         self.core.renderFrame(self.core_mod, self.io) catch {
             self.core.oom.store(true, .release);
         };
+    }
+
+    fn applyResize(self: *RenderLoop, resize: PendingResize) void {
+        var core_window = self.core.windows.getValue(resize.window_id);
+        core_window.width = resize.width;
+        core_window.height = resize.height;
+        core_window.framebuffer_width = resize.framebuffer_width;
+        core_window.framebuffer_height = resize.framebuffer_height;
+        core_window.swap_chain_descriptor.width = resize.framebuffer_width;
+        core_window.swap_chain_descriptor.height = resize.framebuffer_height;
+        core_window.swap_chain.release();
+        core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
+        self.core.windows.setValueRaw(resize.window_id, core_window);
     }
 
     fn displayLinkCallback(
@@ -455,8 +488,9 @@ fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
 const WindowDelegateCallbacks = struct {
     pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*Context)) callconv(.c) void {
         const core: *Core = block.context.core;
+        const window_id = block.context.window_id;
 
-        var core_window = core.windows.getValue(block.context.window_id);
+        const core_window = core.windows.getValue(window_id);
 
         if (core_window.native) |native| {
             const native_window: *objc.app_kit.Window = native.window;
@@ -464,28 +498,39 @@ const WindowDelegateCallbacks = struct {
             const frame = native_window.frame();
             const content_rect = native_window.contentRectForFrameRect(frame);
 
-            if (core_window.width != @as(u32, @intFromFloat(content_rect.size.width)) or core_window.height != @as(u32, @intFromFloat(content_rect.size.height))) {
-                core_window.width = @intFromFloat(content_rect.size.width);
-                core_window.height = @intFromFloat(content_rect.size.height);
+            const new_width: u32 = @intFromFloat(content_rect.size.width);
+            const new_height: u32 = @intFromFloat(content_rect.size.height);
 
+            if (core_window.width != new_width or core_window.height != new_height) {
                 const framebuffer_scale: f32 = @floatCast(native_window.backingScaleFactor());
-                const window_width: f32 = @floatFromInt(core_window.width);
-                const window_height: f32 = @floatFromInt(core_window.height);
+                const fb_width: u32 = @intFromFloat(@as(f32, @floatFromInt(new_width)) * framebuffer_scale);
+                const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(new_height)) * framebuffer_scale);
 
-                core_window.framebuffer_width = @intFromFloat(window_width * framebuffer_scale);
-                core_window.framebuffer_height = @intFromFloat(window_height * framebuffer_scale);
-
-                core_window.swap_chain_descriptor.width = core_window.framebuffer_width;
-                core_window.swap_chain_descriptor.height = core_window.framebuffer_height;
-                core_window.swap_chain.release();
-
-                core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
-
-                core.windows.setValueRaw(block.context.window_id, core_window);
+                // Queue the resize for the render callback to apply.
+                if (global_render_loop) |rl| {
+                    rl.resize_mu.lockUncancelable(rl.io);
+                    defer rl.resize_mu.unlock(rl.io);
+                    const pending: PendingResize = .{
+                        .window_id = window_id,
+                        .width = new_width,
+                        .height = new_height,
+                        .framebuffer_width = fb_width,
+                        .framebuffer_height = fb_height,
+                    };
+                    // Coalesce: overwrite existing entry for the same window.
+                    for (rl.pending_resizes.items) |*r| {
+                        if (r.window_id == window_id) {
+                            r.* = pending;
+                            break;
+                        }
+                    } else {
+                        rl.pending_resizes.append(core.allocator, pending) catch {};
+                    }
+                }
 
                 core.pushEvent(.{ .window_resize = .{
-                    .window_id = block.context.window_id,
-                    .size = .{ .width = core_window.width, .height = core_window.height },
+                    .window_id = window_id,
+                    .size = .{ .width = new_width, .height = new_height },
                 } });
             }
         }
