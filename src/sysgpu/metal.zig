@@ -448,8 +448,9 @@ pub const SwapChain = struct {
         layer.setPixelFormat(conv.metalPixelFormat(desc.format));
         layer.setFramebufferOnly(!(desc.usage.storage_binding or desc.usage.render_attachment));
         layer.setDrawableSize(size);
-        layer.setMaximumDrawableCount(if (desc.present_mode == .mailbox) 3 else 2);
+        layer.setMaximumDrawableCount(3);
         layer.setDisplaySyncEnabled(desc.present_mode != .immediate);
+        layer.setAllowsNextDrawableTimeout(true);
 
         const swapchain = try allocator.create(SwapChain);
         swapchain.* = .{ .device = device, .surface = surface };
@@ -461,7 +462,7 @@ pub const SwapChain = struct {
         allocator.destroy(swapchain);
     }
 
-    pub fn getCurrentTextureView(swapchain: *SwapChain) !*TextureView {
+    pub fn getCurrentTextureView(swapchain: *SwapChain) !?*TextureView {
         const pool = objc.autoreleasePoolPush();
         defer objc.autoreleasePoolPop(pool);
 
@@ -475,7 +476,7 @@ pub const SwapChain = struct {
             _ = drawable.retain();
             return TextureView.initFromMtlTexture(drawable.texture());
         } else {
-            std.debug.panic("getCurrentTextureView no drawable", .{});
+            return null;
         }
     }
 
@@ -491,7 +492,8 @@ pub const SwapChain = struct {
 
             if (swapchain.surface.layer.displaySyncEnabled()) {
                 command_buffer.commit();
-                drawable.present();
+                const mtl_drawable: *mtl.Drawable = @ptrCast(drawable);
+                mtl_drawable.present();
             } else {
                 command_buffer.presentDrawable(@ptrCast(drawable));
                 command_buffer.commit();

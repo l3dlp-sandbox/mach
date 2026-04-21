@@ -23,102 +23,114 @@ pub const Darwin = @This();
 pub const Native = struct {
     window: *objc.app_kit.Window = undefined,
     view: *objc.mach.View = undefined,
+    pending_swap_chain_update: ?PendingSwapChainUpdate = null,
 };
 
 var global_render_loop: ?*RenderLoop = null;
 
-pub const PendingResize = struct {
-    window_id: mach.ObjectID,
+pub const PendingSwapChainUpdate = struct {
     width: u32,
     height: u32,
     framebuffer_width: u32,
     framebuffer_height: u32,
+    present_mode: gpu.PresentMode,
 };
 
 pub const RenderLoop = struct {
-    display_link: *objc.core_video.CVDisplayLinkRef = undefined,
     display_ready_for_frame: objc.system.dispatch_semaphore_t = undefined,
+    owner_view: ?*objc.mach.View = null,
     core: *Core = undefined,
     core_mod: mach.Mod(Core) = undefined,
     io: std.Io = undefined,
     running: std.atomic.Value(bool) = .init(true),
     thread: std.Thread = undefined,
 
-    pending_resizes: std.ArrayList(PendingResize) = .empty,
-    resize_mu: std.Io.Mutex = .init,
-
-    pub fn start(self: *RenderLoop) error{ CVDisplayLinkFailed, ThreadSpawnFailed }!void {
-        self.display_ready_for_frame = objc.system.dispatch_semaphore_create(0) orelse return error.CVDisplayLinkFailed;
-
-        if (objc.core_video.createWithActiveCGDisplays(&self.display_link) != 0)
-            return error.CVDisplayLinkFailed;
-        if (objc.core_video.setOutputCallback(self.display_link, &displayLinkCallback, @ptrCast(self.display_ready_for_frame)) != 0)
-            return error.CVDisplayLinkFailed;
-        if (objc.core_video.displayLinkStart(self.display_link) != 0)
-            return error.CVDisplayLinkFailed;
+    pub fn start(self: *RenderLoop) error{ DisplayLinkFailed, ThreadSpawnFailed }!void {
+        self.display_ready_for_frame = objc.system.dispatch_semaphore_create(0) orelse return error.DisplayLinkFailed;
 
         self.thread = std.Thread.spawn(.{}, renderThreadFn, .{self}) catch
             return error.ThreadSpawnFailed;
     }
 
+    pub fn attachView(self: *RenderLoop, view: *objc.mach.View) void {
+        if (self.owner_view != null) return;
+
+        var render_block = objc.foundation.stackBlockLiteral(
+            displayLinkWake,
+            self,
+            null,
+            null,
+        );
+        view.setBlock_render(render_block.asBlock().copy());
+
+        if (!view.startDisplayLink()) {
+            log.err("CADisplayLink unavailable (requires macOS 14+)", .{});
+            return;
+        }
+        self.owner_view = view;
+    }
+
     pub fn stop(self: *RenderLoop) void {
         self.running.store(false, .release);
+
+        if (self.owner_view) |view| {
+            view.stopDisplayLink();
+            self.owner_view = null;
+        }
+
         // Wake the render thread so it can observe the stop.
+        self.core.frame_ready.set(self.io);
         _ = objc.system.dispatch_semaphore_signal(self.display_ready_for_frame);
         self.thread.join();
-
-        _ = objc.core_video.displayLinkStop(self.display_link);
-        objc.core_video.displayLinkRelease(self.display_link);
     }
 
     fn renderThreadFn(self: *RenderLoop) void {
         while (self.running.load(.acquire)) {
-            // Wait for CVDisplayLink signal (paces rendering to display refresh rate).
-            _ = objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_FOREVER);
+            // Wait until the app thread has produced a new snapshot.
+            self.core.frame_ready.waitUncancelable(self.io);
+            self.core.frame_ready.reset();
             if (!self.running.load(.acquire)) break;
 
-            // Apply any pending resizes before rendering.
+            // When vsync is enabled, also wait for the display refresh signal.
+            if (self.core.vsyncEnabled()) {
+                _ = objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_FOREVER);
+                if (!self.running.load(.acquire)) break;
+            }
+
+            // Apply any pending swap chain updates (resizes, vsync changes) before rendering.
             {
-                self.resize_mu.lockUncancelable(self.io);
-                defer self.resize_mu.unlock(self.io);
-                for (self.pending_resizes.items) |r| self.applyResize(r);
-                self.pending_resizes.clearRetainingCapacity();
+                var windows = self.core.windows.slice();
+                while (windows.next()) |window_id| {
+                    var core_window = self.core.windows.getValue(window_id);
+                    if (core_window.native) |*native| {
+                        if (native.pending_swap_chain_update) |update| {
+                            native.pending_swap_chain_update = null;
+                            core_window.width = update.width;
+                            core_window.height = update.height;
+                            core_window.framebuffer_width = update.framebuffer_width;
+                            core_window.framebuffer_height = update.framebuffer_height;
+                            core_window.swap_chain_descriptor.width = update.framebuffer_width;
+                            core_window.swap_chain_descriptor.height = update.framebuffer_height;
+                            core_window.swap_chain_descriptor.present_mode = update.present_mode;
+                            core_window.swap_chain.release();
+                            core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
+                            self.core.windows.setValueRaw(window_id, core_window);
+                        }
+                    }
+                }
             }
 
             self.core.renderFrame(self.core_mod, self.io) catch {
                 self.core.oom.store(true, .release);
             };
 
-            // Drain any extra semaphore signals that accumulated during this frame
-            // so we don't render stale frames back-to-back.
+            // Drain any extra display link signals that accumulated during this frame.
             while (objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_NOW) == 0) {}
         }
     }
 
-    fn applyResize(self: *RenderLoop, resize: PendingResize) void {
-        var core_window = self.core.windows.getValue(resize.window_id);
-        core_window.width = resize.width;
-        core_window.height = resize.height;
-        core_window.framebuffer_width = resize.framebuffer_width;
-        core_window.framebuffer_height = resize.framebuffer_height;
-        core_window.swap_chain_descriptor.width = resize.framebuffer_width;
-        core_window.swap_chain_descriptor.height = resize.framebuffer_height;
-        core_window.swap_chain.release();
-        core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
-        self.core.windows.setValueRaw(resize.window_id, core_window);
-    }
-
-    fn displayLinkCallback(
-        _: *objc.core_video.CVDisplayLinkRef,
-        _: *const objc.core_video.CVTimeStamp,
-        _: *const objc.core_video.CVTimeStamp,
-        _: u64,
-        _: *u64,
-        ctx: ?*anyopaque,
-    ) callconv(.c) objc.core_video.CVReturn {
-        const semaphore: objc.system.dispatch_semaphore_t = @ptrCast(@alignCast(ctx));
-        _ = objc.system.dispatch_semaphore_signal(semaphore);
-        return 0; // kCVReturnSuccess
+    fn displayLinkWake(block: *objc.foundation.BlockLiteral(*RenderLoop)) callconv(.c) void {
+        _ = objc.system.dispatch_semaphore_signal(block.context.display_ready_for_frame);
     }
 };
 
@@ -228,6 +240,25 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
 
             if (core.windows.updated(window_id, .vsync_mode)) {
                 try ensureRenderLoop(core, core_mod, io);
+                core.windows.setRaw(window_id, .native, .{
+                    .window = native.window,
+                    .view = native.view,
+                    .pending_swap_chain_update = .{
+                        .width = core_window.width,
+                        .height = core_window.height,
+                        .framebuffer_width = core_window.framebuffer_width,
+                        .framebuffer_height = core_window.framebuffer_height,
+                        .present_mode = switch (core_window.vsync_mode) {
+                            .none => .immediate,
+                            .double => .fifo,
+                            .triple => .mailbox,
+                        },
+                    },
+                });
+                if (global_render_loop) |rl| {
+                    // Wake the render thread in case it's blocked on the display link semaphore.
+                    _ = objc.system.dispatch_semaphore_signal(rl.display_ready_for_frame);
+                }
             }
         } else {
             try initWindow(core, core_mod, window_id, io);
@@ -296,7 +327,7 @@ fn initWindow(
     const layer = objc.quartz_core.MetalLayer.new();
     defer layer.release();
 
-    if (core_window.transparent) layer.setOpaque(false);
+    if (core_window.transparent) layer.as(objc.quartz_core.Layer).setOpaque(false);
 
     metal_descriptor.* = .{
         .layer = layer,
@@ -466,10 +497,13 @@ fn initWindow(
 
         // Start or update the global render loop if needed
         try ensureRenderLoop(core, core_mod, core.windows.internal.io);
+
+        // Attach this view as the display link owner if none yet.
+        if (global_render_loop) |rl| rl.attachView(view);
     } else std.debug.panic("mach: window failed to initialize", .{});
 }
 
-/// Ensures a render loop is running. Always uses CVDisplayLink for pacing;
+/// Ensures a render loop is running. Uses CADisplayLink for pacing;
 /// the swap chain's present mode controls vsync behavior.
 fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     if (global_render_loop != null) return;
@@ -502,26 +536,17 @@ const WindowDelegateCallbacks = struct {
                 const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(new_height)) * framebuffer_scale);
 
                 // Queue the resize for the render thread to apply.
-                if (global_render_loop) |rl| {
-                    rl.resize_mu.lockUncancelable(block.context.io);
-                    defer rl.resize_mu.unlock(block.context.io);
-                    const pending: PendingResize = .{
-                        .window_id = window_id,
+                core.windows.setRaw(window_id, .native, .{
+                    .window = native.window,
+                    .view = native.view,
+                    .pending_swap_chain_update = .{
                         .width = new_width,
                         .height = new_height,
                         .framebuffer_width = fb_width,
                         .framebuffer_height = fb_height,
-                    };
-                    // Coalesce: overwrite existing entry for the same window.
-                    for (rl.pending_resizes.items) |*r| {
-                        if (r.window_id == window_id) {
-                            r.* = pending;
-                            break;
-                        }
-                    } else {
-                        rl.pending_resizes.append(core.allocator, pending) catch {};
-                    }
-                }
+                        .present_mode = core_window.swap_chain_descriptor.present_mode,
+                    },
+                });
 
                 core.pushEvent(.{ .window_resize = .{
                     .window_id = window_id,

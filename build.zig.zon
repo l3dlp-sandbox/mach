@@ -25,8 +25,8 @@
             .lazy = true,
         },
         .mach_objc = .{
-            .url = "https://pkg.hexops.org/pkg/hexops/mach-objc/9de6fb144fced068f5ccc60758288f800d32c699.tar.gz",
-            .hash = "mach_objc-0.0.0-pF1e0sRrDQA6so0OtL55z4ThLK0ka2hc3U7OXhATNdU4",
+            .url = "https://pkg.hexops.org/pkg/hexops/mach-objc/f9ac389717207de380813ce9c35cd9f47aeba201.tar.gz",
+            .hash = "mach_objc-0.0.0-pF1e0oGqDQBXa5Uzf-nS6GWU7uc0d38BVc8-EiiEn3JH",
             .lazy = true,
         },
         .xcode_frameworks = .{

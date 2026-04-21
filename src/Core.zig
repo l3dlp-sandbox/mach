@@ -114,6 +114,10 @@ input: mach.time.Frequency,
 /// frames.
 render_mu: std.Io.Mutex = .init,
 
+/// Signaled by the app thread after snapshotEnd to indicate a new frame is ready
+/// for the render thread to consume.
+frame_ready: std.Io.Event = .unset,
+
 // Internal module state
 allocator: std.mem.Allocator,
 io: std.Io,
@@ -275,6 +279,7 @@ pub fn snapshotStart(core: *Core, io: std.Io) !void {
 /// End submission of a snapshot for rendering the next frame.
 pub fn snapshotEnd(core: *Core, io: std.Io) void {
     core.render_mu.unlock(io);
+    core.frame_ready.set(io);
 }
 
 /// Core.main enters the platform's main loop, which drives rendering on the main thread.
@@ -299,6 +304,15 @@ fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !
     try Platform.tick(core, core_mod, io);
     try core.handleExit(core_mod);
     return core.state.load(.acquire) != .exited;
+}
+
+/// Returns true if any window has vsync enabled (i.e. vsync_mode != .none).
+pub fn vsyncEnabled(core: *Core) bool {
+    var windows = core.windows.slice();
+    while (windows.next()) |window_id| {
+        if (core.windows.get(window_id, .vsync_mode) != .none) return true;
+    }
+    return false;
 }
 
 fn handleExit(core: *Core, core_mod: mach.Mod(Core)) !void {
