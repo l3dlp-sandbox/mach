@@ -37,53 +37,62 @@ pub const PendingResize = struct {
 
 pub const RenderLoop = struct {
     display_link: *objc.core_video.CVDisplayLinkRef = undefined,
-    display_source: objc.system.dispatch_source_t = undefined,
+    display_ready_for_frame: objc.system.dispatch_semaphore_t = undefined,
     core: *Core = undefined,
     core_mod: mach.Mod(Core) = undefined,
     io: std.Io = undefined,
+    running: std.atomic.Value(bool) = .init(true),
+    thread: std.Thread = undefined,
 
     pending_resizes: std.ArrayList(PendingResize) = .empty,
     resize_mu: std.Io.Mutex = .init,
 
-    pub fn start(self: *RenderLoop) error{CVDisplayLinkFailed}!void {
-        self.display_source = objc.system.dispatch_source_create(
-            @ptrCast(&objc.system._dispatch_source_type_data_add),
-            0,
-            0,
-            &objc.system._dispatch_main_q,
-        );
-        objc.system.dispatch_set_context(@ptrCast(self.display_source), @ptrCast(self));
-        objc.system.dispatch_source_set_event_handler_f(self.display_source, &onDisplaySourceEvent);
-        objc.system.dispatch_resume(@ptrCast(self.display_source));
+    pub fn start(self: *RenderLoop) error{ CVDisplayLinkFailed, ThreadSpawnFailed }!void {
+        self.display_ready_for_frame = objc.system.dispatch_semaphore_create(0) orelse return error.CVDisplayLinkFailed;
 
         if (objc.core_video.createWithActiveCGDisplays(&self.display_link) != 0)
             return error.CVDisplayLinkFailed;
-        if (objc.core_video.setOutputCallback(self.display_link, &displayLinkCallback, @ptrCast(self.display_source)) != 0)
+        if (objc.core_video.setOutputCallback(self.display_link, &displayLinkCallback, @ptrCast(self.display_ready_for_frame)) != 0)
             return error.CVDisplayLinkFailed;
         if (objc.core_video.displayLinkStart(self.display_link) != 0)
             return error.CVDisplayLinkFailed;
+
+        self.thread = std.Thread.spawn(.{}, renderThreadFn, .{self}) catch
+            return error.ThreadSpawnFailed;
     }
 
     pub fn stop(self: *RenderLoop) void {
+        self.running.store(false, .release);
+        // Wake the render thread so it can observe the stop.
+        _ = objc.system.dispatch_semaphore_signal(self.display_ready_for_frame);
+        self.thread.join();
+
         _ = objc.core_video.displayLinkStop(self.display_link);
         objc.core_video.displayLinkRelease(self.display_link);
-        objc.system.dispatch_source_cancel(self.display_source);
     }
 
-    fn onDisplaySourceEvent(ctx: ?*anyopaque) callconv(.c) void {
-        const self: *RenderLoop = @ptrCast(@alignCast(ctx));
+    fn renderThreadFn(self: *RenderLoop) void {
+        while (self.running.load(.acquire)) {
+            // Wait for CVDisplayLink signal (paces rendering to display refresh rate).
+            _ = objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_FOREVER);
+            if (!self.running.load(.acquire)) break;
 
-        // Apply any pending resizes before rendering.
-        {
-            self.resize_mu.lockUncancelable(self.io);
-            defer self.resize_mu.unlock(self.io);
-            for (self.pending_resizes.items) |r| self.applyResize(r);
-            self.pending_resizes.clearRetainingCapacity();
+            // Apply any pending resizes before rendering.
+            {
+                self.resize_mu.lockUncancelable(self.io);
+                defer self.resize_mu.unlock(self.io);
+                for (self.pending_resizes.items) |r| self.applyResize(r);
+                self.pending_resizes.clearRetainingCapacity();
+            }
+
+            self.core.renderFrame(self.core_mod, self.io) catch {
+                self.core.oom.store(true, .release);
+            };
+
+            // Drain any extra semaphore signals that accumulated during this frame
+            // so we don't render stale frames back-to-back.
+            while (objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_NOW) == 0) {}
         }
-
-        self.core.renderFrame(self.core_mod, self.io) catch {
-            self.core.oom.store(true, .release);
-        };
     }
 
     fn applyResize(self: *RenderLoop, resize: PendingResize) void {
@@ -107,8 +116,8 @@ pub const RenderLoop = struct {
         _: *u64,
         ctx: ?*anyopaque,
     ) callconv(.c) objc.core_video.CVReturn {
-        const source: objc.system.dispatch_source_t = @ptrCast(@alignCast(ctx));
-        objc.system.dispatch_source_merge_data(source, 1);
+        const semaphore: objc.system.dispatch_semaphore_t = @ptrCast(@alignCast(ctx));
+        _ = objc.system.dispatch_semaphore_signal(semaphore);
         return 0; // kCVReturnSuccess
     }
 };
@@ -117,6 +126,7 @@ pub const Context = struct {
     core: *Core,
     core_mod: mach.Mod(Core),
     window_id: mach.ObjectID,
+    io: std.Io,
 };
 
 pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@TypeOf(on_each_update_fn))) noreturn {
@@ -220,7 +230,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
                 try ensureRenderLoop(core, core_mod, io);
             }
         } else {
-            try initWindow(core, core_mod, window_id);
+            try initWindow(core, core_mod, window_id, io);
         }
     }
 
@@ -233,12 +243,9 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
             core.allocator.destroy(rl);
             global_render_loop = null;
         }
-    }
-
-    // When no display link is driving rendering (all windows are vsync=none),
-    // render from the main loop.
-    if (global_render_loop == null) {
-        try core.renderFrame(core_mod, io);
+    } else if (global_render_loop == null) {
+        // Ensure a render loop is always running (with or without display link).
+        try ensureRenderLoop(core, core_mod, io);
     }
 }
 
@@ -246,11 +253,12 @@ fn initWindow(
     core: *Core,
     core_mod: mach.Mod(Core),
     window_id: mach.ObjectID,
+    io: std.Io,
 ) !void {
     var core_window = core.windows.getValue(window_id);
 
     const context = try core.allocator.create(Context);
-    context.* = .{ .core = core, .core_mod = core_mod, .window_id = window_id };
+    context.* = .{ .core = core, .core_mod = core_mod, .window_id = window_id, .io = io };
     // If the application is not headless, we need to make the application a genuine UI application
     // by setting the activation policy, this moves the process to foreground
     // TODO: Only call this on the first window creation
@@ -461,28 +469,15 @@ fn initWindow(
     } else std.debug.panic("mach: window failed to initialize", .{});
 }
 
-/// Starts, stops, or restarts the global render loop based on whether any window needs vsync.
+/// Ensures a render loop is running. Always uses CVDisplayLink for pacing;
+/// the swap chain's present mode controls vsync behavior.
 fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
-    // Check if any window needs vsync
-    var needs_vsync = false;
-    var windows = core.windows.slice();
-    while (windows.next()) |window_id| {
-        const cw = core.windows.getValue(window_id);
-        if (cw.native != null and cw.vsync_mode != .none) {
-            needs_vsync = true;
-            break;
-        }
-    }
+    if (global_render_loop != null) return;
 
-    if (needs_vsync and global_render_loop == null) {
-        const rl = try core.allocator.create(RenderLoop);
-        rl.* = .{ .core = core, .core_mod = core_mod, .io = io };
-        try rl.start();
-        global_render_loop = rl;
-    } else if (!needs_vsync and global_render_loop != null) {
-        global_render_loop.?.stop();
-        global_render_loop = null;
-    }
+    const rl = try core.allocator.create(RenderLoop);
+    rl.* = .{ .core = core, .core_mod = core_mod, .io = io };
+    try rl.start();
+    global_render_loop = rl;
 }
 
 const WindowDelegateCallbacks = struct {
@@ -506,10 +501,10 @@ const WindowDelegateCallbacks = struct {
                 const fb_width: u32 = @intFromFloat(@as(f32, @floatFromInt(new_width)) * framebuffer_scale);
                 const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(new_height)) * framebuffer_scale);
 
-                // Queue the resize for the render callback to apply.
+                // Queue the resize for the render thread to apply.
                 if (global_render_loop) |rl| {
-                    rl.resize_mu.lockUncancelable(rl.io);
-                    defer rl.resize_mu.unlock(rl.io);
+                    rl.resize_mu.lockUncancelable(block.context.io);
+                    defer rl.resize_mu.unlock(block.context.io);
                     const pending: PendingResize = .{
                         .window_id = window_id,
                         .width = new_width,

@@ -57,6 +57,7 @@ tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
 
+vsync_mode: mach.Core.VSyncMode = .double,
 score: usize = 0,
 num_sprites_spawned: usize = 0,
 direction: Vec2 = vec2(0, 0),
@@ -231,6 +232,14 @@ pub fn appTick(
             .key_press => |ev| {
                 switch (ev.key) {
                     .space => app.gotta_go_fast = true,
+                    .v => {
+                        app.vsync_mode = switch (app.vsync_mode) {
+                            .none => .double,
+                            .double => .triple,
+                            .triple => .none,
+                        };
+                        core.windows.set(app.window, .vsync_mode, app.vsync_mode);
+                    },
                     else => {},
                 }
             },
@@ -251,8 +260,8 @@ pub fn appTick(
     // TODO(text): make updating text easier
     app.info_text = std.fmt.bufPrint(
         &app.info_text_buf,
-        "[ render: {d}hz | input: {d}hz ]\n[ Sprites spawned: {d} ]",
-        .{ core.frame.rate, core.input.rate, app.num_sprites_spawned },
+        "[ render: {d}hz | input: {d}hz ]\n[ Sprites spawned: {d} ]\n(v) vsync: {s}",
+        .{ core.frame.rate, core.input.rate, app.num_sprites_spawned, @tagName(app.vsync_mode) },
     ) catch &.{};
     var segments: []gfx.Text.Segment = @constCast(text.objects.get(app.info_text_id, .segments));
     segments[0] = .{
