@@ -470,6 +470,13 @@ pub const Graph = struct {
         src.copy_pending.store(false, .release);
         dst.copy_pending.store(false, .release);
 
+        // Drain any remaining queued operations on src so the snapshot is fully
+        // consistent with synchronous mutations (e.g. Objects.delete) that were
+        // performed before the caller requested the copy.
+        while (src.queue.pop()) |op| {
+            src.processOp(allocator, op);
+        }
+
         // Copy src into dst
         src.copyInto(dst, allocator) catch |err| {
             return err;
