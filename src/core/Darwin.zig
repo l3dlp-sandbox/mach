@@ -15,6 +15,7 @@ const Position = Core.Position;
 const Key = Core.Key;
 const KeyMods = Core.KeyMods;
 const objc = @import("objc");
+const metal = @import("../sysgpu/metal.zig");
 
 const log = std.log.scoped(.mach);
 
@@ -39,6 +40,7 @@ pub const PendingSwapChainUpdate = struct {
 pub const RenderLoop = struct {
     display_ready_for_frame: objc.system.dispatch_semaphore_t = undefined,
     owner_view: ?*objc.mach.View = null,
+    metal_surface: ?*metal.Surface = null,
     core: *Core = undefined,
     core_mod: mach.Mod(Core) = undefined,
     io: std.Io = undefined,
@@ -64,7 +66,7 @@ pub const RenderLoop = struct {
         view.setBlock_render(render_block.asBlock().copy());
 
         if (!view.startDisplayLink()) {
-            log.err("CADisplayLink unavailable (requires macOS 14+)", .{});
+            log.err("CAMetalDisplayLink unavailable (requires macOS 14+)", .{});
             return;
         }
         self.owner_view = view;
@@ -141,12 +143,25 @@ pub const RenderLoop = struct {
             };
 
             // Drain any extra display link signals that accumulated during this frame.
-            while (objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_NOW) == 0) {}
+            if (vsync) {
+                while (objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_NOW) == 0) {}
+            }
         }
     }
 
-    fn displayLinkWake(block: *objc.foundation.BlockLiteral(*RenderLoop)) callconv(.c) void {
-        _ = objc.system.dispatch_semaphore_signal(block.context.display_ready_for_frame);
+    fn displayLinkWake(block: *objc.foundation.BlockLiteral(*RenderLoop), drawable: *objc.quartz_core.MetalDrawable) callconv(.c) void {
+        const self = block.context;
+        const surface = self.metal_surface orelse return;
+        // Retain the drawable so it survives until the render thread consumes it.
+        _ = drawable.retain();
+        // Release a previously unconsumed drawable, if any (frame was skipped).
+        const pending_ptr: *usize = @ptrCast(&surface.pending_drawable);
+        const prev = @atomicRmw(usize, pending_ptr, .Xchg, @intFromPtr(drawable), .acq_rel);
+        if (prev != 0) {
+            const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
+            prev_ptr.release();
+        }
+        _ = objc.system.dispatch_semaphore_signal(self.display_ready_for_frame);
     }
 };
 
@@ -256,6 +271,30 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
 
             if (core.windows.updated(window_id, .vsync_mode)) {
                 try ensureRenderLoop(core, core_mod, io);
+                const want_vsync = !core_window.vsync_mode.isNone();
+                const surface: *metal.Surface = @ptrCast(@alignCast(core_window.surface));
+
+                if (want_vsync) {
+                    // Enable CAMetalDisplayLink for vsync pacing.
+                    @atomicStore(bool, &surface.use_display_link, true, .release);
+                    if (global_render_loop) |rl| {
+                        rl.metal_surface = surface;
+                        rl.attachView(native.view);
+                    }
+                } else {
+                    // Disable CAMetalDisplayLink so nextDrawable() is available for uncapped FPS.
+                    native.view.stopDisplayLink();
+                    if (global_render_loop) |rl| rl.owner_view = null;
+                    // Release any pending drawable from the display link.
+                    const pending_ptr: *usize = @ptrCast(&surface.pending_drawable);
+                    const prev = @atomicRmw(usize, pending_ptr, .Xchg, 0, .acq_rel);
+                    if (prev != 0) {
+                        const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
+                        prev_ptr.release();
+                    }
+                    @atomicStore(bool, &surface.use_display_link, false, .release);
+                }
+
                 core.windows.setRaw(window_id, .native, .{
                     .window = native.window,
                     .view = native.view,
@@ -511,11 +550,16 @@ fn initWindow(
         try ensureRenderLoop(core, core_mod, core.windows.internal.io);
 
         // Attach this view as the display link owner if none yet.
-        if (global_render_loop) |rl| rl.attachView(view);
+        if (global_render_loop) |rl| {
+            // core.initWindow creates the surface, so it's available now.
+            const updated = core.windows.getValue(window_id);
+            rl.metal_surface = @ptrCast(@alignCast(updated.surface));
+            rl.attachView(view);
+        }
     } else std.debug.panic("mach: window failed to initialize", .{});
 }
 
-/// Ensures a render loop is running. Uses CADisplayLink for pacing;
+/// Ensures a render loop is running. Uses CAMetalDisplayLink for pacing;
 /// the swap chain's present mode controls vsync behavior.
 fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     if (global_render_loop != null) return;

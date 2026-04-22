@@ -312,7 +312,6 @@ fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !
     return core.state.load(.acquire) != .exited;
 }
 
-
 fn handleExit(core: *Core, core_mod: mach.Mod(Core)) !void {
     if (core.state.load(.acquire) == .exiting) {
         if (core.on_exit) |on_exit| core_mod.run(on_exit);
