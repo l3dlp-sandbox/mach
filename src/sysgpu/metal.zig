@@ -448,7 +448,7 @@ pub const SwapChain = struct {
         layer.setPixelFormat(conv.metalPixelFormat(desc.format));
         layer.setFramebufferOnly(!(desc.usage.storage_binding or desc.usage.render_attachment));
         layer.setDrawableSize(size);
-        layer.setMaximumDrawableCount(3);
+        layer.setMaximumDrawableCount(desc.max_buffered_frames);
         layer.setDisplaySyncEnabled(desc.present_mode != .immediate);
         layer.setAllowsNextDrawableTimeout(true);
 

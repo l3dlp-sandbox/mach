@@ -226,7 +226,7 @@ pub fn appTick(
 ) !void {
     const window = core.windows.getValue(app.window);
 
-    var iter = core.events(.adaptive);
+    var iter = core.events(if (app.vsync_mode.isNone()) .poll else .adaptive);
     while (iter.next()) |event| {
         switch (event) {
             .key_press => |ev| {
@@ -234,9 +234,12 @@ pub fn appTick(
                     .space => app.gotta_go_fast = true,
                     .v => {
                         app.vsync_mode = switch (app.vsync_mode) {
-                            .none => .double,
                             .double => .triple,
-                            .triple => .none,
+                            .triple => .low_latency,
+                            .low_latency => .adaptive,
+                            .adaptive => .none_low_latency,
+                            .none_low_latency => .none_max_throughput,
+                            .none_max_throughput => .double,
                         };
                         core.windows.set(app.window, .vsync_mode, app.vsync_mode);
                     },

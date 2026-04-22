@@ -36,7 +36,7 @@ windows: mach.Objects(
         framebuffer_height: u32 = 1080 / 2,
 
         /// Vertical sync mode, prevents screen tearing.
-        vsync_mode: VSyncMode = .none,
+        vsync_mode: VSyncMode = .triple,
 
         /// Window display mode: fullscreen, windowed or borderless fullscreen
         display_mode: DisplayMode = .windowed,
@@ -232,9 +232,15 @@ pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {
         .width = core_window.framebuffer_width,
         .height = core_window.framebuffer_height,
         .present_mode = switch (core_window.vsync_mode) {
-            .none => .immediate,
-            .double => .fifo,
-            .triple => .mailbox,
+            .none_low_latency, .none_max_throughput => .immediate,
+            .double, .adaptive => .fifo,
+            .triple => .fifo,
+            .low_latency => .mailbox,
+        },
+        .max_buffered_frames = switch (core_window.vsync_mode) {
+            .double, .adaptive => 2,
+            .triple, .low_latency, .none_max_throughput => 3,
+            .none_low_latency => 2,
         },
     };
     core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
@@ -306,14 +312,6 @@ fn platform_update_callback(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !
     return core.state.load(.acquire) != .exited;
 }
 
-/// Returns true if any window has vsync enabled (i.e. vsync_mode != .none).
-pub fn vsyncEnabled(core: *Core) bool {
-    var windows = core.windows.slice();
-    while (windows.next()) |window_id| {
-        if (core.windows.get(window_id, .vsync_mode) != .none) return true;
-    }
-    return false;
-}
 
 fn handleExit(core: *Core, core_mod: mach.Mod(Core)) !void {
     if (core.state.load(.acquire) == .exiting) {
@@ -840,26 +838,49 @@ pub const DisplayMode = enum {
     fullscreen_borderless,
 };
 
+/// Controls how frames are buffered, synchronized, and presented with the display/compositor.
+///
+/// | VSyncMode              | Present Mode | Metal (macOS)                      | Metal (iOS)                 | D3D12                                          | Vulkan          | WebAssembly           |
+/// |------------------------|--------------|------------------------------------|-----------------------------|------------------------------------------------|-----------------|-----------------------|
+/// | `.double`              | fifo         | displaySync=on, 2 drawables        | displaySync=on, 2 drawables | 2 buffers, flip-sequential                     | minImageCount=2 | requestAnimationFrame |
+/// | `.triple`              | fifo         | displaySync=on, 3 drawables        | displaySync=on, 3 drawables | 3 buffers, flip-discard                        | minImageCount=3 | same as `.double`     |
+/// | `.low_latency`         | mailbox      | same as `.double`                  | same as `.double`           | 3 buffers, flip-discard, SetMaxFrameLatency(1) | minImageCount=3 | same as `.double`     |
+/// | `.adaptive`            | fifo_relaxed | same as `.double`                  | same as `.double`           | `DXGI_PRESENT_ALLOW_TEARING` per-present       | minImageCount=2 | same as `.double`     |
+/// | `.none_low_latency`    | immediate    | displaySync=off, 3 drawables[1][2] | same as `.double`[2]        | 2 buffers, `SetMaxFrameLatency(1)`, waitable   | minImageCount=2 | same as `.double`     |
+/// | `.none_max_throughput` | immediate    | displaySync=off, 3 drawables[2]    | same as `.double`[2]        | 3 buffers, `SetMaxFrameLatency(2)`             | minImageCount=3 | same as `.double`     |
+///
+/// 1. Metal clamps to 3 drawables when displaySync is off, so `.none_low_latency` is the same as
+///    `.none_max_throughput`.
+/// 2. Metal APIs generally do not allow outpacing the compositors' frame rate, so .none vsync
+///    typically run about 3x the usual refresh rate, although sometimes higher in fullscreen.
+/// 3. iOS: displaySyncEnabled is always true; disabling vsync is not supported.
+///
 pub const VSyncMode = enum {
-    /// Potential screen tearing.
-    /// No synchronization with monitor, render frames as fast as possible.
-    ///
-    /// Not available on WASM, fallback to double
-    none,
+    /// May cause tearing, may stall GPU. Aims for lowest latency, not highest FPS.
+    none_low_latency,
 
-    /// No tearing, synchronizes rendering with monitor refresh rate, rendering frames when ready.
+    /// Traditional "vsync off"
     ///
-    /// Tries to stay one frame ahead of the monitor, so when it's ready for the next frame it is
-    /// already prepared.
+    /// May cause tearing. Aims for highest frame rate, not lowest latency.
+    none_max_throughput,
+
+    /// Traditional "double bufferring"
+    ///
+    /// No tearing. Double buffered. Framerate halves on missed deadlines.
     double,
 
-    /// No tearing, synchronizes rendering with monitor refresh rate, rendering frames when ready.
-    ///
-    /// Tries to stay two frames ahead of the monitor, so when it's ready for the next frame it is
-    /// already prepared.
-    ///
-    /// Not available on WASM, fallback to double
+    /// No tearing. Triple-buffered. No GPU stalls, all frames shown in order.
     triple,
+
+    /// No tearing. Lowest latency. Discards stale frames, wastes GPU work.
+    low_latency,
+
+    /// No tearing, but Vtears on missed deadlines instead of halving framerate.
+    adaptive,
+
+    pub fn isNone(mode: VSyncMode) bool {
+        return mode == .none_low_latency or mode == .none_max_throughput;
+    }
 };
 
 pub const Size = struct {

@@ -13,6 +13,9 @@ pub const SwapChain = opaque {
         width: u32,
         height: u32,
         present_mode: PresentMode,
+        /// Maximum number of frames that can be buffered ahead of display.
+        /// On Metal: maps to CAMetalLayer.maximumDrawableCount (2 or 3).
+        max_buffered_frames: u32 = 2,
     };
 
     pub inline fn getCurrentTexture(swap_chain: *SwapChain) ?*Texture {

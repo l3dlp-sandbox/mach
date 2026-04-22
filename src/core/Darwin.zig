@@ -33,7 +33,7 @@ pub const PendingSwapChainUpdate = struct {
     height: u32,
     framebuffer_width: u32,
     framebuffer_height: u32,
-    present_mode: gpu.PresentMode,
+    vsync_mode: Core.VSyncMode,
 };
 
 pub const RenderLoop = struct {
@@ -92,7 +92,15 @@ pub const RenderLoop = struct {
             if (!self.running.load(.acquire)) break;
 
             // When vsync is enabled, also wait for the display refresh signal.
-            if (self.core.vsyncEnabled()) {
+            // TODO: per-window vsync when multi-window is supported.
+            const vsync = blk: {
+                var windows = self.core.windows.slice();
+                break :blk if (windows.next()) |wid|
+                    !self.core.windows.get(wid, .vsync_mode).isNone()
+                else
+                    true;
+            };
+            if (vsync) {
                 _ = objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_FOREVER);
                 if (!self.running.load(.acquire)) break;
             }
@@ -111,7 +119,15 @@ pub const RenderLoop = struct {
                             core_window.framebuffer_height = update.framebuffer_height;
                             core_window.swap_chain_descriptor.width = update.framebuffer_width;
                             core_window.swap_chain_descriptor.height = update.framebuffer_height;
-                            core_window.swap_chain_descriptor.present_mode = update.present_mode;
+                            core_window.swap_chain_descriptor.present_mode = switch (update.vsync_mode) {
+                                .none_low_latency, .none_max_throughput => .immediate,
+                                .double, .adaptive, .low_latency => .fifo,
+                                .triple => .fifo,
+                            };
+                            core_window.swap_chain_descriptor.max_buffered_frames = switch (update.vsync_mode) {
+                                .double, .adaptive, .low_latency => 2,
+                                .triple, .none_low_latency, .none_max_throughput => 3,
+                            };
                             core_window.swap_chain.release();
                             core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
                             self.core.windows.setValueRaw(window_id, core_window);
@@ -248,11 +264,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
                         .height = core_window.height,
                         .framebuffer_width = core_window.framebuffer_width,
                         .framebuffer_height = core_window.framebuffer_height,
-                        .present_mode = switch (core_window.vsync_mode) {
-                            .none => .immediate,
-                            .double => .fifo,
-                            .triple => .mailbox,
-                        },
+                        .vsync_mode = core_window.vsync_mode,
                     },
                 });
                 if (global_render_loop) |rl| {
@@ -544,7 +556,7 @@ const WindowDelegateCallbacks = struct {
                         .height = new_height,
                         .framebuffer_width = fb_width,
                         .framebuffer_height = fb_height,
-                        .present_mode = core_window.swap_chain_descriptor.present_mode,
+                        .vsync_mode = core_window.vsync_mode,
                     },
                 });
 
