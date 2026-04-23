@@ -42,17 +42,6 @@ pub fn next(s: *TextRun) ?Glyph {
                 const font_size_pt = s.font_size_px / px_per_pt;
                 const scale = font_size_pt / s.units_per_em;
 
-                // Get FreeType bearing offsets for baseline-relative positioning.
-                // kb handles shaping but not rasterization metrics; FreeType's
-                // horiBearingX/Y position the bitmap relative to the pen/baseline.
-                var bearing_x: f32 = 0;
-                var bearing_y: f32 = 0;
-                if (ft.FT_Load_Glyph(s.ft_face, glyph.Id, ft.FT_LOAD_DEFAULT) == 0) {
-                    const metrics = s.ft_face.*.glyph.*.metrics;
-                    bearing_x = @as(f32, @floatFromInt(metrics.horiBearingX)) / 64.0;
-                    bearing_y = @as(f32, @floatFromInt(metrics.horiBearingY)) / 64.0;
-                }
-
                 return Glyph{
                     .glyph_index = @intCast(glyph.Id),
                     .cluster = @intCast(glyph.UserIdOrCodepointIndex),
@@ -61,8 +50,8 @@ pub fn next(s: *TextRun) ?Glyph {
                         @as(f32, @floatFromInt(glyph.AdvanceY)) * scale,
                     ),
                     .offset = vec2(
-                        @as(f32, @floatFromInt(glyph.OffsetX)) * scale + bearing_x,
-                        @as(f32, @floatFromInt(glyph.OffsetY)) * scale + bearing_y,
+                        @as(f32, @floatFromInt(glyph.OffsetX)) * scale,
+                        @as(f32, @floatFromInt(glyph.OffsetY)) * scale,
                     ),
                 };
             }

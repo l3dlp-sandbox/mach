@@ -72,6 +72,9 @@ pub fn render(f: *Font, allocator: std.mem.Allocator, glyph_index: u32, opt: Ren
         return error.RenderError;
 
     const glyph = f.face.*.glyph;
+    const glyph_metrics = glyph.*.metrics;
+    const bearing_x = @as(f32, @floatFromInt(glyph_metrics.horiBearingX)) / 64.0;
+    const bearing_y = @as(f32, @floatFromInt(glyph_metrics.horiBearingY)) / 64.0;
     const glyph_bitmap = glyph.*.bitmap;
     const buffer: ?[*]const u8 = glyph_bitmap.buffer;
     const width = glyph_bitmap.width;
@@ -86,6 +89,8 @@ pub fn render(f: *Font, allocator: std.mem.Allocator, glyph_index: u32, opt: Ren
         .bitmap = null,
         .width = dst_width,
         .height = dst_height,
+        .bearing_x = bearing_x,
+        .bearing_y = bearing_y,
     };
 
     const num_pixels = dst_width * dst_height;
@@ -120,6 +125,8 @@ pub fn render(f: *Font, allocator: std.mem.Allocator, glyph_index: u32, opt: Ren
         .bitmap = f.bitmap.items,
         .width = dst_width,
         .height = dst_height,
+        .bearing_x = bearing_x,
+        .bearing_y = bearing_y,
     };
 }
 

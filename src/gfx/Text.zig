@@ -84,7 +84,13 @@ const GlyphKey = struct {
     size: u32,
 };
 
-const RegionMap = std.AutoArrayHashMapUnmanaged(GlyphKey, gfx.Atlas.Region);
+const CachedGlyph = struct {
+    region: gfx.Atlas.Region,
+    bearing_x: f32,
+    bearing_y: f32,
+};
+
+const RegionMap = std.AutoArrayHashMapUnmanaged(GlyphKey, CachedGlyph);
 
 pub const Segment = struct {
     /// UTF-8 encoded string of text to render
@@ -307,7 +313,6 @@ pub fn snapshot(text: *Text, core: *mach.Core) !void {
         }
     }
 }
-
 pub fn render(text: *Text, core: *mach.Core) !void {
     var pipelines = text.render_pipelines.slice();
     while (pipelines.next()) |pipeline_id| {
@@ -640,23 +645,27 @@ fn updatePipelineBuffers(
                         glyph_atlas_region.y += margin;
                         glyph_atlas_region.width -= margin * 2;
                         glyph_atlas_region.height -= margin * 2;
-                        region.value_ptr.* = glyph_atlas_region;
+                        region.value_ptr.* = .{
+                            .region = glyph_atlas_region,
+                            .bearing_x = rendered_glyph.bearing_x,
+                            .bearing_y = rendered_glyph.bearing_y,
+                        };
                     } else {
                         // whitespace
-                        region.value_ptr.* = gfx.Atlas.Region{
-                            .width = 0,
-                            .height = 0,
-                            .x = 0,
-                            .y = 0,
+                        region.value_ptr.* = .{
+                            .region = .{ .width = 0, .height = 0, .x = 0, .y = 0 },
+                            .bearing_x = rendered_glyph.bearing_x,
+                            .bearing_y = rendered_glyph.bearing_y,
                         };
                     }
                 }
 
-                const r = region.value_ptr.*;
+                const cached = region.value_ptr.*;
+                const r = cached.region;
                 const size = math.vec2(@floatFromInt(r.width), @floatFromInt(r.height));
                 const pos = math.vec2(
-                    origin_x + glyph.offset.x(),
-                    origin_y - (size.y() - glyph.offset.y()),
+                    origin_x + glyph.offset.x() + cached.bearing_x,
+                    origin_y - (size.y() - (glyph.offset.y() + cached.bearing_y)),
                 ).divScalar(px_density);
                 try built_text.glyphs.append(text.allocator, .{
                     .pos = pos.gpu(),

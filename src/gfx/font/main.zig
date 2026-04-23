@@ -77,6 +77,8 @@ pub const RenderedGlyph = struct {
     bitmap: ?[]const RGBA32,
     width: u32,
     height: u32,
+    bearing_x: f32 = 0,
+    bearing_y: f32 = 0,
 };
 
 /// The default font used by Mach. currently Fira Sans Regular, but may change in the future.
