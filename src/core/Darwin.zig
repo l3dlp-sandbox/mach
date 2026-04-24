@@ -21,15 +21,9 @@ const log = std.log.scoped(.mach);
 
 pub const Darwin = @This();
 
-pub const Native = struct {
-    window: *objc.app_kit.Window = undefined,
-    view: *objc.mach.View = undefined,
-    pending_swap_chain_update: ?PendingSwapChainUpdate = null,
-};
-
-var global_render_loop: ?*RenderLoop = null;
-
-pub const PendingSwapChainUpdate = struct {
+/// Queued resize or vsync-mode change, written by the main thread and consumed by render thread
+/// in renderThreadFn before each frame.
+const PendingSwapChainUpdate = struct {
     width: u32,
     height: u32,
     framebuffer_width: u32,
@@ -37,147 +31,256 @@ pub const PendingSwapChainUpdate = struct {
     vsync_mode: Core.VSyncMode,
 };
 
-pub const RenderLoop = struct {
-    display_ready_for_frame: objc.system.dispatch_semaphore_t = undefined,
-    owner_view: ?*objc.mach.View = null,
-    metal_surface: ?*metal.Surface = null,
+/// Per-window platform state stored in `Core.windows` via `.native` field.
+///
+/// Copied by value when read/written through the objects system, so any data that must have a
+/// stable address (e.g. display_link_ctx, which is captured by an objc block) is heap
+/// allocated.
+pub const Native = struct {
+    window: *objc.app_kit.Window = undefined,
+    view: *objc.mach.View = undefined,
+    metal_descriptor: *gpu.Surface.DescriptorFromMetalLayer = undefined,
+    display_link_ctx: ?*DisplayLinkContext = null,
+
+    /// Set by the main thread (windowDidResize / vsync change); consumed by the render thread to
+    /// recreate the swap chain before the next frame.
+    pending_swap_chain_update: ?PendingSwapChainUpdate = null,
+
+    /// When true, the window is scheduled for destruction. The render thread skips it, and tick()
+    /// on the main thread performs the actual teardown.
+    pending_destroy: bool = false,
+};
+
+/// Per-window context for CAMetalDisplayLink. Heap-allocated so the pointer remains stable when
+/// Native is copied through the objects system. Passed as the block context to displayLinkWake.
+const DisplayLinkContext = struct {
+    /// Signaled by displayLinkWake on each vsync; the render thread waits on this to pace itself to
+    /// the display refresh rate.
+    ready_sem: objc.system.dispatch_semaphore_t,
+
+    surface: *metal.Surface,
+};
+
+var global_render_loop: ?*RenderLoop = null;
+var did_set_app_activation_policy: bool = false;
+
+/// Shared render loop for all windows. The render thread waits for the app thread's snapshot
+/// (frame_ready), then waits for vsync via one window's display link semaphore, applies pending
+/// swap chain updates, and calls Core.renderFrame to render all windows sequentially.
+const RenderLoop = struct {
     core: *Core = undefined,
     core_mod: mach.Mod(Core) = undefined,
     io: std.Io = undefined,
     running: std.atomic.Value(bool) = .init(true),
     thread: std.Thread = undefined,
 
-    pub fn start(self: *RenderLoop) error{ DisplayLinkFailed, ThreadSpawnFailed }!void {
-        self.display_ready_for_frame = objc.system.dispatch_semaphore_create(0) orelse return error.DisplayLinkFailed;
-
-        self.thread = std.Thread.spawn(.{}, renderThreadFn, .{self}) catch
-            return error.ThreadSpawnFailed;
+    /// Spawns the render thread.
+    fn start(self: *RenderLoop) error{ThreadSpawnFailed}!void {
+        self.thread = std.Thread.spawn(.{}, renderThreadFn, .{self}) catch return error.ThreadSpawnFailed;
     }
 
-    pub fn attachView(self: *RenderLoop, view: *objc.mach.View) void {
-        if (self.owner_view != null) return;
-
-        var render_block = objc.foundation.stackBlockLiteral(
-            displayLinkWake,
-            self,
-            null,
-            null,
-        );
+    /// Registers displayLinkWake as the CAMetalDisplayLink callback for a window's view. Called
+    /// during window creation and when vsync is re-enabled at runtime.
+    fn attachDisplayLink(ctx: *DisplayLinkContext, view: *objc.mach.View) void {
+        // Create an objc block that captures the DisplayLinkContext pointer, then register
+        // it as the view's display link render block.
+        var render_block = objc.foundation.stackBlockLiteral(displayLinkWake, ctx, null, null);
         view.setBlock_render(render_block.asBlock().copy());
 
+        // Tell SwapChain.getCurrentTextureView (on the render thread) to consume display link
+        // drawables instead of calling nextDrawable. This MUST be set before startDisplayLink,
+        // because once the display link is started, Metal forbids nextDrawable() calls and the
+        // render thread could race in between.
+        @atomicStore(bool, &ctx.surface.use_display_link, true, .release);
+
+        // The display link provides external vsync pacing, so disable the layer's own
+        // displaySyncEnabled to prevent present() from blocking a second time.
+        ctx.surface.layer.setDisplaySyncEnabled(false);
+
+        // Start the display link.
         if (!view.startDisplayLink()) {
             log.err("CAMetalDisplayLink unavailable (requires macOS 14+)", .{});
+            @atomicStore(bool, &ctx.surface.use_display_link, false, .release);
             return;
         }
-        self.owner_view = view;
     }
 
-    pub fn stop(self: *RenderLoop) void {
-        self.running.store(false, .release);
+    /// Stops the CAMetalDisplayLink for a window's view. Called when vsync is disabled  or when a
+    /// window is being destroyed.
+    fn detachDisplayLink(ctx: *DisplayLinkContext, view: *objc.mach.View) void {
+        // Stop the display link.
+        view.stopDisplayLink();
 
-        if (self.owner_view) |view| {
-            view.stopDisplayLink();
-            self.owner_view = null;
+        // Release any unconsumed drawable left by displayLinkWake.
+        const pending_ptr: *usize = @ptrCast(&ctx.surface.pending_drawable);
+        const prev = @atomicRmw(usize, pending_ptr, .Xchg, 0, .acq_rel);
+        if (prev != 0) {
+            const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
+            prev_ptr.release();
         }
 
-        // Wake the render thread so it can observe the stop.
+        // Tell SwapChain.getCurrentTextureView to use nextDrawable again.
+        @atomicStore(bool, &ctx.surface.use_display_link, false, .release);
+    }
+
+    /// Stops the render loop, tears down all display links, and joins the render thread. Called
+    /// during app exit.
+    fn stop(self: *RenderLoop) void {
+        // Signal the render thread to exit.
+        self.running.store(false, .release);
+
+        // The render thread may be blocked on dispatch_semaphore_wait for a vsync signal. Stop each
+        // window's display link and signal its semaphore to unblock the render thread.
+        var windows = self.core.windows.slice();
+        while (windows.next()) |window_id| {
+            if (self.core.windows.get(window_id, .native)) |native| {
+                if (native.display_link_ctx) |ctx| {
+                    native.view.stopDisplayLink();
+                    _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
+                }
+            }
+        }
+
+        // The render thread may also be blocked on frame_ready (waiting for the app thread's
+        // snapshot), so wake it / allow it to observe running=false.
         self.core.frame_ready.set(self.io);
-        _ = objc.system.dispatch_semaphore_signal(self.display_ready_for_frame);
+
+        // Wait for render thread to exit.
         self.thread.join();
     }
 
+    /// Render thread entry point.
     fn renderThreadFn(self: *RenderLoop) void {
         while (self.running.load(.acquire)) {
-            // Wait until the app thread has produced a new snapshot.
+            // Wait for the app to signal snapshotEnd() and indicate a frame is ready for drawing.
             self.core.frame_ready.waitUncancelable(self.io);
             self.core.frame_ready.reset();
+
+            // If we want to stop the render loop, exit now.
             if (!self.running.load(.acquire)) break;
 
-            // When vsync is enabled, also wait for the display refresh signal.
-            // TODO: per-window vsync when multi-window is supported.
-            const vsync = blk: {
-                var windows = self.core.windows.slice();
-                break :blk if (windows.next()) |wid|
-                    !self.core.windows.get(wid, .vsync_mode).isNone()
-                else
-                    true;
-            };
-            if (vsync) {
-                _ = objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_FOREVER);
-                if (!self.running.load(.acquire)) break;
+            // vsync: if ALL windows have an active display link, wait for one to signal vsync. If
+            // ANY window lacks a display link (vsync off, or not yet attached), skip the wait: that
+            // window needs uncapped rendering, and display-link windows will naturally skip frames
+            // when no drawable is available (getCurrentTextureView returns null). We check
+            // use_display_link (the actual hardware state) rather than vsync_mode (the desired
+            // state that the main thread hasn't applied yet).
+            {
+                var all_have_display_link = true;
+                var wait_ctx: ?*DisplayLinkContext = null;
+                {
+                    var windows = self.core.windows.slice();
+                    while (windows.next()) |window_id| {
+                        const native_opt = self.core.windows.get(window_id, .native);
+                        const native = native_opt orelse continue;
+                        if (native.pending_destroy) continue;
+                        const ctx = native.display_link_ctx orelse {
+                            all_have_display_link = false;
+                            break;
+                        };
+                        if (!@atomicLoad(bool, &ctx.surface.use_display_link, .acquire)) {
+                            all_have_display_link = false;
+                            break;
+                        }
+                        if (wait_ctx == null) wait_ctx = ctx;
+                    }
+                }
+
+                if (all_have_display_link) {
+                    if (wait_ctx) |ctx| {
+                        _ = objc.system.dispatch_semaphore_wait(
+                            ctx.ready_sem,
+                            objc.system.DISPATCH_TIME_FOREVER,
+                        );
+                    }
+                }
             }
+
+            // Now that we waited for vsync, check if we should exit again before rendering the
+            // frame.
+            if (!self.running.load(.acquire)) break;
 
             // Apply any pending swap chain updates (resizes, vsync changes) before rendering.
             {
                 var windows = self.core.windows.slice();
                 while (windows.next()) |window_id| {
                     var core_window = self.core.windows.getValue(window_id);
-                    if (core_window.native) |*native| {
-                        if (native.pending_swap_chain_update) |update| {
-                            native.pending_swap_chain_update = null;
-                            core_window.width = update.width;
-                            core_window.height = update.height;
-                            core_window.framebuffer_width = update.framebuffer_width;
-                            core_window.framebuffer_height = update.framebuffer_height;
-                            core_window.swap_chain_descriptor.width = update.framebuffer_width;
-                            core_window.swap_chain_descriptor.height = update.framebuffer_height;
-                            core_window.swap_chain_descriptor.present_mode = switch (update.vsync_mode) {
-                                .none_low_latency, .none_max_throughput => .immediate,
-                                .double, .adaptive, .low_latency => .fifo,
-                                .triple => .fifo,
-                            };
-                            core_window.swap_chain_descriptor.max_buffered_frames = switch (update.vsync_mode) {
-                                .double, .adaptive, .low_latency => 2,
-                                .triple, .none_low_latency, .none_max_throughput => 3,
-                            };
-                            core_window.swap_chain.release();
-                            core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
-                            self.core.windows.setValueRaw(window_id, core_window);
-                        }
-                    }
+                    const native = core_window.native orelse continue;
+                    if (native.pending_destroy) continue;
+                    const update = native.pending_swap_chain_update orelse continue;
+
+                    core_window.native.?.pending_swap_chain_update = null;
+                    core_window.width = update.width;
+                    core_window.height = update.height;
+                    core_window.framebuffer_width = update.framebuffer_width;
+                    core_window.framebuffer_height = update.framebuffer_height;
+                    core_window.swap_chain_descriptor.width = update.framebuffer_width;
+                    core_window.swap_chain_descriptor.height = update.framebuffer_height;
+                    core_window.swap_chain_descriptor.present_mode = switch (update.vsync_mode) {
+                        .none_low_latency, .none_max_throughput => .immediate,
+                        .double, .adaptive, .low_latency => .fifo,
+                        .triple => .fifo,
+                    };
+                    core_window.swap_chain_descriptor.max_buffered_frames = switch (update.vsync_mode) {
+                        .double, .adaptive, .low_latency => 2,
+                        .triple, .none_low_latency, .none_max_throughput => 3,
+                    };
+                    core_window.swap_chain.release();
+                    core_window.swap_chain = core_window.device.createSwapChain(
+                        core_window.surface,
+                        &core_window.swap_chain_descriptor,
+                    );
+                    self.core.windows.setValueRaw(window_id, core_window);
                 }
             }
 
+            // Render a frame on all windows.
             self.core.renderFrame(self.core_mod, self.io) catch {
                 self.core.oom.store(true, .release);
             };
-
-            // Drain any extra display link signals that accumulated during this frame.
-            if (vsync) {
-                while (objc.system.dispatch_semaphore_wait(self.display_ready_for_frame, objc.system.DISPATCH_TIME_NOW) == 0) {}
-            }
         }
     }
 
-    fn displayLinkWake(block: *objc.foundation.BlockLiteral(*RenderLoop), drawable: *objc.quartz_core.MetalDrawable) callconv(.c) void {
-        const self = block.context;
-        const surface = self.metal_surface orelse return;
-        // Retain the drawable so it survives until the render thread consumes it.
+    // CAMetalDisplayLink callback, invoked on every vsync for the window.
+    fn displayLinkWake(block: *objc.foundation.BlockLiteral(*DisplayLinkContext), drawable: *objc.quartz_core.MetalDrawable) callconv(.c) void {
+        const ctx = block.context;
+
+        // Retain the drawable so it survives beyond this callback. It will be released in either
+        // SwapChain.getCurrentTextureView or SwapChain.deinit
         _ = drawable.retain();
-        // Release a previously unconsumed drawable, if any (frame was skipped).
-        const pending_ptr: *usize = @ptrCast(&surface.pending_drawable);
+
+        // When the render thread is slower than the display refresh rate, the display link still
+        // fires every vsync, so if the render thread hasn't consumed the previous drawable yet we
+        // should release the old one and replace it with the new one.
+        const pending_ptr: *usize = @ptrCast(&ctx.surface.pending_drawable);
         const prev = @atomicRmw(usize, pending_ptr, .Xchg, @intFromPtr(drawable), .acq_rel);
         if (prev != 0) {
             const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
             prev_ptr.release();
         }
-        _ = objc.system.dispatch_semaphore_signal(self.display_ready_for_frame);
+
+        // Signal to the render thread that a vsync has occurred.
+        _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
     }
 };
 
-pub const Context = struct {
+/// Captured context for objc block callbacks (view events, window delegate). Heap-allocated
+/// per window in initWindow so the pointer remains stable for the lifetime of the window's blocks.
+const WindowContext = struct {
     core: *Core,
     core_mod: mach.Mod(Core),
     window_id: mach.ObjectID,
     io: std.Io,
 };
 
+/// Application entry point called by Core.main. Sets up the NSApplication delegate and run loop,
+/// then repeatedly calls on_each_update_fn via dispatch_async on the main queue.
 pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@TypeOf(on_each_update_fn))) noreturn {
     const Args = @TypeOf(args_tuple);
     const args_bytes = std.mem.asBytes(&args_tuple);
     const ArgsBytes = @TypeOf(args_bytes.*);
     const Helper = struct {
-        // TODO: port libdispatch and use it instead of doing this directly.
+        // TODO(core): port libdispatch and use it instead of doing this directly.
         extern "System" fn dispatch_async(queue: *anyopaque, block: *objc.foundation.Block(fn () void)) void;
         extern "System" var _dispatch_main_q: anyopaque;
         pub fn cCallback(block: *objc.foundation.BlockLiteral(ArgsBytes)) callconv(.c) void {
@@ -202,122 +305,137 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
     ns_app.setDelegate(@ptrCast(delegate));
 
     ns_app.run();
-
     unreachable;
-    // TODO: support UIKit.
 }
 
+/// Called by Core.tick on the main thread each application tick. Creates new windows, applies
+/// changes (window title, size, vsync, etc.), and handles pending window destruction.
 pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
-    // Window management: create new windows, handle property changes.
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         const core_window = core.windows.getValue(window_id);
 
-        if (core_window.native) |native| {
-            const native_window: *objc.app_kit.Window = native.window;
+        const native = core_window.native orelse {
+            if (core_window.on_render != null) try initWindow(core, core_mod, window_id, io);
+            continue;
+        };
 
-            if (core.windows.updated(window_id, .decoration_color)) {
-                if (core_window.decoration_color) |decoration_color| {
-                    const color = objc.app_kit.Color.colorWithRed_green_blue_alpha(
-                        decoration_color.r,
-                        decoration_color.g,
-                        decoration_color.b,
-                        decoration_color.a,
-                    );
-                    native_window.setBackgroundColor(color);
-                    native_window.setTitlebarAppearsTransparent(true);
-                } else {
-                    native_window.setTitlebarAppearsTransparent(false);
+        // Handle pending destruction on the main thread where AppKit calls are safe.
+        if (native.pending_destroy) {
+            if (native.display_link_ctx) |ctx| {
+                RenderLoop.detachDisplayLink(ctx, native.view);
+                _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
+                core.allocator.destroy(ctx);
+            }
+            native.window.setIsVisible(false);
+            native.view.release();
+            native.window.release();
+            core.allocator.destroy(native.metal_descriptor);
+            core.windows.setRaw(window_id, .native, null);
+            // Clear on_render so tick() won't try to re-initialize this window.
+            core.windows.setRaw(window_id, .on_render, null);
+            continue;
+        }
+
+        // Update window decoration color.
+        const native_window: *objc.app_kit.Window = native.window;
+        if (core.windows.updated(window_id, .decoration_color)) {
+            if (core_window.decoration_color) |decoration_color| {
+                const color = objc.app_kit.Color.colorWithRed_green_blue_alpha(
+                    decoration_color.r,
+                    decoration_color.g,
+                    decoration_color.b,
+                    decoration_color.a,
+                );
+                native_window.setBackgroundColor(color);
+                native_window.setTitlebarAppearsTransparent(true);
+            } else {
+                native_window.setTitlebarAppearsTransparent(false);
+            }
+        }
+
+        // Update window title.
+        if (core.windows.updated(window_id, .title)) {
+            const string = objc.foundation.String.allocInit();
+            defer string.release();
+            native.window.setTitle(string.initWithUTF8String(core_window.title));
+        }
+
+        // Update window width/height.
+        if (core.windows.updated(window_id, .width) or core.windows.updated(window_id, .height)) {
+            var frame = native_window.frame();
+            frame.size.width = @floatFromInt(core.windows.get(window_id, .width));
+            frame.size.height = @floatFromInt(core.windows.get(window_id, .height));
+            native_window.setFrame_display_animate(
+                native_window.frameRectForContentRect(frame), true, true,
+            );
+        }
+
+        // Update window cursor mode.
+        if (core.windows.updated(window_id, .cursor_mode)) {
+            switch (core_window.cursor_mode) {
+                .normal => objc.app_kit.Cursor.unhide(),
+                .disabled, .hidden => objc.app_kit.Cursor.hide(),
+            }
+        }
+
+        // Update window cursor shape.
+        if (core.windows.updated(window_id, .cursor_shape)) {
+            const Cursor = objc.app_kit.Cursor;
+
+            // Pop the current cursor, then push the new one so AppKit's
+            // cursor stack reflects the updated shape.
+            Cursor.T_pop();
+            switch (core_window.cursor_shape) {
+                .arrow => Cursor.arrowCursor().push(),
+                .ibeam => Cursor.IBeamCursor().push(),
+                .crosshair => Cursor.crosshairCursor().push(),
+                .pointing_hand => Cursor.pointingHandCursor().push(),
+                .not_allowed => Cursor.operationNotAllowedCursor().push(),
+                .resize_ns => Cursor.resizeUpDownCursor().push(),
+                .resize_ew => Cursor.resizeLeftRightCursor().push(),
+                .resize_all => Cursor.closedHandCursor().push(),
+                else => std.log.warn("Unsupported cursor", .{}),
+            }
+        }
+
+        // Update window vsync.
+        if (core.windows.updated(window_id, .vsync_mode)) {
+            try ensureRenderLoop(core, core_mod, io);
+            const want_vsync = !core_window.vsync_mode.isNone();
+
+            // Only detach/attach the display link when transitioning between vsync-on and
+            // vsync-off. Switching between vsync-on modes (e.g. .double → .triple) only
+            // needs a swap chain recreation — the display link is already running.
+            if (native.display_link_ctx) |ctx| {
+                const have_display_link = @atomicLoad(bool, &ctx.surface.use_display_link, .acquire);
+                if (want_vsync and !have_display_link) {
+                    RenderLoop.attachDisplayLink(ctx, native.view);
+                } else if (!want_vsync and have_display_link) {
+                    RenderLoop.detachDisplayLink(ctx, native.view);
                 }
             }
 
-            if (core.windows.updated(window_id, .title)) {
-                const string = objc.foundation.String.allocInit();
-                defer string.release();
-                native.window.setTitle(string.initWithUTF8String(core_window.title));
+            // Queue a swap chain recreation for the render thread.
+            var updated_native = native;
+            updated_native.pending_swap_chain_update = .{
+                .width = core_window.width,
+                .height = core_window.height,
+                .framebuffer_width = core_window.framebuffer_width,
+                .framebuffer_height = core_window.framebuffer_height,
+                .vsync_mode = core_window.vsync_mode,
+            };
+            core.windows.setRaw(window_id, .native, updated_native);
+
+            // Wake the render thread so it picks up the swap chain update promptly.
+            if (native.display_link_ctx) |ctx| {
+                _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
             }
-
-            if (core.windows.updated(window_id, .width) or core.windows.updated(window_id, .height)) {
-                var frame = native_window.frame();
-                frame.size.width = @floatFromInt(core.windows.get(window_id, .width));
-                frame.size.height = @floatFromInt(core.windows.get(window_id, .height));
-                native_window.setFrame_display_animate(native_window.frameRectForContentRect(frame), true, true);
-            }
-
-            if (core.windows.updated(window_id, .cursor_mode)) {
-                switch (core_window.cursor_mode) {
-                    .normal => objc.app_kit.Cursor.unhide(),
-                    .disabled, .hidden => objc.app_kit.Cursor.hide(),
-                }
-            }
-
-            if (core.windows.updated(window_id, .cursor_shape)) {
-                const Cursor = objc.app_kit.Cursor;
-
-                Cursor.T_pop();
-
-                switch (core_window.cursor_shape) {
-                    .arrow => Cursor.arrowCursor().push(),
-                    .ibeam => Cursor.IBeamCursor().push(),
-                    .crosshair => Cursor.crosshairCursor().push(),
-                    .pointing_hand => Cursor.pointingHandCursor().push(),
-                    .not_allowed => Cursor.operationNotAllowedCursor().push(),
-                    .resize_ns => Cursor.resizeUpDownCursor().push(),
-                    .resize_ew => Cursor.resizeLeftRightCursor().push(),
-                    .resize_all => Cursor.closedHandCursor().push(),
-                    else => std.log.warn("Unsupported cursor", .{}),
-                }
-            }
-
-            if (core.windows.updated(window_id, .vsync_mode)) {
-                try ensureRenderLoop(core, core_mod, io);
-                const want_vsync = !core_window.vsync_mode.isNone();
-                const surface: *metal.Surface = @ptrCast(@alignCast(core_window.surface));
-
-                if (want_vsync) {
-                    // Enable CAMetalDisplayLink for vsync pacing.
-                    @atomicStore(bool, &surface.use_display_link, true, .release);
-                    if (global_render_loop) |rl| {
-                        rl.metal_surface = surface;
-                        rl.attachView(native.view);
-                    }
-                } else {
-                    // Disable CAMetalDisplayLink so nextDrawable() is available for uncapped FPS.
-                    native.view.stopDisplayLink();
-                    if (global_render_loop) |rl| rl.owner_view = null;
-                    // Release any pending drawable from the display link.
-                    const pending_ptr: *usize = @ptrCast(&surface.pending_drawable);
-                    const prev = @atomicRmw(usize, pending_ptr, .Xchg, 0, .acq_rel);
-                    if (prev != 0) {
-                        const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
-                        prev_ptr.release();
-                    }
-                    @atomicStore(bool, &surface.use_display_link, false, .release);
-                }
-
-                core.windows.setRaw(window_id, .native, .{
-                    .window = native.window,
-                    .view = native.view,
-                    .pending_swap_chain_update = .{
-                        .width = core_window.width,
-                        .height = core_window.height,
-                        .framebuffer_width = core_window.framebuffer_width,
-                        .framebuffer_height = core_window.framebuffer_height,
-                        .vsync_mode = core_window.vsync_mode,
-                    },
-                });
-                if (global_render_loop) |rl| {
-                    // Wake the render thread in case it's blocked on the display link semaphore.
-                    _ = objc.system.dispatch_semaphore_signal(rl.display_ready_for_frame);
-                }
-            }
-        } else {
-            try initWindow(core, core_mod, window_id, io);
         }
     }
 
+    // Consider mach.Core exiting/exited state.
     const state = core.state.load(.acquire);
-
     if (state == .exiting or state == .exited) {
         // Stop the render loop before GPU resources are released.
         if (global_render_loop) |rl| {
@@ -331,6 +449,8 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     }
 }
 
+/// Creates the native AppKit window, Metal layer, view, and display link for a new mach.Core window
+/// Called from tick() when a window has on_render set but no native state yet.
 fn initWindow(
     core: *Core,
     core_mod: mach.Mod(Core),
@@ -339,18 +459,23 @@ fn initWindow(
 ) !void {
     var core_window = core.windows.getValue(window_id);
 
-    const context = try core.allocator.create(Context);
-    context.* = .{ .core = core, .core_mod = core_mod, .window_id = window_id, .io = io };
-    // If the application is not headless, we need to make the application a genuine UI application
-    // by setting the activation policy, this moves the process to foreground
-    // TODO: Only call this on the first window creation
-    _ = objc.app_kit.Application.sharedApplication().setActivationPolicy(objc.app_kit.ApplicationActivationPolicyRegular);
+    const win_ctx = try core.allocator.create(WindowContext);
+    win_ctx.* = .{ .core = core, .core_mod = core_mod, .window_id = window_id, .io = io };
+
+    // Make the process a foreground UI application on the first window creation.
+    if (!did_set_app_activation_policy) {
+        did_set_app_activation_policy = true;
+        _ = objc.app_kit.Application.sharedApplication().setActivationPolicy(
+            objc.app_kit.ApplicationActivationPolicyRegular,
+        );
+    }
 
     {
-        // On macos, the command key in particular seems to be handled a bit differently and tends to block the `keyUp` event
-        // from firing. To remedy this, we borrow the same fix GLFW uses and add a monitor.
+        // On macos, the command key in particular seems to be handled a bit differently and tends
+        // to block the `keyUp` event from firing. To remedy this, we borrow the same fix GLFW uses
+        // and add a monitor.
         const commandFn = struct {
-            pub fn commandFn(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) ?*objc.app_kit.Event {
+            pub fn commandFn(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) ?*objc.app_kit.Event {
                 const core_: *Core = block.context.core;
                 const window_id_ = block.context.window_id;
 
@@ -364,34 +489,30 @@ fn initWindow(
             }
         }.commandFn;
 
-        var commandBlock = objc.foundation.stackBlockLiteral(
-            commandFn,
-            context,
-            null,
-            null,
+        var commandBlock = objc.foundation.stackBlockLiteral(commandFn, win_ctx, null, null);
+        _ = objc.app_kit.Event.addLocalMonitorForEventsMatchingMask_handler(
+            objc.app_kit.EventMaskKeyUp,
+            commandBlock.asBlock().copy(),
         );
-
-        _ = objc.app_kit.Event.addLocalMonitorForEventsMatchingMask_handler(objc.app_kit.EventMaskKeyUp, commandBlock.asBlock().copy());
     }
 
+    // Create the Metal layer.
     const metal_descriptor = try core.allocator.create(gpu.Surface.DescriptorFromMetalLayer);
     const layer = objc.quartz_core.MetalLayer.new();
     defer layer.release();
-
-    if (core_window.transparent) layer.as(objc.quartz_core.Layer).setOpaque(false);
-
-    metal_descriptor.* = .{
-        .layer = layer,
-    };
+    metal_descriptor.* = .{ .layer = layer };
     core_window.surface_descriptor = .{};
     core_window.surface_descriptor.next_in_chain = .{ .from_metal_layer = metal_descriptor };
 
+    // Handle window transparency
+    if (core_window.transparent) layer.as(objc.quartz_core.Layer).setOpaque(false);
+
+    // Handle window styling
     const screen = objc.app_kit.Screen.mainScreen();
     const rect = objc.core_graphics.Rect{
         .origin = .{ .x = 0, .y = 0 },
         .size = .{ .width = @floatFromInt(core_window.width), .height = @floatFromInt(core_window.height) },
     };
-
     const window_style =
         (if (core_window.display_mode == .fullscreen) objc.app_kit.WindowStyleMaskFullScreen else 0) |
         (if (core_window.decorated) objc.app_kit.WindowStyleMaskTitled else 0) |
@@ -400,167 +521,149 @@ fn initWindow(
         (if (core_window.decorated) objc.app_kit.WindowStyleMaskResizable else 0) |
         (if (!core_window.decorated) objc.app_kit.WindowStyleMaskFullSizeContentView else 0);
 
-    const native_window_opt: ?*objc.app_kit.Window = objc.app_kit.Window.alloc().initWithContentRect_styleMask_backing_defer_screen(
+    // Create the AppKit window.
+    const native_window = objc.app_kit.Window.alloc().initWithContentRect_styleMask_backing_defer_screen(
         rect,
         window_style,
         objc.app_kit.BackingStoreBuffered,
         false,
         screen,
     );
-    if (native_window_opt) |native_window| {
-        const framebuffer_scale: f32 = @floatCast(native_window.backingScaleFactor());
-        const window_width: f32 = @floatFromInt(core_window.width);
-        const window_height: f32 = @floatFromInt(core_window.height);
+    native_window.setReleasedWhenClosed(false);
 
-        core_window.framebuffer_width = @intFromFloat(window_width * framebuffer_scale);
-        core_window.framebuffer_height = @intFromFloat(window_height * framebuffer_scale);
+    const framebuffer_scale: f32 = @floatCast(native_window.backingScaleFactor());
+    const window_width: f32 = @floatFromInt(core_window.width);
+    const window_height: f32 = @floatFromInt(core_window.height);
 
-        native_window.setReleasedWhenClosed(false);
+    core_window.framebuffer_width = @intFromFloat(window_width * framebuffer_scale);
+    core_window.framebuffer_height = @intFromFloat(window_height * framebuffer_scale);
 
-        var view = objc.mach.View.allocInit();
+    // initWithFrame is overridden in our MACHView, which creates a tracking area for mouse
+    // tracking
+    var view = objc.mach.View.allocInit();
+    view = view.initWithFrame(rect);
+    view.setLayer(@ptrCast(layer));
 
-        // initWithFrame is overridden in our MACHView, which creates a tracking area for mouse tracking
-        view = view.initWithFrame(rect);
-        view.setLayer(@ptrCast(layer));
+    // Register objc block callbacks for view input events.
+    {
+        const bl = objc.foundation.stackBlockLiteral;
 
-        // TODO(core): free this allocation
+        var keyDown = bl(ViewCallbacks.keyDown, win_ctx, null, null);
+        view.setBlock_keyDown(keyDown.asBlock().copy());
 
-        {
-            var keyDown = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.keyDown,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_keyDown(keyDown.asBlock().copy());
+        var insertText = bl(ViewCallbacks.insertText, win_ctx, null, null);
+        view.setBlock_insertText(insertText.asBlock().copy());
 
-            var insertText = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.insertText,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_insertText(insertText.asBlock().copy());
+        var keyUp = bl(ViewCallbacks.keyUp, win_ctx, null, null);
+        view.setBlock_keyUp(keyUp.asBlock().copy());
 
-            var keyUp = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.keyUp,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_keyUp(keyUp.asBlock().copy());
+        var flagsChanged = bl(ViewCallbacks.flagsChanged, win_ctx, null, null);
+        view.setBlock_flagsChanged(flagsChanged.asBlock().copy());
 
-            var flagsChanged = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.flagsChanged,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_flagsChanged(flagsChanged.asBlock().copy());
+        var magnify = bl(ViewCallbacks.magnify, win_ctx, null, null);
+        view.setBlock_magnify(magnify.asBlock().copy());
 
-            var magnify = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.magnify,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_magnify(magnify.asBlock().copy());
+        var mouseMoved = bl(ViewCallbacks.mouseMoved, win_ctx, null, null);
+        view.setBlock_mouseMoved(mouseMoved.asBlock().copy());
 
-            var mouseMoved = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.mouseMoved,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_mouseMoved(mouseMoved.asBlock().copy());
+        var mouseDown = bl(ViewCallbacks.mouseDown, win_ctx, null, null);
+        view.setBlock_mouseDown(mouseDown.asBlock().copy());
 
-            var mouseDown = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.mouseDown,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_mouseDown(mouseDown.asBlock().copy());
+        var mouseUp = bl(ViewCallbacks.mouseUp, win_ctx, null, null);
+        view.setBlock_mouseUp(mouseUp.asBlock().copy());
 
-            var mouseUp = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.mouseUp,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_mouseUp(mouseUp.asBlock().copy());
+        var scrollWheel = bl(ViewCallbacks.scrollWheel, win_ctx, null, null);
+        view.setBlock_scrollWheel(scrollWheel.asBlock().copy());
+    }
+    native_window.setContentView(@ptrCast(view));
 
-            var scrollWheel = objc.foundation.stackBlockLiteral(
-                ViewCallbacks.scrollWheel,
-                context,
-                null,
-                null,
-            );
-            view.setBlock_scrollWheel(scrollWheel.asBlock().copy());
-        }
-        native_window.setContentView(@ptrCast(view));
-        native_window.center();
-        native_window.setIsVisible(true);
-        native_window.makeKeyAndOrderFront(null);
+    // Center the window
+    native_window.center();
 
-        if (core_window.decoration_color) |decoration_color| {
-            const color = objc.app_kit.Color.colorWithRed_green_blue_alpha(
-                decoration_color.r,
-                decoration_color.g,
-                decoration_color.b,
-                decoration_color.a,
-            );
-            native_window.setBackgroundColor(color);
-            native_window.setTitlebarAppearsTransparent(true);
-        }
+    // Set decoration colors
+    if (core_window.decoration_color) |decoration_color| {
+        const color = objc.app_kit.Color.colorWithRed_green_blue_alpha(
+            decoration_color.r,
+            decoration_color.g,
+            decoration_color.b,
+            decoration_color.a,
+        );
+        native_window.setBackgroundColor(color);
+        native_window.setTitlebarAppearsTransparent(true);
+    } else {
+        // Default to black so the window doesn't flash gray before the first frame.
+        native_window.setBackgroundColor(objc.app_kit.Color.colorWithRed_green_blue_alpha(0, 0, 0, 1));
+    }
 
-        const string = objc.foundation.String.allocInit();
-        defer string.release();
-        native_window.setTitle(string.initWithUTF8String(core_window.title));
+    // Set window title
+    const string = objc.foundation.String.allocInit();
+    defer string.release();
+    native_window.setTitle(string.initWithUTF8String(core_window.title));
 
-        const delegate = objc.mach.WindowDelegate.allocInit();
-        defer native_window.setDelegate(@ptrCast(delegate));
-        {
-            var windowDidResize = objc.foundation.stackBlockLiteral(
-                WindowDelegateCallbacks.windowDidResize,
-                context,
-                null,
-                null,
-            );
-            delegate.setBlock_windowDidResize(windowDidResize.asBlock().copy());
+    // NSWindowDelegate receives resize and close notifications from AppKit.
+    const delegate = objc.mach.WindowDelegate.allocInit();
+    defer native_window.setDelegate(@ptrCast(delegate));
+    {
+        const bl = objc.foundation.stackBlockLiteral;
 
-            var windowShouldClose = objc.foundation.stackBlockLiteral(
-                WindowDelegateCallbacks.windowShouldClose,
-                context,
-                null,
-                null,
-            );
-            delegate.setBlock_windowShouldClose(windowShouldClose.asBlock().copy());
-        }
+        var didResize = bl(WindowDelegateCallbacks.windowDidResize, win_ctx, null, null);
+        delegate.setBlock_windowDidResize(didResize.asBlock().copy());
 
-        if (core_window.on_render == null) @panic("on_render must be set on all windows");
+        var shouldClose = bl(WindowDelegateCallbacks.windowShouldClose, win_ctx, null, null);
+        delegate.setBlock_windowShouldClose(shouldClose.asBlock().copy());
+    }
 
-        // Set core_window.native, which we use to check if a window is initialized
-        // Then call core.initWindow to finish initializing the window
-        core_window.native = .{ .window = native_window, .view = view };
-        core.windows.setValueRaw(window_id, core_window);
-        try core.initWindow(window_id);
+    // Store .native on the mach.Core window object.
+    core_window.native = .{
+        .window = native_window,
+        .view = view,
+        .metal_descriptor = metal_descriptor,
+    };
+    core.windows.setValueRaw(window_id, core_window);
 
-        // Start or update the global render loop if needed
-        try ensureRenderLoop(core, core_mod, core.windows.internal.io);
+    // Shared mach.Core.initWindow logic across windowing backends.
+    try core.initWindow(window_id);
 
-        // Attach this view as the display link owner if none yet.
-        if (global_render_loop) |rl| {
-            // core.initWindow creates the surface, so it's available now.
-            const updated = core.windows.getValue(window_id);
-            rl.metal_surface = @ptrCast(@alignCast(updated.surface));
-            rl.attachView(view);
-        }
-    } else std.debug.panic("mach: window failed to initialize", .{});
+    // Start or update the global render loop if needed
+    try ensureRenderLoop(core, core_mod, core.windows.internal.io);
+
+    // Create a per-window display link context and attach the CAMetalDisplayLink so vsync
+    // pacing begins immediately. Re-read the window value because initWindow modified it.
+    core_window = core.windows.getValue(window_id);
+    {
+        const surface: *metal.Surface = @ptrCast(@alignCast(core_window.surface));
+        const dl_ctx = try core.allocator.create(DisplayLinkContext);
+        dl_ctx.* = .{
+            .ready_sem = objc.system.dispatch_semaphore_create(0) orelse
+                return error.SemaphoreCreateFailed,
+            .surface = surface,
+        };
+
+        var native_val = core_window.native.?;
+        native_val.display_link_ctx = dl_ctx;
+        core.windows.setRaw(window_id, .native, native_val);
+
+        RenderLoop.attachDisplayLink(dl_ctx, view);
+    }
+
+    // Show the window only after the surface and display link are ready, so the user never sees
+    // the window without rendered content on it.
+    native_window.setIsVisible(true);
+    native_window.makeKeyAndOrderFront(null);
 }
 
-/// Ensures a render loop is running. Uses CAMetalDisplayLink for pacing;
-/// the swap chain's present mode controls vsync behavior.
+/// Marks a window for destruction. Called by Core.destroyWindow. The actual teardown happens in
+/// tick() on the main thread.
+pub fn destroyWindow(core: *Core, window_id: mach.ObjectID) void {
+    if (core.windows.get(window_id, .native)) |native| {
+        var updated = native;
+        updated.pending_destroy = true;
+        core.windows.setRaw(window_id, .native, updated);
+    }
+}
+
+/// Ensures the global render loop is running. Creates one if it doesn't exist yet. The render loop
+/// is destroyed in tick() when the app exits.
 fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     if (global_render_loop != null) return;
 
@@ -570,67 +673,64 @@ fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     global_render_loop = rl;
 }
 
+/// Callbacks for NSWindowDelegate, invoked by AppKit on the main thread.
 const WindowDelegateCallbacks = struct {
-    pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*Context)) callconv(.c) void {
+    /// Called by AppKit when the user resizes the window.
+    pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
         const core_window = core.windows.getValue(window_id);
 
-        if (core_window.native) |native| {
-            const native_window: *objc.app_kit.Window = native.window;
+        const native = core_window.native orelse return;
+        const native_window: *objc.app_kit.Window = native.window;
 
-            const frame = native_window.frame();
-            const content_rect = native_window.contentRectForFrameRect(frame);
+        const frame = native_window.frame();
+        const content_rect = native_window.contentRectForFrameRect(frame);
 
-            const new_width: u32 = @intFromFloat(content_rect.size.width);
-            const new_height: u32 = @intFromFloat(content_rect.size.height);
+        const new_width: u32 = @intFromFloat(content_rect.size.width);
+        const new_height: u32 = @intFromFloat(content_rect.size.height);
 
-            if (core_window.width != new_width or core_window.height != new_height) {
-                const framebuffer_scale: f32 = @floatCast(native_window.backingScaleFactor());
-                const fb_width: u32 = @intFromFloat(@as(f32, @floatFromInt(new_width)) * framebuffer_scale);
-                const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(new_height)) * framebuffer_scale);
+        if (core_window.width == new_width and core_window.height == new_height) return;
 
-                // Queue the resize for the render thread to apply.
-                core.windows.setRaw(window_id, .native, .{
-                    .window = native.window,
-                    .view = native.view,
-                    .pending_swap_chain_update = .{
-                        .width = new_width,
-                        .height = new_height,
-                        .framebuffer_width = fb_width,
-                        .framebuffer_height = fb_height,
-                        .vsync_mode = core_window.vsync_mode,
-                    },
-                });
+        const framebuffer_scale: f32 = @floatCast(native_window.backingScaleFactor());
+        const fb_width: u32 = @intFromFloat(@as(f32, @floatFromInt(new_width)) * framebuffer_scale);
+        const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(new_height)) * framebuffer_scale);
 
-                core.pushEvent(.{ .window_resize = .{
-                    .window_id = window_id,
-                    .size = .{ .width = new_width, .height = new_height },
-                } });
-            }
-        }
+        // Queue a swap chain recreation for the render thread.
+        var updated_native = native;
+        updated_native.pending_swap_chain_update = .{
+            .width = new_width,
+            .height = new_height,
+            .framebuffer_width = fb_width,
+            .framebuffer_height = fb_height,
+            .vsync_mode = core_window.vsync_mode,
+        };
+        core.windows.setRaw(window_id, .native, updated_native);
+
+        core.pushEvent(.{ .window_resize = .{
+            .window_id = window_id,
+            .size = .{ .width = new_width, .height = new_height },
+        } });
     }
 
-    pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*Context)) callconv(.c) bool {
+    /// Called by AppKit when the user clicks the window's close button.
+    pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) bool {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
         core.pushEvent(.{ .close = .{ .window_id = window_id } });
-
-        // TODO: This should just attempt to close the window, not the entire program, unless
-        // this is the only window.
         return false;
     }
 };
 
+/// Callbacks for MACHView (NSView subclass), invoked by AppKit on the main thread for input events.
 const ViewCallbacks = struct {
-    pub fn mouseMoved(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    pub fn mouseMoved(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
         const mouse_location = event.locationInWindow();
-
         const window_height: f32 = @floatFromInt(core.windows.get(window_id, .height));
 
         core.pushEvent(.{ .mouse_motion = .{
@@ -639,7 +739,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn mouseDown(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    pub fn mouseDown(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -650,7 +750,8 @@ const ViewCallbacks = struct {
             .mods = machModifierFromModifierFlag(event.modifierFlags()),
         } });
     }
-    pub fn mouseUp(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+
+    pub fn mouseUp(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -662,14 +763,15 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn scrollWheel(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    pub fn scrollWheel(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
         var scroll_delta_x = event.scrollingDeltaX();
         var scroll_delta_y = event.scrollingDeltaY();
-
         if (event.hasPreciseScrollingDeltas()) {
+            // Trackpad deltas are in pixels; scale down to match the
+            // line-based units expected by the scroll event consumer.
             scroll_delta_x *= 0.1;
             scroll_delta_y *= 0.1;
         }
@@ -681,8 +783,8 @@ const ViewCallbacks = struct {
         } });
     }
 
-    // This is currently only supported on macOS using a trackpad
-    pub fn magnify(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    // e.g. fired on macOS using a trackpad
+    pub fn magnify(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -693,7 +795,7 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn keyDown(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    pub fn keyDown(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
         if (event.isARepeat()) {
@@ -711,17 +813,14 @@ const ViewCallbacks = struct {
         }
     }
 
-    pub fn insertText(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event, codepoint: u32) callconv(.c) void {
-        _ = event; // autofix
+    pub fn insertText(block: *objc.foundation.BlockLiteral(*WindowContext), _: *objc.app_kit.Event, codepoint: u32) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-        core.pushEvent(.{ .char_input = .{
-            .codepoint = @intCast(codepoint),
-            .window_id = window_id,
-        } });
+
+        core.pushEvent(.{ .char_input = .{ .codepoint = @intCast(codepoint), .window_id = window_id } });
     }
 
-    pub fn keyUp(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    pub fn keyUp(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
@@ -732,13 +831,12 @@ const ViewCallbacks = struct {
         } });
     }
 
-    pub fn flagsChanged(block: *objc.foundation.BlockLiteral(*Context), event: *objc.app_kit.Event) callconv(.c) void {
+    pub fn flagsChanged(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
 
         const key = machKeyFromKeycode(event.keyCode());
         const mods = machModifierFromModifierFlag(event.modifierFlags());
-
         const key_flag = switch (key) {
             .left_shift, .right_shift => objc.app_kit.EventModifierFlagShift,
             .left_control, .right_control => objc.app_kit.EventModifierFlagControl,
@@ -762,9 +860,14 @@ const ViewCallbacks = struct {
 
 fn machPhaseFromPhase(phase: objc.app_kit.EventPhase) Core.GesturePhase {
     return switch (phase) {
+        objc.app_kit.EventPhaseNone => .none,
+        objc.app_kit.EventPhaseMayBegin => .may_begin,
         objc.app_kit.EventPhaseBegan => .began,
+        objc.app_kit.EventPhaseChanged => .changed,
+        objc.app_kit.EventPhaseStationary => .stationary,
         objc.app_kit.EventPhaseEnded => .ended,
-        else => .began,
+        objc.app_kit.EventPhaseCancelled => .cancelled,
+        else => .none,
     };
 }
 
@@ -776,6 +879,8 @@ fn machModifierFromModifierFlag(modifier_flag: usize) Core.KeyMods {
         .num_lock = false,
         .shift = false,
         .super = false,
+        .help = false,
+        .function = false,
     };
 
     if (modifier_flag & objc.app_kit.EventModifierFlagOption != 0)
@@ -792,6 +897,15 @@ fn machModifierFromModifierFlag(modifier_flag: usize) Core.KeyMods {
 
     if (modifier_flag & objc.app_kit.EventModifierFlagCommand != 0)
         modifier.super = true;
+
+    if (modifier_flag & objc.app_kit.EventModifierFlagNumericPad != 0)
+        modifier.num_lock = true;
+
+    if (modifier_flag & objc.app_kit.EventModifierFlagHelp != 0)
+        modifier.help = true;
+
+    if (modifier_flag & objc.app_kit.EventModifierFlagFunction != 0)
+        modifier.function = true;
 
     return modifier;
 }

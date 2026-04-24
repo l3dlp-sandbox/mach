@@ -173,58 +173,77 @@ pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {
     var core_window = core.windows.getValue(window_id);
     defer core.windows.setValueRaw(window_id, core_window);
 
-    core_window.instance = gpu.createInstance(null) orelse {
-        log.err("failed to create GPU instance", .{});
-        std.process.exit(1);
+    // All windows share the same GPU device; only the surface and swap chain are per-window.
+    const existing_gpu = blk: {
+        var windows = core.windows.slice();
+        while (windows.next()) |wid| {
+            if (wid == window_id) continue;
+            const w = core.windows.getValue(wid);
+            if (w.native != null) break :blk w;
+        }
+        break :blk null;
     };
+
+    // Reuse the device/instance/adapter/queue from an existing window if available.
+    if (existing_gpu) |existing| {
+        core_window.instance = existing.instance;
+        core_window.adapter = existing.adapter;
+        core_window.device = existing.device;
+        core_window.queue = existing.queue;
+    } else {
+        core_window.instance = gpu.createInstance(null) orelse {
+            log.err("failed to create GPU instance", .{});
+            std.process.exit(1);
+        };
+
+        var response: RequestAdapterResponse = undefined;
+        core_window.instance.requestAdapter(&gpu.RequestAdapterOptions{
+            .compatible_surface = null,
+            .power_preference = core_window.power_preference,
+            .force_fallback_adapter = .false,
+        }, &response, requestAdapterCallback);
+        if (response.status != .success) {
+            log.err("failed to create GPU adapter: {?s}", .{response.message});
+            if (builtin.target.os.tag == .linux) {
+                log.info("-> maybe try MACH_FORCE_GPU_BACKEND=opengl ?", .{});
+            }
+            std.process.exit(1);
+        }
+
+        var props = std.mem.zeroes(gpu.Adapter.Properties);
+        response.adapter.?.getProperties(&props);
+        if (props.backend_type == .null) {
+            log.err("no backend found for {s} adapter", .{props.adapter_type.name()});
+            std.process.exit(1);
+        }
+        log.info("found {s} backend on {s} adapter: {s}, {s}\n", .{
+            props.backend_type.name(),
+            props.adapter_type.name(),
+            props.name,
+            props.driver_description,
+        });
+
+        core_window.adapter = response.adapter.?;
+        core_window.device = response.adapter.?.createDevice(&.{
+            .required_features_count = if (core_window.required_features) |v| @as(u32, @intCast(v.len)) else 0,
+            .required_features = if (core_window.required_features) |v| @as(?[*]const gpu.FeatureName, v.ptr) else null,
+            .required_limits = if (core_window.required_limits) |limits| @as(?*const gpu.RequiredLimits, &gpu.RequiredLimits{
+                .limits = limits,
+            }) else null,
+            .device_lost_callback = &deviceLostCallback,
+            .device_lost_userdata = null,
+        }) orelse {
+            log.err("failed to create GPU device\n", .{});
+            std.process.exit(1);
+        };
+        core_window.device.setUncapturedErrorCallback({}, printUnhandledErrorCallback);
+        core_window.queue = core_window.device.getQueue();
+    }
+
+    // Create window surface
     core_window.surface = core_window.instance.createSurface(&core_window.surface_descriptor);
 
-    var response: RequestAdapterResponse = undefined;
-    core_window.instance.requestAdapter(&gpu.RequestAdapterOptions{
-        .compatible_surface = core_window.surface,
-        .power_preference = core_window.power_preference,
-        .force_fallback_adapter = .false,
-    }, &response, requestAdapterCallback);
-    if (response.status != .success) {
-        log.err("failed to create GPU adapter: {?s}", .{response.message});
-        if (builtin.target.os.tag == .linux) {
-            log.info("-> maybe try MACH_FORCE_GPU_BACKEND=opengl ?", .{});
-        }
-        std.process.exit(1);
-    }
-
-    // Print which adapter we are going to use.
-    var props = std.mem.zeroes(gpu.Adapter.Properties);
-    response.adapter.?.getProperties(&props);
-    if (props.backend_type == .null) {
-        log.err("no backend found for {s} adapter", .{props.adapter_type.name()});
-        std.process.exit(1);
-    }
-    log.info("found {s} backend on {s} adapter: {s}, {s}\n", .{
-        props.backend_type.name(),
-        props.adapter_type.name(),
-        props.name,
-        props.driver_description,
-    });
-
-    core_window.adapter = response.adapter.?;
-
-    // Create a device with default limits/features.
-    core_window.device = response.adapter.?.createDevice(&.{
-        .required_features_count = if (core_window.required_features) |v| @as(u32, @intCast(v.len)) else 0,
-        .required_features = if (core_window.required_features) |v| @as(?[*]const gpu.FeatureName, v.ptr) else null,
-        .required_limits = if (core_window.required_limits) |limits| @as(?*const gpu.RequiredLimits, &gpu.RequiredLimits{
-            .limits = limits,
-        }) else null,
-        .device_lost_callback = &deviceLostCallback,
-        .device_lost_userdata = null,
-    }) orelse {
-        log.err("failed to create GPU device\n", .{});
-        std.process.exit(1);
-    };
-    core_window.device.setUncapturedErrorCallback({}, printUnhandledErrorCallback);
-    core_window.queue = core_window.device.getQueue();
-
+    // Create swap chain
     core_window.swap_chain_descriptor = gpu.SwapChain.Descriptor{
         .label = "main swap chain",
         .usage = core_window.swap_chain_usage,
@@ -244,30 +263,57 @@ pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {
         },
     };
     core_window.swap_chain = core_window.device.createSwapChain(core_window.surface, &core_window.swap_chain_descriptor);
+
+    // Emit open event
     core.pushEvent(.{ .window_open = .{ .window_id = window_id } });
 }
 
-/// Render all windows. Called on the render thread (main thread).
-///
-/// This is the single entry point for all rendering. Platform backends call this at the
-/// appropriate time (e.g. driven by CVDisplayLink on macOS, or inline on Windows/Linux).
+/// Render all windows, must be called on the render thread.
 pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
-    core.render_mu.lockUncancelable(io);
-    defer core.render_mu.unlock(io);
+    // Hold render_mu only during GPU command recording (on_render) so the app thread can start its
+    // next snapshot while we present.
+    {
+        core.render_mu.lockUncancelable(io);
+        defer core.render_mu.unlock(io);
 
-    var windows = core.windows.slice();
-    while (windows.next()) |window_id| {
-        const core_window = core.windows.getValue(window_id);
-        if (core_window.native == null) continue;
+        var windows = core.windows.slice();
+        while (windows.next()) |window_id| {
+            const core_window = core.windows.getValue(window_id);
+            //const native = core_window.native orelse continue;
+            //if (@hasField(Platform.Native, "pending_destroy") and native.pending_destroy) continue;
 
-        core.window = window_id;
-        const on_render = core_window.on_render orelse @panic("on_render must be set on all windows");
-        core_mod.run(on_render);
-        core.window = undefined;
+            // Allow on_render to read the current window being rendered.
+            core.window = window_id;
 
-        mach.sysgpu.Impl.deviceTick(core_window.device);
-        core_window.swap_chain.present();
+            // Run on_render for the window
+            const on_render = core_window.on_render orelse continue;
+            core_mod.run(on_render);
+
+            // Ensure nobody reads the window outside on_render.
+            core.window = undefined;
+        }
     }
+
+    // Present all windows and tick the shared device outside render_mu so the app thread can
+    // prepare the next frame during GPU submission.
+    var shared_device: ?*gpu.Device = null;
+    {
+        var windows = core.windows.slice();
+        while (windows.next()) |window_id| {
+            const core_window = core.windows.getValue(window_id);
+            // TODO(core): window destruction
+            const native = core_window.native orelse continue;
+            if (@hasField(Platform.Native, "pending_destroy") and native.pending_destroy) continue;
+
+            shared_device = core_window.device;
+            core_window.swap_chain.present();
+        }
+    }
+
+    // Device tick.
+    if (shared_device) |device| mach.sysgpu.Impl.deviceTick(device);
+
+    // Frame rate counter.
     core.frame.tick();
 }
 
@@ -325,19 +371,40 @@ pub fn exit(core: *Core) void {
     core.events_ready.set(core.io);
 }
 
+// TODO(core): window destruction
+/// Destroy a single window, releasing its GPU resources and native platform objects.
+pub fn destroyWindow(core: *Core, window_id: mach.ObjectID) void {
+    Platform.destroyWindow(core, window_id);
+}
+
 pub fn deinit(core: *Core) !void {
     core.state.store(.exited, .release);
+
+    // Release per-window resources first, then shared GPU objects once.
+    var shared_device: ?*gpu.Device = null;
+    var shared_queue: ?*gpu.Queue = null;
+    var shared_adapter: ?*gpu.Adapter = null;
+    var shared_instance: ?*gpu.Instance = null;
 
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         var core_window = core.windows.getValue(window_id);
+        if (core_window.native == null) continue;
+
         core_window.swap_chain.release();
-        core_window.queue.release();
-        core_window.device.release();
         core_window.surface.release();
-        core_window.adapter.release();
-        core_window.instance.release();
+
+        // Track shared objects for single release.
+        shared_device = core_window.device;
+        shared_queue = core_window.queue;
+        shared_adapter = core_window.adapter;
+        shared_instance = core_window.instance;
     }
+
+    if (shared_queue) |q| q.release();
+    if (shared_device) |d| d.release();
+    if (shared_adapter) |a| a.release();
+    if (shared_instance) |i| i.release();
 
     core.render_graph.deinit(core.allocator);
     core.backend_events.deinit(core.allocator);
@@ -379,6 +446,18 @@ pub const EventIterator = struct {
         return event;
     }
 };
+
+/// Suggests EventMode based on the current vsync state of all windows. If any window has vsync
+/// disabled (.none_ modes), it returns `.poll` for uncapped event handling frequency. Otherwise it
+/// returns `.adaptive` to run at a limited frequency while scaling up to meet the frequency
+/// required for timely event handling.
+pub fn suggestEventPacing(core: *@This()) EventMode {
+    var windows = core.windows.slice();
+    while (windows.next()) |wid| {
+        if (core.windows.get(wid, .vsync_mode).isNone()) return .poll;
+    }
+    return .adaptive;
+}
 
 /// Returns an iterator over events using the specified mode for pacing/blocking.
 ///
@@ -651,8 +730,13 @@ pub const ZoomGestureEvent = struct {
 };
 
 pub const GesturePhase = enum {
+    none,
+    may_begin,
     began,
+    changed,
+    stationary,
     ended,
+    cancelled,
 };
 
 pub const MouseButton = enum {
@@ -807,14 +891,16 @@ pub const Key = enum {
     pub const max = Key.unknown;
 };
 
-pub const KeyMods = packed struct(u8) {
+pub const KeyMods = packed struct(u16) {
     shift: bool,
     control: bool,
     alt: bool,
     super: bool,
     caps_lock: bool,
     num_lock: bool,
-    _padding: u2 = 0,
+    help: bool,
+    function: bool,
+    _padding: u8 = 0,
 };
 
 pub const DisplayMode = enum {

@@ -134,16 +134,20 @@ pub const Surface = struct {
     manager: utils.Manager(Surface) = .{},
     layer: *ca.MetalLayer,
     /// When true, CAMetalDisplayLink is active and nextDrawable() must not be called.
-    use_display_link: bool = true,
+    use_display_link: bool,
     /// Drawable provided by the CAMetalDisplayLink callback; consumed by the swap chain.
-    pending_drawable: ?*ca.MetalDrawable = null,
+    pending_drawable: ?*ca.MetalDrawable,
 
     pub fn init(instance: *Instance, desc: *const sysgpu.Surface.Descriptor) !*Surface {
         _ = instance;
 
         if (utils.findChained(sysgpu.Surface.DescriptorFromMetalLayer, desc.next_in_chain.generic)) |mtl_desc| {
             const surface = try allocator.create(Surface);
-            surface.* = .{ .layer = @ptrCast(mtl_desc.layer) };
+            surface.* = .{
+                .layer = @ptrCast(mtl_desc.layer),
+                .use_display_link = false,
+                .pending_drawable = null,
+            };
             return surface;
         } else {
             return error.InvalidDescriptor;
@@ -443,7 +447,6 @@ pub const SwapChain = struct {
     device: *Device,
     surface: *Surface,
     current_drawable: ?*ca.MetalDrawable = null,
-
     pub fn init(device: *Device, surface: *Surface, desc: *const sysgpu.SwapChain.Descriptor) !*SwapChain {
         const layer = surface.layer;
         const size = cg.Size{ .width = @floatFromInt(desc.width), .height = @floatFromInt(desc.height) };
@@ -452,13 +455,23 @@ pub const SwapChain = struct {
         layer.setPixelFormat(conv.metalPixelFormat(desc.format));
         layer.setFramebufferOnly(!(desc.usage.storage_binding or desc.usage.render_attachment));
         layer.setDrawableSize(size);
-        if (!@atomicLoad(bool, &surface.use_display_link, .acquire)) {
+
+        const display_link_active = @atomicLoad(bool, &surface.use_display_link, .acquire);
+
+        if (display_link_active) {
+            // Display link provides external vsync pacing; disable the layer's own vsync sync so
+            // present() doesn't block per-window.
+            layer.setDisplaySyncEnabled(false);
+        } else {
             layer.setMaximumDrawableCount(desc.max_buffered_frames);
             layer.setDisplaySyncEnabled(desc.present_mode != .immediate);
         }
 
         const swapchain = try allocator.create(SwapChain);
-        swapchain.* = .{ .device = device, .surface = surface };
+        swapchain.* = .{
+            .device = device,
+            .surface = surface,
+        };
         return swapchain;
     }
 
@@ -473,8 +486,11 @@ pub const SwapChain = struct {
 
         if (swapchain.current_drawable) |drawable| drawable.release();
 
-        if (@atomicLoad(bool, &swapchain.surface.use_display_link, .acquire)) {
-            // CAMetalDisplayLink is active: consume the drawable it provided.
+        // Check the live flag: when a CAMetalDisplayLink is attached, Metal forbids calling nextDrawable() on the layer.
+        const use_display_link = @atomicLoad(bool, &swapchain.surface.use_display_link, .acquire);
+
+        if (use_display_link) {
+            // Consume the drawable provided by the display link callback.
             const pending_ptr: *usize = @ptrCast(&swapchain.surface.pending_drawable);
             const pending = @atomicRmw(usize, pending_ptr, .Xchg, 0, .acq_rel);
             swapchain.current_drawable = if (pending != 0) @ptrFromInt(pending) else null;
@@ -486,7 +502,11 @@ pub const SwapChain = struct {
         swapchain.device.processQueuedOperations();
 
         if (swapchain.current_drawable) |drawable| {
-            _ = drawable.retain();
+            // Display link drawables are already retained by displayLinkWake; nextDrawable()
+            // returns autoreleased objects that need a retain.
+            if (!use_display_link) {
+                _ = drawable.retain();
+            }
             return TextureView.initFromMtlTexture(drawable.texture());
         } else {
             return null;

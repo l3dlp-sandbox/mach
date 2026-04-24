@@ -36,6 +36,8 @@ pub const mach_systems = .{
     .audioStateChange,
 };
 
+pub const mach_tags = .{.window_meta};
+
 pub const main = mach.schedule(.{
     .{ mach.Core, .init },
     .{ mach.Audio, .init },
@@ -52,25 +54,28 @@ pub const deinit = mach.schedule(.{
 
 app_thread: mach.Thread,
 allocator: std.mem.Allocator,
-window: mach.ObjectID,
+window_id: mach.ObjectID,
 tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
 
-vsync_mode: mach.Core.VSyncMode = .double,
-score: usize = 0,
-num_sprites_spawned: usize = 0,
-direction: Vec2 = vec2(0, 0),
-spawning: bool = false,
-gotta_go_fast: bool = false,
 
-info_text_buf: [128]u8 = undefined,
-info_text: []u8 = &.{},
-info_text_id: mach.ObjectID = undefined,
 info_text_style_id: mach.ObjectID = undefined,
-sprite_pipeline_id: ?mach.ObjectID = null,
-text_pipeline_id: mach.ObjectID = undefined,
+has_setup_shared: bool = false,
+sprite_texture: *gpu.Texture = undefined,
 sfx: mach.Audio.Opus = undefined,
+next_window_num: usize = 2,
+
+window_meta: mach.Objects(.{}, struct {
+    window_id: mach.ObjectID,
+    window_num: usize,
+    sprite_pipeline_id: ?mach.ObjectID = null,
+    text_pipeline_id: ?mach.ObjectID = null,
+    info_text_id: ?mach.ObjectID = null,
+    info_text_buf: ?*[160]u8 = null,
+    gotta_go_fast: bool = false,
+    num_sprites_spawned: usize = 0,
+}),
 
 pub fn init(
     core: *mach.Core,
@@ -98,20 +103,22 @@ pub fn init(
     app.* = .{
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .allocator = allocator,
-        .window = window,
+        .window_id = window,
+        .window_meta = app.window_meta,
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
         .rand = std.Random.DefaultPrng.init(1337),
     };
+
+    // Tag the main window with its metadata
+    const main_window_meta = try app.window_meta.new(.{ .window_id = window, .window_num = 1 });
+    try core.windows.setTag(window, App, .window_meta, main_window_meta);
 }
 
 pub fn deinit2(
     app: *App,
-    text: *gfx.Text,
 ) void {
     app.app_thread.join();
-    // Cleanup here, if desired.
-    text.objects.delete(app.info_text_id);
 }
 
 /// Called on the high-priority audio OS thread when the audio driver needs more audio samples, so
@@ -132,7 +139,8 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
     }
 }
 
-fn setupPipeline(
+/// One-time initialization of shared resources used in all windows.
+fn setupShared(
     core: *mach.Core,
     app: *App,
     sprite: *gfx.Sprite,
@@ -143,70 +151,52 @@ fn setupPipeline(
     // Load sfx
     app.sfx = try mach.Audio.Opus.decodeStream(app.allocator, .{ .data = assets.sfx.scifi_gun });
 
-    // Create a sprite rendering pipeline
-    app.sprite_pipeline_id = try sprite.pipelines.new(.{
-        .window = core.window,
-        .render_pass = undefined,
-        .texture = try loadTexture(window.device, window.queue, app.allocator),
-    });
+    // Load sprite texture
+    app.sprite_texture = try loadTexture(window.device, window.queue, app.allocator);
 
-    // Create a text rendering pipeline
-    app.text_pipeline_id = try text.pipelines.new(.{
-        .window = core.window,
-        .render_pass = undefined,
-    });
-
-    // Create a text style
+    // Prepare text style
     app.info_text_style_id = try text.styles.new(.{
-        .font_size = 48 * gfx.px_per_pt, // 48pt
+        .font_size = 48 * gfx.px_per_pt,
     });
 
-    // Create documentation text
-    {
-        // TODO(text): release this memory somewhere
-        const text_value =
-            \\ Mach is probably working if you:
-            \\ * See this text
-            \\ * See sprites to the left
-            \\ * Hear sounds when sprites disappear
-            \\ * Hold space and things go faster
-        ;
-        const text_buf = try app.allocator.alloc(u8, text_value.len);
-        @memcpy(text_buf, text_value);
-        const segments = try app.allocator.alloc(gfx.Text.Segment, 1);
-        segments[0] = .{
-            .text = text_buf,
-            .style = app.info_text_style_id,
-        };
+    // Setup main window
+    try app.setupWindow(core, sprite, text, core.window);
+}
 
-        // Create our player text
-        const text_id = try text.objects.new(.{
-            .transform = Mat4x4.translate(vec3(-0.02, 0, 0)),
-            .segments = segments,
-        });
-        // Attach the text object to our text rendering pipeline.
-        try text.pipelines.setParent(text_id, app.text_pipeline_id);
-    }
+/// Set up per-window sprite pipeline, text pipeline, and info text.
+fn setupWindow(app: *App, core: *mach.Core, sprite: *gfx.Sprite, text: *gfx.Text, window_id: mach.ObjectID) !void {
+    const window_meta_id = core.windows.getTag(window_id, App, .window_meta) orelse return;
+    if (app.window_meta.get(window_meta_id, .sprite_pipeline_id) != null) return;
 
-    // Create info text to be updated dynamically later
-    {
-        const text_value = "[info]";
-        @memcpy(app.info_text_buf[0..text_value.len], text_value);
-        app.info_text = app.info_text_buf[0..text_value.len];
-        const segments = try app.allocator.alloc(gfx.Text.Segment, 1);
-        segments[0] = .{
-            .text = app.info_text,
-            .style = app.info_text_style_id,
-        };
+    // Setup sprite pipeline
+    const sprite_pipeline = try sprite.pipelines.new(.{
+        .window = window_id,
+        .render_pass = undefined,
+        .texture = app.sprite_texture,
+    });
+    app.window_meta.set(window_meta_id, .sprite_pipeline_id, sprite_pipeline);
 
-        // Create our player text
-        app.info_text_id = try text.objects.new(.{
-            .transform = Mat4x4.translate(vec3(0, (@as(f32, @floatFromInt(window.height)) / 2.0) - 50.0, 0)),
-            .segments = segments,
-        });
-        // Attach the text object to our text rendering pipeline.
-        try text.pipelines.setParent(app.info_text_id, app.text_pipeline_id);
-    }
+    // Setup text pipeline
+    const text_pipeline = try text.pipelines.new(.{
+        .window = window_id,
+        .render_pass = undefined,
+    });
+    app.window_meta.set(window_meta_id, .text_pipeline_id, text_pipeline);
+
+    // Create info text.
+    const buf = try app.allocator.create([160]u8);
+    const text_value = "[info]";
+    @memcpy(buf[0..text_value.len], text_value);
+    const segs = try app.allocator.alloc(gfx.Text.Segment, 1);
+    segs[0] = .{ .text = buf[0..text_value.len], .style = app.info_text_style_id };
+
+    const info_id = try text.objects.new(.{
+        .transform = Mat4x4.translate(vec3(0, 0, 0)),
+        .segments = segs,
+    });
+    try text.pipelines.setParent(info_id, text_pipeline);
+    app.window_meta.set(window_meta_id, .info_text_id, info_id);
+    app.window_meta.set(window_meta_id, .info_text_buf, buf);
 }
 
 pub const tick = mach.schedule(.{
@@ -220,20 +210,25 @@ pub const tick = mach.schedule(.{
 pub fn appTick(
     core: *mach.Core,
     app: *App,
+    app_mod: mach.Mod(App),
     sprite: *gfx.Sprite,
     text: *gfx.Text,
     audio: *mach.Audio,
 ) !void {
-    const window = core.windows.getValue(app.window);
-
-    var iter = core.events(if (app.vsync_mode.isNone()) .poll else .adaptive);
+    var iter = core.events(core.suggestEventPacing());
     while (iter.next()) |event| {
         switch (event) {
             .key_press => |ev| {
                 switch (ev.key) {
-                    .space => app.gotta_go_fast = true,
+                    .space => {
+                        // Space bar pressed: make sprites go faster
+                        if (core.windows.getTag(ev.window_id, App, .window_meta)) |window_meta_id|
+                            app.window_meta.set(window_meta_id, .gotta_go_fast, true);
+                    },
                     .v => {
-                        app.vsync_mode = switch (app.vsync_mode) {
+                        // V key: change vsync mode to next mode
+                        const vsync = core.windows.get(ev.window_id, .vsync_mode);
+                        const new_vsync: mach.Core.VSyncMode = switch (vsync) {
                             .double => .triple,
                             .triple => .low_latency,
                             .low_latency => .adaptive,
@@ -241,95 +236,182 @@ pub fn appTick(
                             .none_low_latency => .none_max_throughput,
                             .none_max_throughput => .double,
                         };
-                        core.windows.set(app.window, .vsync_mode, app.vsync_mode);
+                        core.windows.set(ev.window_id, .vsync_mode, new_vsync);
+                    },
+                    .one => {
+                        // 1 key: create a new window
+                        var title_buf: [32]u8 = undefined;
+                        const title = std.fmt.bufPrint(&title_buf, "Window {d}", .{app.next_window_num}) catch break;
+                        const title_z = app.allocator.allocSentinel(u8, title.len, 0) catch break;
+                        @memcpy(title_z, title);
+
+                        const new_window = core.windows.new(.{
+                            .title = title_z,
+                            .on_render = app_mod.id.render,
+                            .vsync_mode = .double,
+                        }) catch break;
+
+                        const meta = app.window_meta.new(.{
+                            .window_id = new_window,
+                            .window_num = app.next_window_num,
+                        }) catch break;
+
+                        core.windows.setTag(new_window, App, .window_meta, meta) catch break;
+                        app.next_window_num += 1;
+                    },
+                    .two => {
+                        // 2 key: delete the most recent window.
+
+                        // Find the extra window with the highest window_num.
+                        var highest_num: usize = 1;
+                        var highest_meta: ?mach.ObjectID = null;
+                        var metas = app.window_meta.slice();
+                        while (metas.next()) |window_meta_id| {
+                            const num = app.window_meta.get(window_meta_id, .window_num);
+                            if (num > highest_num) {
+                                highest_num = num;
+                                highest_meta = window_meta_id;
+                            }
+                        }
+                        if (highest_meta) |window_meta_id| {
+                            // Null out pipeline render passes before deleting meta so
+                            // the snapshot doesn't leave stale pointers for sprite/text render.
+                            if (app.window_meta.get(window_meta_id, .sprite_pipeline_id)) |sprite_pipeline_id| {
+                                sprite.pipelines.set(sprite_pipeline_id, .render_pass, null);
+                            }
+                            if (app.window_meta.get(window_meta_id, .text_pipeline_id)) |text_pipeline_id| {
+                                text.pipelines.set(text_pipeline_id, .render_pass, null);
+                            }
+                            const window_id = app.window_meta.get(window_meta_id, .window_id);
+                            core.windows.removeTag(window_id, App, .window_meta);
+                            app.window_meta.delete(window_meta_id);
+                            core.destroyWindow(window_id);
+                        }
                     },
                     else => {},
                 }
             },
             .key_release => |ev| {
                 switch (ev.key) {
-                    .space => app.gotta_go_fast = false,
+                    .space => {
+                        // Space bar released: slow down sprites
+                        if (core.windows.getTag(ev.window_id, App, .window_meta)) |window_meta_id|
+                            app.window_meta.set(window_meta_id, .gotta_go_fast, false);
+                    },
                     else => {},
                 }
             },
 
+            .window_open => |ev| {
+                // Window opened: set it up if not the main window.
+                if (ev.window_id != app.window_id) {
+                    app.setupWindow(core, sprite, text, ev.window_id) catch {};
+                }
+            },
+
+            // Main window closed: exit the app
+            // TODO: vet mach.Core events to ensure all send a window ID, and handle this here.
             .close => core.exit(),
             else => {},
         }
     }
 
-    if (app.sprite_pipeline_id == null) return;
-
-    // TODO(text): make updating text easier
-    app.info_text = std.fmt.bufPrint(
-        &app.info_text_buf,
-        "[ render: {d}hz | input: {d}hz ]\n[ Sprites spawned: {d} ]\n(v) vsync: {s}",
-        .{ core.frame.rate, core.input.rate, app.num_sprites_spawned, @tagName(app.vsync_mode) },
-    ) catch &.{};
-    var segments: []gfx.Text.Segment = @constCast(text.objects.get(app.info_text_id, .segments));
-    segments[0] = .{
-        .text = app.info_text,
-        .style = segments[0].style,
-    };
-    text.objects.set(app.info_text_id, .segments, segments);
-
-    const entities_per_second: f32 = @floatFromInt(
-        app.rand.random().intRangeAtMost(usize, 0, if (app.gotta_go_fast) 50 else 10),
-    );
-    if (app.spawn_timer.read() > 1.0 / entities_per_second) {
-        // Spawn new entities
-        _ = app.spawn_timer.lap();
-
-        var new_pos = vec3(-(@as(f32, @floatFromInt(window.width)) / 2), 0, 0);
-        new_pos.v[1] += app.rand.random().floatNorm(f32) * 50;
-
-        const new_sprite_id = try sprite.objects.new(.{
-            .transform = Mat4x4.translate(new_pos),
-            .size = vec2(32, 32),
-            .uv_transform = Mat3x3.translate(vec2(0, 0)),
-        });
-        try sprite.pipelines.setParent(new_sprite_id, app.sprite_pipeline_id.?);
-        app.num_sprites_spawned += 1;
-    }
-
-    // Multiply by delta_time to ensure that movement is the same speed regardless of tick rate.
     const delta_time = app.tick_timer.lap();
+    if (!app.has_setup_shared) return;
 
-    // Move sprites to the right, and make them smaller the further they travel
-    var pipeline_children = try sprite.pipelines.getChildren(app.sprite_pipeline_id.?);
-    defer pipeline_children.deinit();
-    for (pipeline_children.items) |sprite_id| {
-        if (!sprite.objects.is(sprite_id)) continue;
-        var s = sprite.objects.getValue(sprite_id);
+    // Update per-window info text.
+    var window_count: usize = 0;
+    {
+        var metas = app.window_meta.slice();
+        while (metas.next()) |window_meta_id| {
+            window_count += 1;
+            const buf = app.window_meta.get(window_meta_id, .info_text_buf) orelse continue;
+            const info_id = app.window_meta.get(window_meta_id, .info_text_id) orelse continue;
+            const window_id = app.window_meta.get(window_meta_id, .window_id);
+            const window_num = app.window_meta.get(window_meta_id, .window_num);
+            const vsync_mode = core.windows.get(window_id, .vsync_mode);
+            const num_spawned = app.window_meta.get(window_meta_id, .num_sprites_spawned);
 
-        const location = s.transform.translation();
-        const speed: f32 = if (app.gotta_go_fast) 2000 else 100;
-        const progression = std.math.clamp((location.v[0] + (@as(f32, @floatFromInt(window.height)) / 2.0)) / @as(f32, @floatFromInt(window.height)), 0, 1);
-        const scale = mach.math.lerp(2, 0, progression);
-        if (progression >= 0.6) {
-            try sprite.pipelines.removeChild(app.sprite_pipeline_id.?, sprite_id);
-            sprite.objects.delete(sprite_id);
+            const new_text = std.fmt.bufPrint(
+                buf,
+                "Window {d}\n[ render: {d}hz | input: {d}hz ]\n[ Sprites: {d} | Windows: {d} ]\n(v)sync: {s} (1)new (2)close",
+                .{ window_num, core.frame.rate, core.input.rate, num_spawned, window_count, @tagName(vsync_mode) },
+            ) catch continue;
 
-            // Play a new sound
-            const samples = try app.allocator.alignedAlloc(f32, std.mem.Alignment.fromByteUnits(mach.Audio.alignment), app.sfx.samples.len);
-            @memcpy(samples, app.sfx.samples);
-            audio.buffers.lock();
-            defer audio.buffers.unlock();
-            const sound_id = try audio.buffers.new(.{
-                .samples = samples,
-                .channels = app.sfx.channels,
-            });
-            _ = sound_id;
-            app.score += 1;
-        } else {
-            var transform = Mat4x4.ident;
-            transform = transform.mul(&Mat4x4.translate(location.add(&vec3(speed * delta_time, (speed / 2.0) * delta_time * progression, 0))));
-            transform = transform.mul(&Mat4x4.scaleScalar(scale));
-            sprite.objects.set(sprite_id, .transform, transform);
+            var segments: []gfx.Text.Segment = @constCast(text.objects.get(info_id, .segments));
+            segments[0] = .{
+                .text = new_text,
+                .style = segments[0].style,
+            };
+            text.objects.set(info_id, .segments, segments);
         }
     }
 
+    // Spawn and animate sprites per-window.
+    {
+        var metas = app.window_meta.slice();
+        while (metas.next()) |window_meta_id| {
+            const sprite_pipeline_id = app.window_meta.get(window_meta_id, .sprite_pipeline_id) orelse continue;
+            const window_id = app.window_meta.get(window_meta_id, .window_id);
+            const window = core.windows.getValue(window_id);
+            const fast = app.window_meta.get(window_meta_id, .gotta_go_fast);
+
+            // Spawn
+            const entities_per_second: f32 = @floatFromInt(
+                app.rand.random().intRangeAtMost(usize, 0, if (fast) 50 else 10),
+            );
+            if (app.spawn_timer.read() > 1.0 / entities_per_second) {
+                _ = app.spawn_timer.lap();
+                var new_pos = vec3(-(@as(f32, @floatFromInt(window.width)) / 2), 0, 0);
+                new_pos.v[1] += app.rand.random().floatNorm(f32) * 50;
+
+                const new_sprite_id = try sprite.objects.new(.{
+                    .transform = Mat4x4.translate(new_pos),
+                    .size = vec2(32, 32),
+                    .uv_transform = Mat3x3.translate(vec2(0, 0)),
+                });
+                try sprite.pipelines.setParent(new_sprite_id, sprite_pipeline_id);
+                app.window_meta.set(window_meta_id, .num_sprites_spawned, app.window_meta.get(window_meta_id, .num_sprites_spawned) + 1);
+            }
+
+            // Animate
+            var pipeline_children = try sprite.pipelines.getChildren(sprite_pipeline_id);
+            defer pipeline_children.deinit();
+            for (pipeline_children.items) |sprite_id| {
+                if (!sprite.objects.is(sprite_id)) continue;
+
+                const location = sprite.objects.getValue(sprite_id).transform.translation();
+                const speed: f32 = if (fast) 2000 else 100;
+                const progression = std.math.clamp((location.v[0] + (@as(f32, @floatFromInt(window.height)) / 2.0)) / @as(f32, @floatFromInt(window.height)), 0, 1);
+                const scale = mach.math.lerp(2, 0, progression);
+                if (progression >= 0.6) {
+                    try sprite.pipelines.removeChild(sprite_pipeline_id, sprite_id);
+                    sprite.objects.delete(sprite_id);
+
+                    // Play a sound effect when a sprite disappears.
+                    const samples = try app.allocator.alignedAlloc(
+                        f32,
+                        std.mem.Alignment.fromByteUnits(mach.Audio.alignment),
+                        app.sfx.samples.len,
+                    );
+                    @memcpy(samples, app.sfx.samples);
+                    audio.buffers.lock();
+                    defer audio.buffers.unlock();
+                    _ = try audio.buffers.new(.{
+                        .samples = samples,
+                        .channels = app.sfx.channels,
+                    });
+                } else {
+                    var transform = Mat4x4.ident;
+                    transform = transform.mul(&Mat4x4.translate(location.add(&vec3(speed * delta_time, (speed / 2.0) * delta_time * progression, 0))));
+                    transform = transform.mul(&Mat4x4.scaleScalar(scale));
+                    sprite.objects.set(sprite_id, .transform, transform);
+                }
+            }
+        }
+    }
 }
+
 
 pub fn render(
     core: *mach.Core,
@@ -339,24 +421,21 @@ pub fn render(
     text: *gfx.Text,
     text_mod: mach.Mod(gfx.Text),
 ) !void {
-    if (app.sprite_pipeline_id == null) {
-        try setupPipeline(core, app, sprite, text);
+    if (!app.has_setup_shared) {
+        try setupShared(core, app, sprite, text);
+        app.has_setup_shared = true;
         return;
     }
 
     const label = @tagName(mach_module) ++ ".render";
     const window = core.windows.getValue(core.window);
 
-    // Grab the back buffer of the swapchain
-    // TODO(core): this wouldn't exist in browser
     const back_buffer_view = window.swap_chain.getCurrentTextureView() orelse return;
     defer back_buffer_view.release();
 
-    // Create a command encoder
     const encoder = window.device.createCommandEncoder(&.{ .label = label });
     defer encoder.release();
 
-    // Begin render pass
     const sky_blue = gpu.Color{ .r = 0.776, .g = 0.988, .b = 1, .a = 1 };
     const color_attachments = [_]gpu.RenderPassColorAttachment{.{
         .view = back_buffer_view,
@@ -369,21 +448,37 @@ pub fn render(
         .color_attachments = &color_attachments,
     }));
 
-    // Render sprites
-    sprite.pipelines.set(app.sprite_pipeline_id.?, .render_pass, render_pass);
-    sprite_mod.call(.render);
+    // TODO: clean this up ASAP
+    // Null out all pipelines, then activate only the current window's.
+    {
+        var metas = app.window_meta.slice();
+        while (metas.next()) |window_meta_id| {
+            if (app.window_meta.get(window_meta_id, .sprite_pipeline_id)) |sprite_pipeline_id| {
+                sprite.pipelines.set(sprite_pipeline_id, .render_pass, null);
+            }
+            if (app.window_meta.get(window_meta_id, .text_pipeline_id)) |text_pipeline_id| {
+                text.pipelines.set(text_pipeline_id, .render_pass, null);
+            }
+        }
+    }
+    if (core.windows.getTag(core.window, App, .window_meta)) |window_meta_id| {
+        if (app.window_meta.get(window_meta_id, .sprite_pipeline_id)) |sprite_pipeline_id| {
+            sprite.pipelines.set(sprite_pipeline_id, .render_pass, render_pass);
+        }
+        if (app.window_meta.get(window_meta_id, .text_pipeline_id)) |text_pipeline_id| {
+            text.pipelines.set(text_pipeline_id, .render_pass, render_pass);
+        }
+    }
 
-    // Render text
-    text.pipelines.set(app.text_pipeline_id, .render_pass, render_pass);
+    // Render 
+    sprite_mod.call(.render);
     text_mod.call(.render);
 
-    // Finish render pass
     render_pass.end();
     var command = encoder.finish(&.{ .label = label });
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
     command.release();
     render_pass.release();
-
 }
 
 // TODO(sprite): don't require users to copy / write this helper themselves
