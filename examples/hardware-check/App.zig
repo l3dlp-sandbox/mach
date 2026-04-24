@@ -278,7 +278,7 @@ pub fn appTick(
                             const window_id = app.window_meta.get(window_meta_id, .window_id);
                             core.windows.removeTag(window_id, App, .window_meta);
                             app.window_meta.free(window_meta_id);
-                            core.destroyWindow(window_id);
+                            core.windows.delete(window_id);
                         }
                     },
                     else => {},

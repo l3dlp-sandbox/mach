@@ -42,13 +42,13 @@ pub const Native = struct {
     metal_descriptor: *gpu.Surface.DescriptorFromMetalLayer = undefined,
     display_link_ctx: ?*DisplayLinkContext = null,
 
+    /// Global event monitor for command-key keyUp workaround. Must be removed on window teardown.
+    key_up_monitor: ?*objc.objc.Id = null,
+
     /// Set by the main thread (windowDidResize / vsync change); consumed by the render thread to
     /// recreate the swap chain before the next frame.
     pending_swap_chain_update: ?PendingSwapChainUpdate = null,
 
-    /// When true, the window is scheduled for destruction. The render thread skips it, and tick()
-    /// on the main thread performs the actual teardown.
-    pending_destroy: bool = false,
 };
 
 /// Per-window context for CAMetalDisplayLink. Heap-allocated so the pointer remains stable when
@@ -173,7 +173,6 @@ const RenderLoop = struct {
                     while (windows.next()) |window_id| {
                         const native_opt = self.core.windows.get(window_id, .native);
                         const native = native_opt orelse continue;
-                        if (native.pending_destroy) continue;
                         const ctx = native.display_link_ctx orelse {
                             all_have_display_link = false;
                             break;
@@ -206,7 +205,6 @@ const RenderLoop = struct {
                 while (windows.next()) |window_id| {
                     var core_window = self.core.windows.getValue(window_id);
                     const native = core_window.native orelse continue;
-                    if (native.pending_destroy) continue;
                     const update = native.pending_swap_chain_update orelse continue;
 
                     core_window.native.?.pending_swap_chain_update = null;
@@ -311,6 +309,26 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 /// Called by Core.tick on the main thread each application tick. Creates new windows, applies
 /// changes (window title, size, vsync, etc.), and handles pending window destruction.
 pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
+    // Tear down native resources for deleted windows on the main thread where AppKit calls are safe.
+    var deleted_windows = core.windows.sliceDeleted();
+    while (deleted_windows.next()) |window_id| {
+        const native = core.windows.get(window_id, .native) orelse continue;
+        if (native.key_up_monitor) |monitor| {
+            objc.app_kit.Event.removeMonitor(monitor);
+        }
+        if (native.display_link_ctx) |ctx| {
+            RenderLoop.detachDisplayLink(ctx, native.view);
+            _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
+            core.allocator.destroy(ctx);
+        }
+        native.window.setIsVisible(false);
+        native.view.release();
+        native.window.release();
+        core.allocator.destroy(native.metal_descriptor);
+        core.windows.setRaw(window_id, .native, null);
+        // The window_id object itself will be freed inside snapshotStart()
+    }
+
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         const core_window = core.windows.getValue(window_id);
@@ -319,23 +337,6 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
             if (core_window.on_render != null) try initWindow(core, core_mod, window_id, io);
             continue;
         };
-
-        // Handle pending destruction on the main thread where AppKit calls are safe.
-        if (native.pending_destroy) {
-            if (native.display_link_ctx) |ctx| {
-                RenderLoop.detachDisplayLink(ctx, native.view);
-                _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
-                core.allocator.destroy(ctx);
-            }
-            native.window.setIsVisible(false);
-            native.view.release();
-            native.window.release();
-            core.allocator.destroy(native.metal_descriptor);
-            core.windows.setRaw(window_id, .native, null);
-            // Clear on_render so tick() won't try to re-initialize this window.
-            core.windows.setRaw(window_id, .on_render, null);
-            continue;
-        }
 
         // Update window decoration color.
         const native_window: *objc.app_kit.Window = native.window;
@@ -470,6 +471,7 @@ fn initWindow(
         );
     }
 
+    var key_up_monitor: ?*objc.objc.Id = null;
     {
         // On macos, the command key in particular seems to be handled a bit differently and tends
         // to block the `keyUp` event from firing. To remedy this, we borrow the same fix GLFW uses
@@ -490,10 +492,11 @@ fn initWindow(
         }.commandFn;
 
         var commandBlock = objc.foundation.stackBlockLiteral(commandFn, win_ctx, null, null);
-        _ = objc.app_kit.Event.addLocalMonitorForEventsMatchingMask_handler(
+        const monitor = objc.app_kit.Event.addLocalMonitorForEventsMatchingMask_handler(
             objc.app_kit.EventMaskKeyUp,
             commandBlock.asBlock().copy(),
         );
+        key_up_monitor = monitor;
     }
 
     // Create the Metal layer.
@@ -618,6 +621,7 @@ fn initWindow(
         .window = native_window,
         .view = view,
         .metal_descriptor = metal_descriptor,
+        .key_up_monitor = key_up_monitor,
     };
     core.windows.setValueRaw(window_id, core_window);
 
@@ -652,16 +656,6 @@ fn initWindow(
     native_window.makeKeyAndOrderFront(null);
 }
 
-/// Marks a window for destruction. Called by Core.destroyWindow. The actual teardown happens in
-/// tick() on the main thread.
-pub fn destroyWindow(core: *Core, window_id: mach.ObjectID) void {
-    if (core.windows.get(window_id, .native)) |native| {
-        var updated = native;
-        updated.pending_destroy = true;
-        core.windows.setRaw(window_id, .native, updated);
-    }
-}
-
 /// Ensures the global render loop is running. Creates one if it doesn't exist yet. The render loop
 /// is destroyed in tick() when the app exits.
 fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
@@ -679,7 +673,6 @@ const WindowDelegateCallbacks = struct {
     pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         const core_window = core.windows.getValue(window_id);
 
         const native = core_window.native orelse return;
@@ -718,7 +711,6 @@ const WindowDelegateCallbacks = struct {
     pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) bool {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         core.pushEvent(.{ .close = .{ .window_id = window_id } });
         return false;
     }
@@ -729,7 +721,6 @@ const ViewCallbacks = struct {
     pub fn mouseMoved(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         const mouse_location = event.locationInWindow();
         const window_height: f32 = @floatFromInt(core.windows.get(window_id, .height));
 
@@ -742,7 +733,6 @@ const ViewCallbacks = struct {
     pub fn mouseDown(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         core.pushEvent(.{ .mouse_press = .{
             .window_id = window_id,
             .button = @enumFromInt(event.buttonNumber()),
@@ -754,7 +744,6 @@ const ViewCallbacks = struct {
     pub fn mouseUp(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         core.pushEvent(.{ .mouse_release = .{
             .window_id = window_id,
             .button = @enumFromInt(event.buttonNumber()),
@@ -766,7 +755,6 @@ const ViewCallbacks = struct {
     pub fn scrollWheel(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         var scroll_delta_x = event.scrollingDeltaX();
         var scroll_delta_y = event.scrollingDeltaY();
         if (event.hasPreciseScrollingDeltas()) {
@@ -787,7 +775,6 @@ const ViewCallbacks = struct {
     pub fn magnify(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         core.pushEvent(.{ .zoom_gesture = .{
             .window_id = window_id,
             .zoom = @floatCast(event.magnification()),
@@ -798,6 +785,7 @@ const ViewCallbacks = struct {
     pub fn keyDown(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
+
         if (event.isARepeat()) {
             core.pushEvent(.{ .key_repeat = .{
                 .window_id = window_id,
@@ -816,14 +804,12 @@ const ViewCallbacks = struct {
     pub fn insertText(block: *objc.foundation.BlockLiteral(*WindowContext), _: *objc.app_kit.Event, codepoint: u32) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         core.pushEvent(.{ .char_input = .{ .codepoint = @intCast(codepoint), .window_id = window_id } });
     }
 
     pub fn keyUp(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         core.pushEvent(.{ .key_release = .{
             .window_id = window_id,
             .key = machKeyFromKeycode(event.keyCode()),
@@ -834,7 +820,6 @@ const ViewCallbacks = struct {
     pub fn flagsChanged(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
-
         const key = machKeyFromKeycode(event.keyCode());
         const mods = machModifierFromModifierFlag(event.modifierFlags());
         const key_flag = switch (key) {

@@ -9,7 +9,14 @@ const Core = @This();
 
 pub const mach_module = .mach_core;
 
-pub const mach_systems = .{ .main, .init, .tick, .deinit, .snapshotStart, .snapshotEnd };
+pub const mach_systems = .{
+    .main,
+    .init,
+    .tick,
+    .snapshotStart,
+    .snapshotEnd,
+    .deinit,
+};
 
 // Set track_fields to true so that when these field values change, we know about it
 // and can update the platform windows.
@@ -279,8 +286,7 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             const core_window = core.windows.getValue(window_id);
-            //const native = core_window.native orelse continue;
-            //if (@hasField(Platform.Native, "pending_destroy") and native.pending_destroy) continue;
+            if (core_window.native == null) continue;
 
             // Allow on_render to read the current window being rendered.
             core.window = window_id;
@@ -301,9 +307,7 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             const core_window = core.windows.getValue(window_id);
-            // TODO(core): window destruction
-            const native = core_window.native orelse continue;
-            if (@hasField(Platform.Native, "pending_destroy") and native.pending_destroy) continue;
+            if (core_window.native == null) continue;
 
             shared_device = core_window.device;
             core_window.swap_chain.present();
@@ -324,6 +328,15 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
 
 /// Begin submitting a snapshot for rendering the next frame.
 pub fn snapshotStart(core: *Core, io: std.Io) !void {
+    // Free windows whose native resources have been torn down already by the platform backend. This
+    // happens here on the app thread before the snapshot so that the render thread never sees a
+    // freed window.
+    var deleted_windows = core.windows.sliceDeleted();
+    while (deleted_windows.next()) |window_id| {
+        if (core.windows.get(window_id, .native) != null) continue;
+        core.windows.free(window_id);
+    }
+
     core.render_mu.lockUncancelable(io);
     try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
 }
@@ -371,11 +384,7 @@ pub fn exit(core: *Core) void {
     core.events_ready.set(core.io);
 }
 
-// TODO(core): window destruction
-/// Destroy a single window, releasing its GPU resources and native platform objects.
-pub fn destroyWindow(core: *Core, window_id: mach.ObjectID) void {
-    Platform.destroyWindow(core, window_id);
-}
+
 
 pub fn deinit(core: *Core) !void {
     core.state.store(.exited, .release);
