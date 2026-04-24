@@ -72,7 +72,7 @@ window_meta: mach.Objects(.{}, struct {
     sprite_pipeline_id: ?mach.ObjectID = null,
     text_pipeline_id: ?mach.ObjectID = null,
     info_text_id: ?mach.ObjectID = null,
-    info_text_buf: ?*[160]u8 = null,
+
     gotta_go_fast: bool = false,
     num_sprites_spawned: usize = 0,
 }),
@@ -182,25 +182,18 @@ fn setupWindow(app: *App, core: *mach.Core, sprite: *gfx.Sprite, text: *gfx.Text
     app.window_meta.set(window_meta_id, .text_pipeline_id, text_pipeline);
 
     // Create info text.
-    const buf = try app.allocator.create([160]u8);
-    const text_value = "[info]";
-    @memcpy(buf[0..text_value.len], text_value);
-    const segs = try app.allocator.alloc(gfx.Text.Segment, 1);
-    segs[0] = .{ .text = buf[0..text_value.len], .style = app.info_text_style_id };
-
-    const info_id = try text.objects.new(.{
-        .transform = Mat4x4.translate(vec3(0, 0, 0)),
-        .segments = segs,
+    const info_id = try text.createFmt(Mat4x4.translate(vec3(0, 0, 0)), .{
+        .{ app.info_text_style_id, "[info]", .{} },
     });
     try text.pipelines.setParent(info_id, text_pipeline);
     app.window_meta.set(window_meta_id, .info_text_id, info_id);
-    app.window_meta.set(window_meta_id, .info_text_buf, buf);
 }
 
 pub const tick = mach.schedule(.{
     .{ App, .appTick },
     .{ mach.Audio, .cleanup },
     .{ gfx.Sprite, .cleanup },
+    .{ gfx.Text, .cleanup },
     .{ mach.Core, .snapshotStart },
     .{ gfx.Sprite, .snapshot },
     .{ gfx.Text, .snapshot },
@@ -325,25 +318,24 @@ pub fn appTick(
         var metas = app.window_meta.slice();
         while (metas.next()) |window_meta_id| {
             window_count += 1;
-            const buf = app.window_meta.get(window_meta_id, .info_text_buf) orelse continue;
             const info_id = app.window_meta.get(window_meta_id, .info_text_id) orelse continue;
             const window_id = app.window_meta.get(window_meta_id, .window_id);
             const window_num = app.window_meta.get(window_meta_id, .window_num);
             const vsync_mode = core.windows.get(window_id, .vsync_mode);
             const num_spawned = app.window_meta.get(window_meta_id, .num_sprites_spawned);
 
-            const new_text = std.fmt.bufPrint(
-                buf,
-                "Window {d}\n[ render: {d}hz | input: {d}hz ]\n[ Sprites: {d} | Windows: {d} ]\n(v)sync: {s} (1)new (2)close",
-                .{ window_num, core.frame.rate, core.input.rate, num_spawned, window_count, @tagName(vsync_mode) },
-            ) catch continue;
-
-            var segments: []gfx.Text.Segment = @constCast(text.objects.get(info_id, .segments));
-            segments[0] = .{
-                .text = new_text,
-                .style = segments[0].style,
-            };
-            text.objects.set(info_id, .segments, segments);
+            try text.setFmt(info_id, .{
+                .{
+                    app.info_text_style_id,
+                    "Window {d}\n" ++
+                        "[ render: {d}hz | input: {d}hz ]\n" ++
+                        "[ Sprites: {d} | Windows: {d} ]\n" ++
+                        "(v) sync: {s}\n" ++
+                        "(1) new window\n" ++
+                        "(2) close window",
+                    .{ window_num, core.frame.rate, core.input.rate, num_spawned, window_count, @tagName(vsync_mode) },
+                },
+            });
         }
     }
 

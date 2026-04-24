@@ -41,7 +41,6 @@ pub const main = mach.schedule(.{
     .{ mach.Core, .main },
 });
 
-allocator: std.mem.Allocator,
 app_thread: mach.Thread,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
@@ -81,11 +80,7 @@ pub fn init(
         .on_render = app_mod.id.render,
     });
 
-    // TODO(allocator): find a better way to get an allocator here
-    const allocator = std.heap.c_allocator;
-
     app.* = .{
-        .allocator = allocator,
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
@@ -111,24 +106,15 @@ fn setupPipeline(
         .font_size = 48 * gfx.px_per_pt, // 48pt
     });
 
-    // TODO(text): release this memory somewhere
-    const player_text_value =
-        \\ Text with spaces
-        \\ and newlines
-        \\ but nothing fancy (yet)
-    ;
-    const player_text = try app.allocator.alloc(u8, player_text_value.len);
-    @memcpy(player_text, player_text_value);
-    const player_segments = try app.allocator.alloc(gfx.Text.Segment, 1);
-    player_segments[0] = .{
-        .text = player_text,
-        .style = app.style1_id,
-    };
-
     // Create our player text
-    app.player_id = try text.objects.new(.{
-        .transform = Mat4x4.translate(vec3(-0.02, 0, 0)),
-        .segments = player_segments,
+    app.player_id = try text.createFmt(Mat4x4.translate(vec3(-0.02, 0, 0)), .{
+        .{
+            app.style1_id,
+            " Text with spaces\n" ++
+                " and newlines\n" ++
+                " but nothing fancy (yet)",
+            .{},
+        },
     });
     // Attach the text object to our text rendering pipeline.
     try text.pipelines.setParent(app.player_id, app.pipeline_id.?);
@@ -136,6 +122,7 @@ fn setupPipeline(
 
 pub const tick = mach.schedule(.{
     .{ App, .appTick },
+    .{ gfx.Text, .cleanup },
     .{ mach.Core, .snapshotStart },
     .{ gfx.Text, .snapshot },
     .{ mach.Core, .snapshotEnd },
@@ -194,20 +181,10 @@ pub fn appTick(
             new_pos.v[0] += app.rand.random().floatNorm(f32) * 50;
             new_pos.v[1] += app.rand.random().floatNorm(f32) * 50;
 
-            // TODO(text): release this memory somewhere
-            const new_text_value = "?!";
-            const new_text = try app.allocator.alloc(u8, new_text_value.len);
-            @memcpy(new_text, new_text_value);
-            const new_segments = try app.allocator.alloc(gfx.Text.Segment, 1);
-            new_segments[0] = .{
-                .text = new_text,
-                .style = app.style1_id,
-            };
-
-            const new_text_id = try text.objects.new(.{
-                .transform = Mat4x4.scaleScalar(upscale).mul(&Mat4x4.translate(new_pos)),
-                .segments = new_segments,
-            });
+            const new_text_id = try text.createFmt(
+                Mat4x4.scaleScalar(upscale).mul(&Mat4x4.translate(new_pos)),
+                .{.{ app.style1_id, "?!", .{} }},
+            );
             try text.pipelines.setParent(new_text_id, pipeline_id);
         }
     }
@@ -311,5 +288,5 @@ pub fn deinit(
 ) void {
     app.app_thread.join();
     // Cleanup here, if desired.
-    if (app.pipeline_id != null) text.objects.free(app.player_id);
+    if (app.pipeline_id != null) text.objects.delete(app.player_id);
 }

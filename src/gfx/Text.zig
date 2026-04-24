@@ -11,7 +11,7 @@ const Text = @This();
 
 pub const mach_module = .mach_gfx_text;
 
-pub const mach_systems = .{ .init, .snapshot, .render };
+pub const mach_systems = .{ .init, .cleanup, .snapshot, .render };
 
 // TODO(text): currently not handling deinit properly
 
@@ -100,6 +100,19 @@ pub const Segment = struct {
     style: mach.ObjectID,
 };
 
+/// State for text objects whose segments are managed by createFmt/setFmt.
+pub const Managed = struct {
+    /// Segments. The text object's `.segments` field points to `.items`.
+    segments: std.ArrayList(Segment),
+
+    /// Text buffers. Each segment's `.text` slice points to the corresponding buffer's `.items`.
+    bufs: std.ArrayList(std.ArrayList(u8)),
+
+    /// Hash of the last createFmt/setFmt inputs. setFmt uses this to skip expensive computation
+    /// to rebuild the text when the inputs haven't changed.
+    hash: u64,
+};
+
 const Styles = mach.Objects(.{ .track_fields = true }, struct {
     // TODO(text): not currently implemented
     // TODO(text): ship a default font
@@ -133,6 +146,10 @@ const TextObjects = mach.Objects(.{ .track_fields = true }, struct {
 
     /// The segments of text
     segments: []const Segment,
+
+    /// Managed text state. When non-null, this text object's segments are managed by
+    /// createFmt/setFmt and will be freed by cleanup().
+    managed: ?Managed = null,
 
     /// Internal text object state.
     built: ?BuiltText = null,
@@ -233,6 +250,9 @@ render_objects: TextObjects,
 render_pipelines: TextPipelines,
 built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
 
+// Tracks render-side deep-copied segments so they can be freed next frame.
+render_segments: ?[][]Segment = null,
+
 // Temporary buffer used during updatePipelineBuffers, retained to avoid re-allocation.
 cp_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
 
@@ -248,6 +268,145 @@ pub fn init(text: *Text) !void {
         .render_objects = text.render_objects,
         .render_pipelines = text.render_pipelines,
     };
+}
+
+/// Creates a managed text object with formatted segments. Each element of `specs` is a
+/// `.{ style, fmt, args }` tuple.
+///
+/// Allocations are managed by the Text module and freed automatically by `cleanup()`.
+///
+/// Example:
+/// ```
+/// const my_text_id = try text.createFmt(Mat4x4.translate(vec3(0, 0, 0)), .{
+///     .{ style_id, "Score: {d}", .{score} },
+///     .{ label_style, "Player: {s}", .{name} },
+/// });
+/// ```
+pub fn createFmt(text: *Text, transform: Mat4x4, specs: anytype) !mach.ObjectID {
+    const hash = hashSpecs(specs);
+    var managed: Managed = .{
+        .segments = .empty,
+        .bufs = .empty,
+        .hash = hash,
+    };
+    try managed.segments.ensureTotalCapacity(text.allocator, specs.len);
+    try managed.bufs.ensureTotalCapacity(text.allocator, specs.len);
+    inline for (0..specs.len) |i| {
+        var buf: std.ArrayList(u8) = .empty;
+        buf.print(text.allocator, specs[i][1], specs[i][2]) catch return error.OutOfMemory;
+        managed.bufs.appendAssumeCapacity(buf);
+        managed.segments.appendAssumeCapacity(.{ .text = buf.items, .style = specs[i][0] });
+    }
+    return try text.objects.new(.{
+        .transform = transform,
+        .segments = managed.segments.items,
+        .managed = managed,
+    });
+}
+
+/// Updates a managed text object with new formatted segments. Each element of `specs` is a
+/// `.{ style, fmt, args }` tuple.
+///
+/// If the input specs hash to the same as the text currently has, this function is no-op to prevent
+/// costly recomputation - making it less expensive to invoke each frame if your inputs have not
+/// changed.
+///
+/// Example:
+/// ```
+/// // Create text initially
+/// const my_text_id = try text.createFmt(Mat4x4.translate(vec3(0, 0, 0)), .{
+///     .{ style_id, "Score: {d}", .{score} },
+///     .{ label_style, "Player: {s}", .{name} },
+/// });
+///
+/// // Update text
+/// text.setFmt(my_text_id, .{
+///     .{ style_id, "Score: {d}", .{score} },
+/// });
+/// ```
+pub fn setFmt(text_mod: *Text, text_id: mach.ObjectID, specs: anytype) !void {
+    var managed = text_mod.objects.get(text_id, .managed) orelse return;
+
+    // If the hashed inputs wouldn't actually change the text, nothing to do.
+    const hash = hashSpecs(specs);
+    if (managed.hash == hash) return;
+
+    // Grow segments and bufs if the new spec count is larger.
+    if (specs.len > managed.segments.items.len) {
+        try managed.segments.ensureTotalCapacity(text_mod.allocator, specs.len);
+        try managed.bufs.ensureTotalCapacity(text_mod.allocator, specs.len);
+        while (managed.bufs.items.len < specs.len) {
+            managed.bufs.appendAssumeCapacity(.empty);
+            managed.segments.appendAssumeCapacity(undefined);
+        }
+    }
+
+    // Pre-ensure capacity on all buffers so print cannot fail below.
+    inline for (0..specs.len) |i| {
+        try managed.bufs.items[i].ensureTotalCapacity(text_mod.allocator, std.fmt.count(specs[i][1], specs[i][2]));
+    }
+
+    // Update segments
+    inline for (0..specs.len) |i| {
+        // Update text buffer
+        managed.bufs.items[i].clearRetainingCapacity();
+        managed.bufs.items[i].print(text_mod.allocator, specs[i][1], specs[i][2]) catch unreachable;
+
+        // Update segment
+        managed.segments.items[i] = .{ .text = managed.bufs.items[i].items, .style = specs[i][0] };
+    }
+
+    // Update managed field
+    managed.hash = hash;
+    text_mod.objects.set(text_id, .segments, managed.segments.items[0..specs.len]);
+    text_mod.objects.set(text_id, .managed, managed);
+}
+
+fn hashSpecs(specs: anytype) u64 {
+    var hasher = std.hash.Wyhash.init(0);
+    inline for (0..specs.len) |i| {
+        std.hash.autoHash(&hasher, specs[i][0]); // style
+        inline for (specs[i][2]) |arg| {
+            hashValue(&hasher, arg);
+        }
+    }
+    return hasher.final();
+}
+
+fn hashValue(hasher: anytype, value: anytype) void {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (ptr.size == .slice) {
+                hasher.update(std.mem.sliceAsBytes(value));
+            } else {
+                std.hash.autoHash(hasher, value);
+            }
+        },
+        else => std.hash.autoHash(hasher, value),
+    }
+}
+
+/// Cleans up text objects that have been marked for deletion via `delete()`.
+/// Frees managed segment text, segments slice, built glyph data, and releases the object.
+pub fn cleanup(text: *Text) void {
+    var deleted = text.objects.sliceDeleted();
+    while (deleted.next()) |text_id| {
+        if (text.objects.get(text_id, .managed)) |managed| {
+            for (managed.bufs.items) |*buf| {
+                buf.deinit(text.allocator);
+            }
+            var bufs = managed.bufs;
+            bufs.deinit(text.allocator);
+            var segments = managed.segments;
+            segments.deinit(text.allocator);
+        }
+        if (text.objects.get(text_id, .built)) |built| {
+            var glyphs = built.glyphs;
+            glyphs.deinit(text.allocator);
+        }
+        text.objects.free(text_id);
+    }
 }
 
 pub fn snapshot(text: *Text, core: *mach.Core) !void {
@@ -294,6 +453,51 @@ pub fn snapshot(text: *Text, core: *mach.Core) !void {
     // Snapshot the text objects and pipelines.
     try text.render_objects.copyFrom(&text.objects);
     try text.render_pipelines.copyFrom(&text.pipelines);
+
+    // Deep-copy segment text for managed text objects so the render thread has
+    // its own stable copy that won't be modified by the app thread's setFmt.
+    {
+        var it = text.render_objects.slice();
+        while (it.next()) |text_id| {
+            if (text.render_objects.get(text_id, .managed) == null) continue;
+            const src_segments = text.render_objects.get(text_id, .segments);
+            const dst_segments = try text.allocator.alloc(Segment, src_segments.len);
+            for (src_segments, 0..) |seg, i| {
+                dst_segments[i] = .{
+                    .text = try text.allocator.dupe(u8, seg.text),
+                    .style = seg.style,
+                };
+            }
+            text.render_objects.setRaw(text_id, .segments, dst_segments);
+        }
+    }
+
+    // Free render-side deep copies from the previous frame.
+    if (text.render_segments) |old| {
+        for (old) |segments| {
+            for (segments) |seg| text.allocator.free(@constCast(seg.text));
+            text.allocator.free(segments);
+        }
+        text.allocator.free(old);
+    }
+
+    // Collect current render-side segment pointers so we can free them next frame.
+    {
+        var count: usize = 0;
+        var it = text.render_objects.slice();
+        while (it.next()) |text_id| {
+            if (text.render_objects.get(text_id, .managed) != null) count += 1;
+        }
+        const entries = try text.allocator.alloc([]Segment, count);
+        var idx: usize = 0;
+        it = text.render_objects.slice();
+        while (it.next()) |text_id| {
+            if (text.render_objects.get(text_id, .managed) == null) continue;
+            entries[idx] = @constCast(text.render_objects.get(text_id, .segments));
+            idx += 1;
+        }
+        text.render_segments = entries;
+    }
 
     // Point render-side graphs to the snapshotted render_graph so render-side
     // getChildren queries use the snapshot rather than the live app graph.
