@@ -216,6 +216,14 @@ pub const Graph = struct {
         return graph.id_to_node.map.get(id);
     }
 
+    /// Returns true if the given object has any children in the graph.
+    pub fn hasChildren(graph: *Graph, id: u64) bool {
+        graph.id_to_node.lock.lockSharedUncancelable(graph.io);
+        defer graph.id_to_node.lock.unlockShared(graph.io);
+        const node = graph.id_to_node.map.get(id) orelse return false;
+        return node.first_child != null;
+    }
+
     /// The thread that runs continuously in the background to process queue submissions.
     fn processThread(graph: *Graph, allocator: std.mem.Allocator) void {
         while (!graph.should_stop.load(.acquire)) {
