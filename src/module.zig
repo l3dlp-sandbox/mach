@@ -67,6 +67,10 @@ pub const ObjectsOptions = struct {
     /// You can get this information by calling `.updated(.field_name)`
     /// Note that calling `.updated(.field_name) will also set the flag back to false.
     track_fields: bool = false,
+
+    /// When true, delete() will result in a panic indicating that objects in this list must be
+    /// explicitly free()'d instead.
+    require_free: bool = false,
 };
 
 pub fn Objects(options: ObjectsOptions, comptime T: type) type {
@@ -94,6 +98,9 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             /// Whether a given slot in data[i] has been freed or not
             freed: std.bit_set.DynamicBitSetUnmanaged = .{},
+
+            /// Whether a given slot in data[i] is marked for pending deletion
+            pending_delete: std.bit_set.DynamicBitSetUnmanaged = .{},
 
             /// The current generation number of data[i], when data[i] becomes freed and then alive
             /// again, this number is incremented by one.
@@ -157,7 +164,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
                     }
                     defer s.index += 1;
 
-                    if (!freed.isSet(s.index)) return @bitCast(PackedID{
+                    if (!freed.isSet(s.index) and !s.objs.internal.pending_delete.isSet(s.index)) return @bitCast(PackedID{
                         .type_id = s.objs.internal.type_id,
                         .generation = generation.items[s.index],
                         .index = s.index,
@@ -190,6 +197,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const allocator = objs.internal.allocator;
             const data = &objs.internal.data;
             const freed = &objs.internal.freed;
+            const pending_delete = &objs.internal.pending_delete;
             const generation = &objs.internal.generation;
             const recycling_bin = &objs.internal.recycling_bin;
 
@@ -214,8 +222,9 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             }
 
             if (recycling_bin.pop()) |index| {
-                // Reuse a slot from the recycling bin.
+                // Reuse a free slot from the recycling bin.
                 freed.unset(index);
+                pending_delete.unset(index);
                 const gen = generation.items[index] + 1;
                 generation.items[index] = gen;
                 data.set(index, toStorage(value));
@@ -229,6 +238,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             // Ensure we have space for the new object
             try data.ensureUnusedCapacity(allocator, 1);
             try freed.resize(allocator, data.capacity, false);
+            try pending_delete.resize(allocator, data.capacity, false);
             try generation.ensureUnusedCapacity(allocator, 1);
 
             // If we are tracking fields, we need to resize the bitset to hold another object's fields
@@ -319,21 +329,95 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             return fromStorage(data.get(unpacked.index));
         }
 
+        /// Marks an object for deletion. The object is flagged for deletion, it remains alive and
+        /// readable until someone, usually the owning module that knows how to cleanup its
+        /// resources, invokes `free()` on it.
+        ///
+        /// Use `isDeleted()` to check if an object has been deleted but not yet freed, or
+        /// `sliceDeleted()` to iterate all deleted objects from the set.
+        ///
+        /// If `require_free = true`, it is a @compileError to invoke this method on the set and
+        /// free() must be used instead.
+        pub fn delete(objs: *@This(), id: ObjectID) void {
+            if (options.require_free) @compileError("delete() cannot be used when require_free is set; use free() instead");
+            const unpacked = objs.validateAndUnpack(id, "delete");
+            objs.internal.pending_delete.set(unpacked.index);
+        }
+
+        /// Immediately removes an object from the pool, freeing its slot for reuse.
+        ///
+        /// In order to free an object, you must know how to release its resources - including graph
+        /// resources. If `require_free = true`, then an object is declared as requiring manual
+        /// `free()`.
+        ///
+        /// If `require_free = false`, you should use `delete()` instead which doesn't require
+        /// knowing how to free the objects resources - by allowing the module that owns the object
+        /// to release them later (by ultimately calling `free()` itself) instead.
+        ///
+        /// In debug builds, calling free() on an object which has children in the graph results in
+        /// a panic.
         pub fn free(objs: *@This(), id: ObjectID) void {
+            const unpacked = objs.validateAndUnpack(id, "free");
             const data = &objs.internal.data;
             const freed = &objs.internal.freed;
             const recycling_bin = &objs.internal.recycling_bin;
-
-            const unpacked = objs.validateAndUnpack(id, "free");
             if (recycling_bin.items.len < recycling_bin.capacity) {
                 recycling_bin.appendAssumeCapacity(unpacked.index);
             } else objs.internal.thrown_on_the_floor += 1;
 
             freed.set(unpacked.index);
+            objs.internal.pending_delete.unset(unpacked.index);
             if (mach.is_debug) {
                 const undef: StorageT = undefined;
                 data.set(unpacked.index, undef);
             }
+        }
+
+        /// Returns an iterator over objects marked for deletion.
+        ///
+        /// Used by modules to find objects that need to cleanup resources on objects before
+        /// ultimately calling free() on each object.
+        pub fn sliceDeleted(objs: *@This()) SliceDeleted {
+            return .{ .index = 0, .objs = objs };
+        }
+
+        pub const SliceDeleted = struct {
+            index: Index,
+            objs: *Objects(options, T),
+
+            pub fn next(s: *SliceDeleted) ?ObjectID {
+                const pending = &s.objs.internal.pending_delete;
+                const generation = &s.objs.internal.generation;
+                const num_objects = generation.items.len;
+
+                while (true) {
+                    if (s.index == num_objects) {
+                        s.index = 0;
+                        return null;
+                    }
+                    defer s.index += 1;
+
+                    if (pending.isSet(s.index)) return @bitCast(PackedID{
+                        .type_id = s.objs.internal.type_id,
+                        .generation = generation.items[s.index],
+                        .index = s.index,
+                    });
+                }
+            }
+        };
+
+        /// Returns true if the object has been marked for deferred deletion.
+        ///
+        /// Calling this on an object which has been free()'d already is illegal and will result in
+        /// undefined behavior in production builds, and a safety-check panic in debug builds.
+        pub fn isDeleted(objs: *const @This(), id: ObjectID) bool {
+            const unpacked = objs.validateAndUnpack(id, "isDeleted");
+            return objs.internal.pending_delete.isSet(unpacked.index);
+        }
+
+        /// Returns the number of objects currently marked for deferred deletion.
+        pub fn numDeleted(objs: *const @This()) u32 {
+            return @intCast(objs.internal.pending_delete.count());
         }
 
         // TODO(objects): evaluate whether tag operations should ever return an error
@@ -382,6 +466,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             return objs.internal.tags.get(tagged) orelse null;
         }
 
+        /// Returns an iterator over all live objects. Excludes any objects which have been freed
+        /// or marked for deletion.
         pub fn slice(objs: *@This()) Slice {
             return Slice{
                 .index = 0,
@@ -557,6 +643,13 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             const freed_masks = (src.internal.freed.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
             if (freed_masks > 0) {
                 @memcpy(dst.internal.freed.masks[0..freed_masks], src.internal.freed.masks[0..freed_masks]);
+            }
+
+            // copy pending_delete
+            try dst.internal.pending_delete.resize(allocator, src.internal.pending_delete.bit_length, false);
+            const pd_masks = (src.internal.pending_delete.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
+            if (pd_masks > 0) {
+                @memcpy(dst.internal.pending_delete.masks[0..pd_masks], src.internal.pending_delete.masks[0..pd_masks]);
             }
 
             // copy generation
