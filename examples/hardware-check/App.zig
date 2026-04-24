@@ -134,7 +134,7 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
 
         // Remove the audio buffer that is no longer playing
         const samples = audio.buffers.get(buf_id, .samples);
-        audio.buffers.delete(buf_id);
+        audio.buffers.free(buf_id);
         app.allocator.free(samples);
     }
 }
@@ -284,7 +284,7 @@ pub fn appTick(
                             }
                             const window_id = app.window_meta.get(window_meta_id, .window_id);
                             core.windows.removeTag(window_id, App, .window_meta);
-                            app.window_meta.delete(window_meta_id);
+                            app.window_meta.free(window_meta_id);
                             core.destroyWindow(window_id);
                         }
                     },
@@ -386,7 +386,7 @@ pub fn appTick(
                 const scale = mach.math.lerp(2, 0, progression);
                 if (progression >= 0.6) {
                     try sprite.pipelines.removeChild(sprite_pipeline_id, sprite_id);
-                    sprite.objects.delete(sprite_id);
+                    sprite.objects.free(sprite_id);
 
                     // Play a sound effect when a sprite disappears.
                     const samples = try app.allocator.alignedAlloc(

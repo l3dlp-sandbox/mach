@@ -122,7 +122,7 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
             // Repeat background music forever
             audio.buffers.set(buf_id, .index, 0);
             audio.buffers.set(buf_id, .playing, true);
-        } else audio.buffers.delete(buf_id);
+        } else audio.buffers.free(buf_id);
     }
 }
 

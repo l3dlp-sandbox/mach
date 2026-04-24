@@ -280,7 +280,7 @@ pub fn deinit(
 ) void {
     app.app_thread.join();
     // Cleanup here, if desired.
-    if (app.pipeline_id != null) sprite.objects.delete(app.player_id);
+    if (app.pipeline_id != null) sprite.objects.free(app.player_id);
 }
 
 // TODO(sprite): don't require users to copy / write this helper themselves

@@ -49,7 +49,7 @@ pub fn initGraph(graph: *Graph, allocator: std.mem.Allocator, io: std.Io, compti
 /// An ID representing a mach object. This is an opaque identifier which effectively encodes:
 ///
 /// * An array index that can be used to O(1) lookup the actual data / struct fields of the object.
-/// * The generation (or 'version') of the object, enabling detecting use-after-object-delete in
+/// * The generation (or 'version') of the object, enabling detecting use-after-free in
 ///   many (but not all) cases.
 /// * Which module the object came from, allowing looking up type information or the module name
 ///   from ID alone.
@@ -92,18 +92,18 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             /// The actual object data
             data: std.MultiArrayList(StorageT) = .empty,
 
-            /// Whether a given slot in data[i] is dead or not
-            dead: std.bit_set.DynamicBitSetUnmanaged = .{},
+            /// Whether a given slot in data[i] has been freed or not
+            freed: std.bit_set.DynamicBitSetUnmanaged = .{},
 
-            /// The current generation number of data[i], when data[i] becomes dead and then alive
+            /// The current generation number of data[i], when data[i] becomes freed and then alive
             /// again, this number is incremented by one.
             generation: std.ArrayListUnmanaged(Generation) = .empty,
 
-            /// The recycling bin which tells which data indices are dead and can be reused.
+            /// The recycling bin which tells which data indices are freed and can be reused.
             recycling_bin: std.ArrayListUnmanaged(Index) = .empty,
 
             /// The number of objects that could not fit in the recycling bin and hence were thrown
-            /// on the floor and forgotten about. This means there are dead items recorded by dead.set(index)
+            /// on the floor and forgotten about. This means there are freed items recorded by freed.set(index)
             /// which aren't in the recycling_bin, and the next call to new() may consider cleaning up.
             thrown_on_the_floor: u32 = 0,
 
@@ -146,7 +146,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             objs: *Objects(options, T),
 
             pub fn next(s: *Slice) ?ObjectID {
-                const dead = &s.objs.internal.dead;
+                const freed = &s.objs.internal.freed;
                 const generation = &s.objs.internal.generation;
                 const num_objects = generation.items.len;
 
@@ -157,7 +157,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
                     }
                     defer s.index += 1;
 
-                    if (!dead.isSet(s.index)) return @bitCast(PackedID{
+                    if (!freed.isSet(s.index)) return @bitCast(PackedID{
                         .type_id = s.objs.internal.type_id,
                         .generation = generation.items[s.index],
                         .index = s.index,
@@ -189,7 +189,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         pub fn new(objs: *@This(), value: T) std.mem.Allocator.Error!ObjectID {
             const allocator = objs.internal.allocator;
             const data = &objs.internal.data;
-            const dead = &objs.internal.dead;
+            const freed = &objs.internal.freed;
             const generation = &objs.internal.generation;
             const recycling_bin = &objs.internal.recycling_bin;
 
@@ -197,16 +197,16 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             // all objects have been thrown on the floor. If they have, we find them and grow the
             // recycling bin to fit them.
             if (objs.internal.thrown_on_the_floor >= (data.len / 10)) {
-                var iter = dead.iterator(.{ .kind = .set });
-                dead_object_loop: while (iter.next()) |index| {
+                var iter = freed.iterator(.{ .kind = .set });
+                freed_object_loop: while (iter.next()) |index| {
                     // We need to check if this index is already in the recycling bin since
                     // if it is, it could get recycled a second time while still
                     // in use.
                     for (recycling_bin.items) |recycled_index| {
-                        if (index == recycled_index) continue :dead_object_loop;
+                        if (index == recycled_index) continue :freed_object_loop;
                     }
 
-                    // dead bitset contains data.capacity number of entries, we only care about ones that are in data.len range.
+                    // freed bitset contains data.capacity number of entries, we only care about ones that are in data.len range.
                     if (index > data.len - 1) break;
                     try recycling_bin.append(allocator, @intCast(index));
                 }
@@ -214,8 +214,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             }
 
             if (recycling_bin.pop()) |index| {
-                // Reuse a free slot from the recycling bin.
-                dead.unset(index);
+                // Reuse a slot from the recycling bin.
+                freed.unset(index);
                 const gen = generation.items[index] + 1;
                 generation.items[index] = gen;
                 data.set(index, toStorage(value));
@@ -228,7 +228,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             // Ensure we have space for the new object
             try data.ensureUnusedCapacity(allocator, 1);
-            try dead.resize(allocator, data.capacity, false);
+            try freed.resize(allocator, data.capacity, false);
             try generation.ensureUnusedCapacity(allocator, 1);
 
             // If we are tracking fields, we need to resize the bitset to hold another object's fields
@@ -238,7 +238,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             const index = data.len;
             data.appendAssumeCapacity(toStorage(value));
-            dead.unset(index);
+            freed.unset(index);
             generation.appendAssumeCapacity(0);
 
             return @bitCast(PackedID{
@@ -319,17 +319,17 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             return fromStorage(data.get(unpacked.index));
         }
 
-        pub fn delete(objs: *@This(), id: ObjectID) void {
+        pub fn free(objs: *@This(), id: ObjectID) void {
             const data = &objs.internal.data;
-            const dead = &objs.internal.dead;
+            const freed = &objs.internal.freed;
             const recycling_bin = &objs.internal.recycling_bin;
 
-            const unpacked = objs.validateAndUnpack(id, "delete");
+            const unpacked = objs.validateAndUnpack(id, "free");
             if (recycling_bin.items.len < recycling_bin.capacity) {
                 recycling_bin.appendAssumeCapacity(unpacked.index);
             } else objs.internal.thrown_on_the_floor += 1;
 
-            dead.set(unpacked.index);
+            freed.set(unpacked.index);
             if (mach.is_debug) {
                 const undef: StorageT = undefined;
                 data.set(unpacked.index, undef);
@@ -389,10 +389,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             };
         }
 
-        /// Validates the given object is from this list (type check) and alive (not a use after delete
+        /// Validates the given object is from this list (type check) and alive (not a use after free
         /// situation.)
         fn validateAndUnpack(objs: *const @This(), id: ObjectID, comptime fn_name: []const u8) PackedID {
-            const dead = &objs.internal.dead;
+            const freed = &objs.internal.freed;
             const generation = &objs.internal.generation;
 
             // TODO(object): decide whether to disable safety checks like this in some conditions,
@@ -402,10 +402,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
                 @panic("mach: " ++ fn_name ++ "() called with object not from this list");
             }
             if (unpacked.generation != generation.items[unpacked.index]) {
-                @panic("mach: " ++ fn_name ++ "() called with a dead object (use after delete, recycled slot)");
+                @panic("mach: " ++ fn_name ++ "() called with a freed object (use after free, recycled slot)");
             }
-            if (dead.isSet(unpacked.index)) {
-                @panic("mach: " ++ fn_name ++ "() called with a dead object (use after delete)");
+            if (freed.isSet(unpacked.index)) {
+                @panic("mach: " ++ fn_name ++ "() called with a freed object (use after free)");
             }
             return unpacked;
         }
@@ -527,7 +527,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         ///
         /// The copy is optimized for speed rather than memory efficiency, operating under the
         /// assumption that the objects to be copied may be frequently copied from src to dst.
-        /// For example, dead to-be-recycled objects are copied too rather than being garbage
+        /// For example, freed to-be-recycled objects are copied too rather than being garbage
         /// collected during the copy process. Additional capacity in arrays is also mirrored
         /// rather than resizing to fit only what is needed, under the assumption that capacity
         /// may be needed in the next copy.
@@ -551,12 +551,12 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
                 }
             }
 
-            // copy dead
-            try dst.internal.dead.resize(allocator, src.internal.dead.bit_length, false);
+            // copy freed
+            try dst.internal.freed.resize(allocator, src.internal.freed.bit_length, false);
             const MaskInt = std.bit_set.DynamicBitSetUnmanaged.MaskInt;
-            const dead_masks = (src.internal.dead.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
-            if (dead_masks > 0) {
-                @memcpy(dst.internal.dead.masks[0..dead_masks], src.internal.dead.masks[0..dead_masks]);
+            const freed_masks = (src.internal.freed.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
+            if (freed_masks > 0) {
+                @memcpy(dst.internal.freed.masks[0..freed_masks], src.internal.freed.masks[0..freed_masks]);
             }
 
             // copy generation

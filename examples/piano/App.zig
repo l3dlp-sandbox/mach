@@ -130,7 +130,7 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
 
         // Remove the audio buffer that is no longer playing
         const samples = audio.buffers.get(buf_id, .samples);
-        audio.buffers.delete(buf_id);
+        audio.buffers.free(buf_id);
         app.allocator.free(samples);
     }
 }

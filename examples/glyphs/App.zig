@@ -312,7 +312,7 @@ pub fn appTick(
 
         if (location.x() < -@as(f32, @floatFromInt(window.width)) / 1.5 or location.x() > @as(f32, @floatFromInt(window.width)) / 1.5 or location.y() < -@as(f32, @floatFromInt(window.height)) / 1.5 or location.y() > @as(f32, @floatFromInt(window.height)) / 1.5) {
             try sprite.objects.setParent(sprite_id, null);
-            sprite.objects.delete(sprite_id);
+            sprite.objects.free(sprite_id);
             app.sprites -= 1;
             continue;
         }

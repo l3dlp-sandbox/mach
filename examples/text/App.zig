@@ -311,5 +311,5 @@ pub fn deinit(
 ) void {
     app.app_thread.join();
     // Cleanup here, if desired.
-    if (app.pipeline_id != null) text.objects.delete(app.player_id);
+    if (app.pipeline_id != null) text.objects.free(app.player_id);
 }
