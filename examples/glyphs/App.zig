@@ -224,6 +224,7 @@ fn prepareGlyphs(queue: *gpu.Queue, app: *App) !void {
 
 pub const tick = mach.schedule(.{
     .{ App, .appTick },
+    .{ gfx.Sprite, .cleanup },
     .{ mach.Core, .snapshotStart },
     .{ gfx.Sprite, .snapshot },
     .{ mach.Core, .snapshotEnd },
@@ -312,7 +313,7 @@ pub fn appTick(
 
         if (location.x() < -@as(f32, @floatFromInt(window.width)) / 1.5 or location.x() > @as(f32, @floatFromInt(window.width)) / 1.5 or location.y() < -@as(f32, @floatFromInt(window.height)) / 1.5 or location.y() > @as(f32, @floatFromInt(window.height)) / 1.5) {
             try sprite.objects.setParent(sprite_id, null);
-            sprite.objects.free(sprite_id);
+            sprite.objects.delete(sprite_id);
             app.sprites -= 1;
             continue;
         }

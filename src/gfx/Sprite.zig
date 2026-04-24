@@ -12,7 +12,7 @@ const Sprite = @This();
 
 pub const mach_module = .mach_gfx_sprite;
 
-pub const mach_systems = .{ .init, .snapshot, .render };
+pub const mach_systems = .{ .init, .cleanup, .snapshot, .render };
 
 // TODO(sprite): currently not handling deinit properly
 
@@ -184,9 +184,16 @@ pub fn init(sprite: *Sprite) !void {
     };
 }
 
+/// Cleans up sprite objects that have been marked for deletion via `delete()`.
+pub fn cleanup(sprite: *Sprite) void {
+    var deleted = sprite.objects.sliceDeleted();
+    while (deleted.next()) |sprite_id| {
+        sprite.objects.free(sprite_id);
+    }
+}
+
 pub fn snapshot(sprite: *Sprite, core: *mach.Core) !void {
     const allocator = sprite.allocator;
-
     {
         // Walk over all render snapshot pipelines.
         var render_it = sprite.render_pipelines.slice();

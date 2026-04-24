@@ -200,6 +200,7 @@ fn setupWindow(app: *App, core: *mach.Core, sprite: *gfx.Sprite, text: *gfx.Text
 pub const tick = mach.schedule(.{
     .{ App, .appTick },
     .{ mach.Audio, .cleanup },
+    .{ gfx.Sprite, .cleanup },
     .{ mach.Core, .snapshotStart },
     .{ gfx.Sprite, .snapshot },
     .{ gfx.Text, .snapshot },
@@ -385,7 +386,7 @@ pub fn appTick(
                 const scale = mach.math.lerp(2, 0, progression);
                 if (progression >= 0.6) {
                     try sprite.pipelines.removeChild(sprite_pipeline_id, sprite_id);
-                    sprite.objects.free(sprite_id);
+                    sprite.objects.delete(sprite_id);
 
                     // Play a sound effect when a sprite disappears.
                     const samples = try audio.allocSamples(app.sfx.samples.len);
