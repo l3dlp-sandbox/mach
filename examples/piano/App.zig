@@ -30,6 +30,7 @@ pub const mach_module = .app;
 pub const mach_systems = .{
     .main,
     .init,
+    .appTick,
     .tick,
     .render,
     .deinit,
@@ -128,14 +129,19 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
             try app.play_after.removeChild(buf_id, play_after_id);
         }
 
-        // Remove the audio buffer that is no longer playing
-        const samples = audio.buffers.get(buf_id, .samples);
-        audio.buffers.free(buf_id);
-        app.allocator.free(samples);
+        // Mark the audio buffer for deletion; Audio.cleanup will free it.
+        audio.buffers.delete(buf_id);
     }
 }
 
-pub fn tick(
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Audio, .cleanup },
+    .{ mach.Core, .snapshotStart },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(
     core: *mach.Core,
     audio: *mach.Audio,
     app: *App,
@@ -229,13 +235,13 @@ pub fn render(
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
 }
 
-fn fillTone(app: *App, audio: *mach.Audio, frequency: f32) ![]align(mach.Audio.alignment) const f32 {
+fn fillTone(_: *App, audio: *mach.Audio, frequency: f32) ![]align(mach.Audio.alignment) const f32 {
     const channels = audio.player.channels().len;
     const sample_rate: f32 = @floatFromInt(audio.player.sampleRate());
     const duration: f32 = 1.5 * @as(f32, @floatFromInt(channels)) * sample_rate; // play the tone for 1.5s
     const gain = 0.1;
 
-    const samples = try app.allocator.alignedAlloc(f32, .fromByteUnits(mach.Audio.alignment), @intFromFloat(duration));
+    const samples = try audio.allocSamples(@intFromFloat(duration));
 
     var i: usize = 0;
     while (i < samples.len) : (i += channels) {

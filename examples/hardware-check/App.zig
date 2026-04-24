@@ -123,7 +123,7 @@ pub fn deinit2(
 
 /// Called on the high-priority audio OS thread when the audio driver needs more audio samples, so
 /// this callback should be fast to respond.
-pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
+pub fn audioStateChange(audio: *mach.Audio) !void {
     audio.buffers.lock();
     defer audio.buffers.unlock();
 
@@ -132,10 +132,8 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
     while (buffers.next()) |buf_id| {
         if (audio.buffers.get(buf_id, .playing)) continue;
 
-        // Remove the audio buffer that is no longer playing
-        const samples = audio.buffers.get(buf_id, .samples);
-        audio.buffers.free(buf_id);
-        app.allocator.free(samples);
+        // Mark the audio buffer for deletion; Audio.cleanup will free it.
+        audio.buffers.delete(buf_id);
     }
 }
 
@@ -201,6 +199,7 @@ fn setupWindow(app: *App, core: *mach.Core, sprite: *gfx.Sprite, text: *gfx.Text
 
 pub const tick = mach.schedule(.{
     .{ App, .appTick },
+    .{ mach.Audio, .cleanup },
     .{ mach.Core, .snapshotStart },
     .{ gfx.Sprite, .snapshot },
     .{ gfx.Text, .snapshot },
@@ -389,11 +388,7 @@ pub fn appTick(
                     sprite.objects.free(sprite_id);
 
                     // Play a sound effect when a sprite disappears.
-                    const samples = try app.allocator.alignedAlloc(
-                        f32,
-                        std.mem.Alignment.fromByteUnits(mach.Audio.alignment),
-                        app.sfx.samples.len,
-                    );
+                    const samples = try audio.allocSamples(app.sfx.samples.len);
                     @memcpy(samples, app.sfx.samples);
                     audio.buffers.lock();
                     defer audio.buffers.unlock();

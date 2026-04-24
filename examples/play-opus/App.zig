@@ -25,6 +25,7 @@ pub const mach_module = .app;
 pub const mach_systems = .{
     .main,
     .init,
+    .appTick,
     .tick,
     .render,
     .deinit,
@@ -122,11 +123,18 @@ pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
             // Repeat background music forever
             audio.buffers.set(buf_id, .index, 0);
             audio.buffers.set(buf_id, .playing, true);
-        } else audio.buffers.free(buf_id);
+        } else audio.buffers.delete(buf_id);
     }
 }
 
-pub fn tick(
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Audio, .cleanup },
+    .{ mach.Core, .snapshotStart },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(
     core: *mach.Core,
     audio: *mach.Audio,
     app: *App,

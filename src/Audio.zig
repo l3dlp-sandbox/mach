@@ -10,7 +10,7 @@ const Audio = @This();
 
 pub const mach_module = .mach_audio;
 
-pub const mach_systems = .{ .init, .tick, .deinit };
+pub const mach_systems = .{ .init, .tick, .cleanup, .deinit };
 
 /// The length of a @Vector(len, f32) used for SIMD mixing of audio buffers. Audio buffers must be
 /// aligned to simd_vector_length * @sizeOf(f32).
@@ -196,6 +196,26 @@ pub fn init(audio: *Audio, audio_mod: mach.Mod(Audio), io: std.Io) !void {
     };
 
     try player.start();
+}
+
+/// Allocates a sample buffer with the correct alignment for use with audio buffers.
+/// The returned memory will be freed by `cleanup` when the buffer is deleted.
+pub fn allocSamples(audio: *Audio, len: usize) ![]align(alignment) f32 {
+    return audio.allocator.alignedAlloc(f32, .fromByteUnits(alignment), len);
+}
+
+/// Cleans up audio buffers that have been marked for deletion via `delete()`.
+/// Frees the sample memory and releases the buffer object.
+pub fn cleanup(audio: *Audio) void {
+    audio.buffers.lock();
+    defer audio.buffers.unlock();
+
+    var deleted = audio.buffers.sliceDeleted();
+    while (deleted.next()) |buf_id| {
+        const samples = audio.buffers.get(buf_id, .samples);
+        audio.buffers.free(buf_id);
+        audio.allocator.free(samples);
+    }
 }
 
 pub fn deinit(audio: *Audio) void {
