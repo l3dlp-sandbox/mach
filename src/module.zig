@@ -333,6 +333,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// readable until someone, usually the owning module that knows how to cleanup its
         /// resources, invokes `free()` on it.
         ///
+        /// Deletion is cascaded to all descendants in the object graph, marking them as deleted too
+        ///
         /// Use `isDeleted()` to check if an object has been deleted but not yet freed, or
         /// `sliceDeleted()` to iterate all deleted objects from the set.
         ///
@@ -342,9 +344,15 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             if (options.require_free) @compileError("delete() cannot be used when require_free is set; use free() instead");
             const unpacked = objs.validateAndUnpack(id, "delete");
             objs.internal.pending_delete.set(unpacked.index);
+
+            // Enqueue the cascaded delete to all descendants in the graph.
+            // TODO(object): better error handling here
+            objs.internal.graph.cascadeDelete(objs.internal.allocator, id) catch {};
         }
 
         /// Immediately removes an object from the pool, freeing its slot for reuse.
+        ///
+        /// Freeing an object also removes its parent object in the graph, if any.
         ///
         /// In order to free an object, you must know how to release its resources - including graph
         /// resources. If `require_free = true`, then an object is declared as requiring manual
@@ -367,6 +375,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             freed.set(unpacked.index);
             objs.internal.pending_delete.unset(unpacked.index);
+
+            // Enqueue our parents' removal from the graph
+            objs.internal.graph.removeParent(objs.internal.allocator, id) catch {};
+
             if (mach.is_debug) {
                 const undef: StorageT = undefined;
                 data.set(unpacked.index, undef);
@@ -378,6 +390,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// Used by modules to find objects that need to cleanup resources on objects before
         /// ultimately calling free() on each object.
         pub fn sliceDeleted(objs: *@This()) SliceDeleted {
+            // Sync any cascaded deletions that may have occurred prior to this so our
+            // pending_delete bits are up to date.
+            objs.internal.graph.sync(objs.internal.allocator) catch {};
+
             return .{ .index = 0, .objs = objs };
         }
 
@@ -412,11 +428,20 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// undefined behavior in production builds, and a safety-check panic in debug builds.
         pub fn isDeleted(objs: *const @This(), id: ObjectID) bool {
             const unpacked = objs.validateAndUnpack(id, "isDeleted");
+
+            // Sync any cascaded deletions that may have occurred prior to this so our
+            // pending_delete bits are up to date.
+            objs.internal.graph.sync(objs.internal.allocator) catch {};
+
             return objs.internal.pending_delete.isSet(unpacked.index);
         }
 
         /// Returns the number of objects currently marked for deferred deletion.
         pub fn numDeleted(objs: *const @This()) u32 {
+            // Sync any cascaded deletions that may have occurred prior to this so our
+            // pending_delete bits are up to date.
+            objs.internal.graph.sync(objs.internal.allocator) catch {};
+
             return @intCast(objs.internal.pending_delete.count());
         }
 
@@ -469,6 +494,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// Returns an iterator over all live objects. Excludes any objects which have been freed
         /// or marked for deletion.
         pub fn slice(objs: *@This()) Slice {
+            // Sync any cascaded deletions that may have occurred prior to this so our
+            // pending_delete bits are up to date.
+            objs.internal.graph.sync(objs.internal.allocator) catch {};
+
             return Slice{
                 .index = 0,
                 .objs = objs,
@@ -609,7 +638,8 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         ///
         /// src.graph is not copied, and dst.graph is not modified. Tags are copied. Note that
         /// tags and the graph store object IDs, effectively array indices, not object pointers
-        /// or values.
+        /// or values. The pending_delete bitset is copied (which objects are deleted but not freed)
+        /// but is not registered with src.graph or dst.graph for future cascading deletes.
         ///
         /// The copy is optimized for speed rather than memory efficiency, operating under the
         /// assumption that the objects to be copied may be frequently copied from src to dst.
@@ -645,7 +675,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
                 @memcpy(dst.internal.freed.masks[0..freed_masks], src.internal.freed.masks[0..freed_masks]);
             }
 
-            // copy pending_delete
+            // Sync any cascaded deletions that may have occurred prior to this so our
+            // pending_delete bits are up to date.
+            src.internal.graph.sync(src.internal.allocator) catch {};
+
             try dst.internal.pending_delete.resize(allocator, src.internal.pending_delete.bit_length, false);
             const pd_masks = (src.internal.pending_delete.bit_length + @bitSizeOf(MaskInt) - 1) / @bitSizeOf(MaskInt);
             if (pd_masks > 0) {
@@ -867,6 +900,15 @@ pub fn Modules(module_lists: anytype) type {
                     }
                 }
                 @field(m.mods, field.name) = mod;
+
+                // Register each Objects pool's pending_delete bitset and mutex with the graph
+                // so that delete() can cascade across pools via cascadeDelete().
+                inline for (mod_fields) |mod_field| {
+                    if (@typeInfo(mod_field.type) == .@"struct" and @hasDecl(mod_field.type, "IsMachObjects")) {
+                        const objs = &@field(@field(m.mods, field.name), mod_field.name);
+                        try m.graph.registerDeletePool(allocator, objs.internal.type_id, &objs.internal.pending_delete, &objs.internal.mu);
+                    }
+                }
             }
         }
 

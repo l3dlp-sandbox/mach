@@ -81,6 +81,13 @@ const Op = union(enum) {
     /// Remove the parent of a child node. no-op if no parent.
     remove_parent: struct { child_id: u64 },
 
+    /// Mark all descendants of the given node as .pending_delete in their respective Objects lists.
+    cascade_delete: struct { id: u64 },
+
+    /// Signals when all prior operations have been processed. Used by sync() to wait for pending
+    /// writes.
+    sync: struct { done: *std.atomic.Value(bool) },
+
     /// Query the children of the given node
     get_children: struct {
         node_id: u64,
@@ -110,6 +117,18 @@ const Op = union(enum) {
 /// The graph uses lock-free pools to manage all nodes internally, eliminating runtime allocations
 /// during operation processing.
 pub const Graph = struct {
+    /// Mirrors module.zig's PackedID layout for decoding ObjectIDs.
+    const PackedID = packed struct(u64) {
+        type_id: u16,
+        generation: u16,
+        index: u32,
+    };
+
+    const PoolDeleteInfo = struct {
+        bitset: *std.bit_set.DynamicBitSetUnmanaged,
+        mu: *std.Io.Mutex,
+    };
+
     /// Queue of read/write/mutation operations to the graph.
     queue: Queue(Op),
 
@@ -129,6 +148,10 @@ pub const Graph = struct {
         available: std.ArrayListUnmanaged(*std.ArrayListUnmanaged(u64)) = .empty,
         lock: std.Io.Mutex = .init,
     } = .{},
+
+    /// Registry of pending_delete bitsets and mutexes from each Objects pool, indexed by
+    /// type_id.
+    pending_delete_pools: std.ArrayList(PoolDeleteInfo) = .empty,
 
     preallocate_result_list_size: u32,
 
@@ -224,6 +247,38 @@ pub const Graph = struct {
         return node.first_child != null;
     }
 
+    /// Register an Objects's .pending_delete bitset and mutex so that cascadeDelete() can set bits
+    /// across different pools when cascading a delete.
+    ///
+    /// The type_id must equal the current length of the list (i.e. type_ids must be registered in
+    /// order).
+    pub fn registerDeletePool(graph: *Graph, allocator: std.mem.Allocator, type_id: u16, bitset: *std.bit_set.DynamicBitSetUnmanaged, mu: *std.Io.Mutex) !void {
+        std.debug.assert(type_id == graph.pending_delete_pools.items.len);
+        try graph.pending_delete_pools.append(allocator, .{ .bitset = bitset, .mu = mu });
+    }
+
+    /// Enqueues an operation to mark all descendants of the given object as .pending_delete
+    /// in their respective Objects pool.
+    ///
+    /// Processed asynchronously by the graph's background thread, use sync() to observe completion.
+    pub fn cascadeDelete(graph: *Graph, allocator: std.mem.Allocator, id: u64) Error!void {
+        try graph.queue.push(allocator, .{ .cascade_delete = .{ .id = id } });
+    }
+
+    fn doCascadeDelete(graph: *Graph, node: *Node) void {
+        var child = node.first_child;
+        while (child) |c| : (child = c.next) {
+            const unpacked: PackedID = @bitCast(c.id);
+            if (unpacked.type_id < graph.pending_delete_pools.items.len) {
+                const pool = &graph.pending_delete_pools.items[unpacked.type_id];
+                pool.mu.lockUncancelable(graph.io);
+                pool.bitset.set(unpacked.index);
+                pool.mu.unlock(graph.io);
+            }
+            graph.doCascadeDelete(c);
+        }
+    }
+
     /// The thread that runs continuously in the background to process queue submissions.
     fn processThread(graph: *Graph, allocator: std.mem.Allocator) void {
         while (!graph.should_stop.load(.acquire)) {
@@ -291,6 +346,15 @@ pub const Graph = struct {
                     graph.cleanupIsolatedNode(parent);
                     graph.cleanupIsolatedNode(child);
                 }
+            },
+
+            .cascade_delete => |data| {
+                const node = graph.getNode(data.id) orelse return;
+                graph.doCascadeDelete(node);
+            },
+
+            .sync => |data| {
+                data.done.store(true, .release);
             },
 
             .get_children => |query| {
@@ -368,6 +432,16 @@ pub const Graph = struct {
             .child_id = child_id,
             .parent_id = parent_id,
         } });
+    }
+
+    /// Waits for all prior operations enqueued by this thread to be processed by the background
+    /// thread.
+    pub fn sync(graph: *Graph, allocator: std.mem.Allocator) Error!void {
+        var done = std.atomic.Value(bool).init(false);
+        try graph.queue.push(allocator, .{ .sync = .{ .done = &done } });
+        while (!done.load(.acquire)) {
+            std.Thread.yield() catch {};
+        }
     }
 
     pub fn removeParent(graph: *Graph, allocator: std.mem.Allocator, child_id: u64) Error!void {
