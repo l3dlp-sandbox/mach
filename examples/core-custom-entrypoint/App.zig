@@ -21,9 +21,9 @@ pub const mach_systems = .{
     .render,
 };
 
-title_timer: mach.time.Timer,
 pipeline: ?*gpu.RenderPipeline = null,
 app_thread: mach.Thread,
+window: mach.ObjectID,
 
 pub const main = mach.schedule(.{
     .{ mach.Core, .init },
@@ -41,23 +41,19 @@ pub fn init(
     core: *mach.Core,
     app_mod: mach.Mod(App),
     core_mod: mach.Mod(mach.Core),
-    io: std.Io,
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    _ = try core.windows.new(.{
+    const window = try core.windows.new(.{
         .title = "core-custom-entrypoint",
         .on_render = app_mod.id.render,
     });
 
     // Store our render pipeline in our module's state, so we can access it later on.
     app.* = .{
-        .title_timer = mach.time.Timer.start(io),
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
+        .window = window,
     };
-
-    // TODO(object): window-title
-    // try updateWindowTitle(core);
 }
 
 pub const tick = mach.schedule(.{
@@ -156,23 +152,7 @@ pub fn render(core: *mach.Core, app: *App) !void {
     defer command.release();
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
 
-    // update the window title every second
-    if (app.title_timer.read() >= 1.0) {
-        app.title_timer.reset();
-        // TODO(object): window-title
-        // try updateWindowTitle(core);
-    }
+    try core.fmtTitle(app.window, "core-custom-entrypoint [ {d}fps ] [ Input {d}hz ]", .{
+        core.frame.rate, core.input.rate,
+    });
 }
-
-// TODO(object): window-title
-// fn updateWindowTitle(core: *mach.Core) !void {
-//     try core.printTitle(
-//         core.main_window,
-//         "core-custom-entrypoint [ {d}fps ] [ Input {d}hz ]",
-//         .{
-//             core.frameRate(),
-//             core.inputRate(),
-//         },
-//     );
-//     core.schedule(.update);
-// }

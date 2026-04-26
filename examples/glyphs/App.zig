@@ -58,10 +58,8 @@ allocator: std.mem.Allocator,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
-fps_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
 
-frame_count: usize = 0,
 sprites: usize = 0,
 anim_time: f32 = 0,
 direction: Vec2 = vec2(0, 0),
@@ -104,7 +102,6 @@ pub fn init(
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
-        .fps_timer = mach.time.Timer.start(io),
         .rand = std.Random.DefaultPrng.init(1337),
     };
 }
@@ -386,18 +383,9 @@ pub fn render(
     command.release();
     render_pass.release();
 
-    app.frame_count += 1;
-
-    // TODO(object): window-title
-    // // Every second, update the window title with the FPS
-    // if (app.fps_timer.read() >= 1.0) {
-    //     try core.printTitle(
-    //         core.main_window,
-    //         "glyphs [ FPS: {d} ] [ Sprites: {d} ]",
-    //         .{ app.frame_count, app.sprites },
-    //     );
-    //     core.schedule(.update);
-    //     app.fps_timer.reset();
-    //     app.frame_count = 0;
-    // }
+    try core.fmtTitle(
+        app.window,
+        "glyphs [ {d}fps ] [ Input {d}hz ] [ Sprites: {d} ]",
+        .{ core.frame.rate, core.input.rate, app.sprites },
+    );
 }

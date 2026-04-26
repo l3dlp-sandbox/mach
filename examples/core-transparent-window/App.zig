@@ -29,7 +29,6 @@ pub const main = mach.schedule(.{
 
 app_thread: mach.Thread,
 window: mach.ObjectID,
-title_timer: mach.time.Timer,
 color_timer: mach.time.Timer,
 color_time: f32 = 0.0,
 flip: bool = false,
@@ -55,7 +54,6 @@ pub fn init(
     app.* = .{
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .window = window,
-        .title_timer = mach.time.Timer.start(io),
         .color_timer = mach.time.Timer.start(io),
     };
 }
@@ -96,9 +94,6 @@ fn setupPipeline(core: *mach.Core, app: *App) !void {
     };
     app.pipeline = window.device.createRenderPipeline(&pipeline_descriptor);
 }
-
-// TODO(object): window-title
-// try updateWindowTitle(core);
 
 pub const tick = mach.schedule(.{
     .{ App, .appTick },
@@ -200,12 +195,9 @@ pub fn render(app: *App, core: *mach.Core) !void {
     defer command.release();
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
 
-    if (app.title_timer.read() >= 1.0) {
-        app.title_timer.reset();
-        // TODO(object): window-title
-
-        core.windows.set(app.window, .title, std.fmt.allocPrintSentinel(core.allocator, "core-transparent-window [ {d}fps ] [ Input {d}hz ]", .{ core.frame.rate, core.input.rate }, 0) catch unreachable);
-    }
+    try core.fmtTitle(app.window, "core-transparent-window [ {d}fps ] [ Input {d}hz ]", .{
+        core.frame.rate, core.input.rate,
+    });
 }
 
 pub fn deinit(app: *App) void {

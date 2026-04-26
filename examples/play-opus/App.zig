@@ -51,6 +51,7 @@ pub const deinit = mach.schedule(.{
 });
 
 app_thread: mach.Thread,
+window: mach.ObjectID,
 
 sfx: mach.Audio.Opus,
 
@@ -66,7 +67,7 @@ pub fn init(
 
     core.on_exit = app_mod.id.deinit;
 
-    _ = try core.windows.new(.{
+    const window = try core.windows.new(.{
         .title = "play-opus",
         .on_render = app_mod.id.render,
     });
@@ -81,7 +82,11 @@ pub fn init(
     const sfx = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.sfx.sword1 });
 
     // Initialize module state
-    app.* = .{ .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app), .sfx = sfx };
+    app.* = .{
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
+        .window = window,
+        .sfx = sfx,
+    };
 
     {
         audio.buffers.lock();
@@ -185,6 +190,10 @@ pub fn appTick(
             else => {},
         }
     }
+
+    try core.fmtTitle(app.window, "play-opus [ {d}fps ] [ Input {d}hz ]", .{
+        core.frame.rate, core.input.rate,
+    });
 }
 
 pub fn render(

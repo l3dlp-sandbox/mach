@@ -33,6 +33,7 @@ pub const mach_systems = .{
 app_thread: mach.Thread,
 tick_timer: mach.time.Timer,
 player: mach.ObjectID,
+window: mach.ObjectID,
 direction: Vec2 = vec2(0, 0),
 spawning: bool = false,
 spawn_timer: mach.time.Timer,
@@ -63,7 +64,7 @@ pub fn init(
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    _ = try core.windows.new(.{
+    const window = try core.windows.new(.{
         .title = "custom renderer",
         .on_render = app_mod.id.render,
     });
@@ -79,6 +80,7 @@ pub fn init(
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
         .player = player,
+        .window = window,
     };
 }
 
@@ -203,6 +205,10 @@ pub fn appTick(
         // Try to move towards the center of the world if we don't need to avoid something else
         child.position = new_position.lerp(&vec3(0, 0, 0), move_speed / avoidance_div);
     }
+
+    try core.fmtTitle(app.window, "custom-renderer [ {d}fps ] [ Input {d}hz ]", .{
+        core.frame.rate, core.input.rate,
+    });
 }
 
 pub fn render(

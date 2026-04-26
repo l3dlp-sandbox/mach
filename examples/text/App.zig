@@ -45,10 +45,8 @@ app_thread: mach.Thread,
 window: mach.ObjectID,
 tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
-fps_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
 
-frame_count: usize = 0,
 anim_time: f32 = 0,
 direction: Vec2 = vec2(0, 0),
 spawning: bool = false,
@@ -85,7 +83,6 @@ pub fn init(
         .window = window,
         .tick_timer = mach.time.Timer.start(io),
         .spawn_timer = mach.time.Timer.start(io),
-        .fps_timer = mach.time.Timer.start(io),
         .rand = std.Random.DefaultPrng.init(1337),
     };
 }
@@ -269,21 +266,11 @@ pub fn render(
     command.release();
     render_pass.release();
 
-    app.frame_count += 1;
-
-    // TODO(object): window-title
-    // // Every second, update the window title with the FPS
-    // if (app.fps_timer.read() >= 1.0) {
-    //     const pipeline = text.pipelines.getValue(app.pipeline_id);
-    //     try core.printTitle(
-    //         core.main_window,
-    //         "text [ FPS: {d} ] [ Texts: {d} ] [ Segments: {d} ] [ Styles: {d} ]",
-    //         .{ app.frame_count, pipeline.num_texts, pipeline.num_segments, pipeline.num_styles },
-    //     );
-    //     core.schedule(.update);
-    //     app.fps_timer.reset();
-    //     app.frame_count = 0;
-    // }
+    try core.fmtTitle(
+        app.window,
+        "text [ {d}fps ] [ Input {d}hz ]",
+        .{ core.frame.rate, core.input.rate },
+    );
 }
 
 pub fn deinit(

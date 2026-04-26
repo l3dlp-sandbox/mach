@@ -62,6 +62,7 @@ play_after: mach.Objects(.{}, struct {
 
 app_thread: mach.Thread,
 allocator: std.mem.Allocator,
+window: mach.ObjectID,
 ghost_key_mode: bool = false,
 
 pub fn init(
@@ -73,7 +74,7 @@ pub fn init(
 ) !void {
     core.on_exit = app_mod.id.deinit;
 
-    _ = try core.windows.new(.{
+    const window = try core.windows.new(.{
         .title = "piano",
         .on_render = app_mod.id.render,
     });
@@ -88,6 +89,7 @@ pub fn init(
     app.* = .{
         .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
         .allocator = allocator,
+        .window = window,
         .play_after = app.play_after,
     };
 
@@ -193,6 +195,10 @@ pub fn appTick(
             else => {},
         }
     }
+
+    try core.fmtTitle(app.window, "piano [ {d}fps ] [ Input {d}hz ]", .{
+        core.frame.rate, core.input.rate,
+    });
 }
 
 pub fn render(

@@ -339,6 +339,12 @@ pub fn appTick(
                     .{ window_num, core.frame.rate, core.input.rate, num_spawned, window_count, @tagName(vsync_mode) },
                 },
             });
+
+            try core.fmtTitle(
+                window_id,
+                "hardware-check window {d} [ {d}fps ] [ Input {d}hz ] [ Sprites: {d} ]",
+                .{ window_num, core.frame.rate, core.input.rate, num_spawned },
+            );
         }
     }
 
