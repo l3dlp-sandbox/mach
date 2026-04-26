@@ -22,6 +22,11 @@ pub const Modules = mach.Modules(.{
 
 pub const mach_module = .app;
 
+pub const mach_tags = .{
+    // A tag we'll attach to mach.Audio buffers to indicate they are background music
+    .bgm,
+};
+
 pub const mach_systems = .{
     .main,
     .init,
@@ -46,9 +51,6 @@ pub const deinit = mach.schedule(.{
 });
 
 app_thread: mach.Thread,
-/// Tag object we set as a child of mach.Audio objects to indicate they are background music.
-// TODO(object): consider adding a better object 'tagging' system?
-bgm: mach.Objects(.{}, struct {}),
 
 sfx: mach.Audio.Opus,
 
@@ -80,19 +82,19 @@ pub fn init(
     const sfx = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.sfx.sword1 });
 
     // Initialize module state
-    app.* = .{ .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app), .sfx = sfx, .bgm = app.bgm };
+    app.* = .{ .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app), .sfx = sfx };
 
-    const bgm_buffer = blk: {
+    {
         audio.buffers.lock();
         defer audio.buffers.unlock();
 
-        break :blk try audio.buffers.new(.{
+        const bgm_buffer = try audio.buffers.new(.{
             .samples = bgm.samples,
             .channels = bgm.channels,
         });
-    };
-    const bgm_obj = try app.bgm.new(.{});
-    try app.bgm.setParent(bgm_obj, bgm_buffer);
+        // Tag the buffer as background music
+        try audio.buffers.setTag(bgm_buffer, App, .bgm, null);
+    }
 
     std.debug.print("controls:\n", .{});
     std.debug.print("[typing]     Play SFX\n", .{});
@@ -106,20 +108,16 @@ pub fn deinitApp(app: *App) void {
 
 /// Called on the high-priority audio OS thread when the audio driver needs more audio samples, so
 /// this callback should be fast to respond.
-pub fn audioStateChange(audio: *mach.Audio, app: *App) !void {
+pub fn audioStateChange(audio: *mach.Audio) !void {
     audio.buffers.lock();
     defer audio.buffers.unlock();
-
-    app.bgm.lock();
-    defer app.bgm.unlock();
 
     // Find audio objects that are no longer playing
     var buffers = audio.buffers.slice();
     while (buffers.next()) |buf_id| {
         if (audio.buffers.get(buf_id, .playing)) continue;
 
-        // If the buffer has a bgm object as a child, then we consider it background music
-        if (try app.bgm.getFirstChildOfType(buf_id)) |_| {
+        if (audio.buffers.hasTag(buf_id, App, .bgm)) {
             // Repeat background music forever
             audio.buffers.set(buf_id, .index, 0);
             audio.buffers.set(buf_id, .playing, true);

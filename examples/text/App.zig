@@ -106,7 +106,7 @@ fn setupPipeline(
         .font_size = 48 * gfx.px_per_pt, // 48pt
     });
 
-    // Create our player text
+    // Create our player text.
     app.player_id = try text.createFmt(Mat4x4.translate(vec3(-0.02, 0, 0)), .{
         .{
             app.style1_id,
@@ -116,8 +116,10 @@ fn setupPipeline(
             .{},
         },
     });
-    // Attach the text object to our text rendering pipeline.
-    try text.pipelines.setParent(app.player_id, app.pipeline_id.?);
+    // Register the text object with our text rendering pipeline.
+    var texts = text.pipelines.get(app.pipeline_id.?, .render_list);
+    try texts.append(std.heap.c_allocator, app.player_id);
+    text.pipelines.set(app.pipeline_id.?, .render_list, texts);
 }
 
 pub const tick = mach.schedule(.{
@@ -185,7 +187,10 @@ pub fn appTick(
                 Mat4x4.scaleScalar(upscale).mul(&Mat4x4.translate(new_pos)),
                 .{.{ app.style1_id, "?!", .{} }},
             );
-            try text.pipelines.setParent(new_text_id, pipeline_id);
+            // Register the text object with our text rendering pipeline.
+            var texts = text.pipelines.get(pipeline_id, .render_list);
+            try texts.append(std.heap.c_allocator, new_text_id);
+            text.pipelines.set(pipeline_id, .render_list, texts);
         }
     }
 
@@ -193,9 +198,8 @@ pub fn appTick(
     const delta_time = app.tick_timer.lap();
 
     // Rotate all text objects in the pipeline.
-    var pipeline_children = try text.pipelines.getChildren(pipeline_id);
-    defer pipeline_children.deinit();
-    for (pipeline_children.items) |text_id| {
+    const pipeline_texts = text.pipelines.get(pipeline_id, .render_list);
+    for (pipeline_texts.items) |text_id| {
         if (!text.objects.is(text_id)) continue;
         if (text_id == player_id) continue; // don't rotate the player
         var s = text.objects.getValue(text_id);

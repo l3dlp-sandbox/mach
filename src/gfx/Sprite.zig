@@ -73,7 +73,7 @@ const Objects = mach.Objects(.{ .track_fields = true }, struct {
     size: Vec2,
 });
 
-/// A sprite pipeline renders all sprites that are parented to it.
+/// A sprite pipeline renders all sprites in its `.render_list`
 const Pipelines = mach.Objects(.{ .track_fields = true }, struct {
     /// Which window (device/queue) to use. If not set, this pipeline will not be rendered.
     window: ?mach.ObjectID = null,
@@ -152,6 +152,17 @@ const Pipelines = mach.Objects(.{ .track_fields = true }, struct {
     /// Read-only, updated as part of Sprite.snapshot
     num_sprites: u32 = 0,
 
+    /// The sprites this pipeline will render. Add to it to render a sprite:
+    ///
+    /// ```
+    /// var render_list = sprite.pipelines.get(pipeline_id, .render_list);
+    /// try render_list.append(allocator, sprite_id);
+    /// sprite.pipelines.set(pipeline_id, .render_list, render_list);
+    /// ```
+    ///
+    /// Sprites are removed from this list automatically when they are deleted (via Sprite.cleanup).
+    render_list: std.ArrayList(mach.ObjectID) = .empty,
+
     /// Internal pipeline state.
     built_index: ?u32 = null,
 });
@@ -166,10 +177,15 @@ render_objects: Objects,
 render_pipelines: Pipelines,
 built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
 
+// Per-pipeline render-side `.render_list` storage, indexed by `built_index` (parallel to
+// `built_pipelines`). Owned by us across frames so the allocated capacity can be reused rather
+// than freed and re-allocated on each `copyFrom`.
+cached_render_lists: std.ArrayList(std.ArrayList(mach.ObjectID)) = .empty,
+
 // Temporary buffers used during updatePipelineBuffers, retained to avoid re-allocation.
-cp_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
-cp_uv_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
-cp_sizes: std.ArrayListUnmanaged(gpu.Vec2) = .empty,
+cp_transforms: std.ArrayList(gpu.Mat4x4) = .empty,
+cp_uv_transforms: std.ArrayList(gpu.Mat4x4) = .empty,
+cp_sizes: std.ArrayList(gpu.Vec2) = .empty,
 
 pub fn init(sprite: *Sprite) !void {
     // TODO(allocator): find a better way to get an allocator here
@@ -185,7 +201,25 @@ pub fn init(sprite: *Sprite) !void {
 }
 
 /// Cleans up sprite objects that have been marked for deletion via `delete()`.
+///
+/// Each deleted sprite is removed from any pipeline's `.render_list` it appears in.
 pub fn cleanup(sprite: *Sprite) void {
+    // Fast path: no deletions, no work.
+    if (sprite.objects.numDeleted() == 0) return;
+
+    // Remove deleted sprite IDs from every pipeline's render_list.
+    var pipeline_ids = sprite.pipelines.slice();
+    while (pipeline_ids.next()) |pipeline_id| {
+        var render_list = sprite.pipelines.get(pipeline_id, .render_list);
+        var i: usize = render_list.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (sprite.objects.isDeleted(render_list.items[i])) _ = render_list.swapRemove(i);
+        }
+        sprite.pipelines.setRaw(pipeline_id, .render_list, render_list);
+    }
+
+    // Now free the deleted sprite slots.
     var deleted = sprite.objects.sliceDeleted();
     while (deleted.next()) |sprite_id| {
         sprite.objects.free(sprite_id);
@@ -206,16 +240,19 @@ pub fn snapshot(sprite: *Sprite, core: *mach.Core) !void {
                 }
                 break :blk false;
             };
+            const built_idx = sprite.render_pipelines.get(render_pid, .built_index).?;
             if (alive) {
                 // The app pipeline is still alive, so update it with stats from the last .render.
                 sprite.pipelines.setRaw(render_pid, .num_sprites, sprite.render_pipelines.get(render_pid, .num_sprites));
+
+                // Clear our cached render_list for re-use after copyFrom; capacity is retained.
+                sprite.cached_render_lists.items[built_idx].clearRetainingCapacity();
             } else {
                 // The app wants to delete the pipeline, so deinit it.
-                const pipeline = sprite.render_pipelines.getValue(render_pid);
-                if (pipeline.built_index) |built_idx| {
-                    if (sprite.built_pipelines.items[built_idx]) |*b| b.deinit();
-                    sprite.built_pipelines.items[built_idx] = null;
-                }
+                sprite.cached_render_lists.items[built_idx].deinit(allocator);
+                sprite.cached_render_lists.items[built_idx] = .empty;
+                if (sprite.built_pipelines.items[built_idx]) |*b| b.deinit();
+                sprite.built_pipelines.items[built_idx] = null;
             }
         }
     }
@@ -227,6 +264,7 @@ pub fn snapshot(sprite: *Sprite, core: *mach.Core) !void {
             if (sprite.pipelines.get(app_pid, .built_index) == null) {
                 const idx: u32 = @intCast(sprite.built_pipelines.items.len);
                 try sprite.built_pipelines.append(allocator, null);
+                try sprite.cached_render_lists.append(allocator, .empty);
                 sprite.pipelines.setRaw(app_pid, .built_index, idx);
             }
         }
@@ -236,8 +274,21 @@ pub fn snapshot(sprite: *Sprite, core: *mach.Core) !void {
     try sprite.render_objects.copyFrom(&sprite.objects);
     try sprite.render_pipelines.copyFrom(&sprite.pipelines);
 
-    // Point render-side graphs to the snapshotted render_graph so render-side
-    // getChildren queries use the snapshot rather than the live app graph.
+    // Deep-copy each pipeline's .render_list. copyFrom shallow-aliased the field to the app-side
+    // backing memory; re-attach our owned cached_render_lists entry (with its retained capacity)
+    // and re-fill it from the app-side items.
+    var render_pipeline_ids = sprite.render_pipelines.slice();
+    while (render_pipeline_ids.next()) |render_pipeline_id| {
+        const src = sprite.render_pipelines.get(render_pipeline_id, .render_list);
+        const built_idx = sprite.render_pipelines.get(render_pipeline_id, .built_index).?;
+        var dst = sprite.cached_render_lists.items[built_idx];
+        try dst.appendSlice(allocator, src.items);
+        sprite.cached_render_lists.items[built_idx] = dst;
+        sprite.render_pipelines.setRaw(render_pipeline_id, .render_list, dst);
+    }
+
+    // Point render-side graphs to the snapshotted render_graph so user-driven graph queries on
+    // the render side observe the snapshot rather than the live app graph.
     sprite.render_objects.internal.graph = &core.render_graph;
     sprite.render_pipelines.internal.graph = &core.render_graph;
 
@@ -273,6 +324,7 @@ pub fn render(sprite: *Sprite, core: *mach.Core) !void {
         _ = sprite.render_pipelines.updated(pipeline_id, .view_projection);
         _ = sprite.render_pipelines.updated(pipeline_id, .num_sprites);
         _ = sprite.render_pipelines.updated(pipeline_id, .built_index);
+        _ = sprite.render_pipelines.updated(pipeline_id, .render_list);
 
         // A pipeline rebuild is required if the slot hasn't been built yet, or if any
         // pipeline fields (texture, shader, blend state, etc.) have been updated.
@@ -280,20 +332,19 @@ pub fn render(sprite: *Sprite, core: *mach.Core) !void {
             sprite.render_pipelines.anyUpdated(pipeline_id);
         if (needs_rebuild) rebuildPipeline(core, sprite, pipeline_id);
 
-        // Find sprites parented to this pipeline.
-        var pipeline_children = try sprite.render_pipelines.getChildren(pipeline_id);
-        defer pipeline_children.deinit();
+        // Get sprites registered with this pipeline
+        const render_list = sprite.render_pipelines.get(pipeline_id, .render_list).items;
 
         // If the pipeline was just rebuilt, or any sprites were updated, we need to
         // upload all sprite data to the GPU storage buffers.
         const any_sprites_updated = needs_rebuild or blk: {
-            for (pipeline_children.items) |sprite_id| {
+            for (render_list) |sprite_id| {
                 if (!sprite.render_objects.is(sprite_id)) continue;
                 if (sprite.render_objects.anyUpdated(sprite_id)) break :blk true;
             }
             break :blk false;
         };
-        if (any_sprites_updated) try updatePipelineBuffers(sprite, core, pipeline_id, pipeline_children.items);
+        if (any_sprites_updated) try updatePipelineBuffers(sprite, core, pipeline_id, render_list);
 
         // Do we actually have any sprites to render?
         pipeline = sprite.render_pipelines.getValue(pipeline_id);

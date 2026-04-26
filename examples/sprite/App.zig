@@ -110,8 +110,10 @@ fn setupPipeline(
         .size = vec2(32, 32),
         .uv_transform = Mat3x3.translate(vec2(0, 0)),
     });
-    // Attach the sprite to our sprite rendering pipeline.
-    try sprite.pipelines.setParent(app.player_id, app.pipeline_id.?);
+    // Register the sprite with our sprite rendering pipeline.
+    var sprites = sprite.pipelines.get(app.pipeline_id.?, .render_list);
+    try sprites.append(app.allocator, app.player_id);
+    sprite.pipelines.set(app.pipeline_id.?, .render_list, sprites);
 }
 
 pub const tick = mach.schedule(.{
@@ -180,7 +182,10 @@ pub fn appTick(
                 .size = vec2(32, 32),
                 .uv_transform = Mat3x3.translate(vec2(0, 0)),
             });
-            try sprite.pipelines.setParent(new_sprite_id, pipeline_id);
+            // Register the sprite with our sprite rendering pipeline.
+            var sprites = sprite.pipelines.get(pipeline_id, .render_list);
+            try sprites.append(app.allocator, new_sprite_id);
+            sprite.pipelines.set(pipeline_id, .render_list, sprites);
             app.sprites += 1;
         }
     }
@@ -189,9 +194,8 @@ pub fn appTick(
     const delta_time = app.tick_timer.lap();
 
     // Rotate all sprites in the pipeline.
-    var pipeline_children = try sprite.pipelines.getChildren(pipeline_id);
-    defer pipeline_children.deinit();
-    for (pipeline_children.items) |sprite_id| {
+    const pipeline_sprites = sprite.pipelines.get(pipeline_id, .render_list);
+    for (pipeline_sprites.items) |sprite_id| {
         if (!sprite.objects.is(sprite_id)) continue;
         if (sprite_id == player_id) continue; // don't rotate the player
         var s = sprite.objects.getValue(sprite_id);

@@ -185,7 +185,10 @@ fn setupWindow(app: *App, core: *mach.Core, sprite: *gfx.Sprite, text: *gfx.Text
     const info_id = try text.createFmt(Mat4x4.translate(vec3(0, 0, 0)), .{
         .{ app.info_text_style_id, "[info]", .{} },
     });
-    try text.pipelines.setParent(info_id, text_pipeline);
+    // Register the text object with our text rendering pipeline.
+    var texts = text.pipelines.get(text_pipeline, .render_list);
+    try texts.append(app.allocator, info_id);
+    text.pipelines.set(text_pipeline, .render_list, texts);
     app.window_meta.set(window_meta_id, .info_text_id, info_id);
 }
 
@@ -362,14 +365,16 @@ pub fn appTick(
                     .size = vec2(32, 32),
                     .uv_transform = Mat3x3.translate(vec2(0, 0)),
                 });
-                try sprite.pipelines.setParent(new_sprite_id, sprite_pipeline_id);
+                // Register the sprite with our sprite rendering pipeline.
+                var sprites = sprite.pipelines.get(sprite_pipeline_id, .render_list);
+                try sprites.append(app.allocator, new_sprite_id);
+                sprite.pipelines.set(sprite_pipeline_id, .render_list, sprites);
                 app.window_meta.set(window_meta_id, .num_sprites_spawned, app.window_meta.get(window_meta_id, .num_sprites_spawned) + 1);
             }
 
             // Animate
-            var pipeline_children = try sprite.pipelines.getChildren(sprite_pipeline_id);
-            defer pipeline_children.deinit();
-            for (pipeline_children.items) |sprite_id| {
+            const pipeline_sprites = sprite.pipelines.get(sprite_pipeline_id, .render_list);
+            for (pipeline_sprites.items) |sprite_id| {
                 if (!sprite.objects.is(sprite_id)) continue;
 
                 const location = sprite.objects.getValue(sprite_id).transform.translation();
@@ -377,7 +382,6 @@ pub fn appTick(
                 const progression = std.math.clamp((location.v[0] + (@as(f32, @floatFromInt(window.height)) / 2.0)) / @as(f32, @floatFromInt(window.height)), 0, 1);
                 const scale = mach.math.lerp(2, 0, progression);
                 if (progression >= 0.6) {
-                    try sprite.pipelines.removeChild(sprite_pipeline_id, sprite_id);
                     sprite.objects.delete(sprite_id);
 
                     // Play a sound effect when a sprite disappears.

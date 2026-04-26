@@ -166,8 +166,10 @@ fn setupPipeline(
         .size = vec2(@floatFromInt(r.width), @floatFromInt(r.height)),
         .uv_transform = Mat3x3.translate(vec2(@floatFromInt(r.x), @floatFromInt(r.y))),
     });
-    // Attach the sprite to our sprite rendering pipeline.
-    try sprite.pipelines.setParent(app.player_id, app.pipeline_id.?);
+    // Register the sprite with our sprite rendering pipeline.
+    var sprites = sprite.pipelines.get(app.pipeline_id.?, .render_list);
+    try sprites.append(app.allocator, app.player_id);
+    sprite.pipelines.set(app.pipeline_id.?, .render_list, sprites);
 }
 
 fn prepareGlyphs(queue: *gpu.Queue, app: *App) !void {
@@ -292,7 +294,10 @@ pub fn appTick(
                 .size = vec2(@floatFromInt(r.width), @floatFromInt(r.height)),
                 .uv_transform = Mat3x3.translate(vec2(@floatFromInt(r.x), @floatFromInt(r.y))),
             });
-            try sprite.pipelines.setParent(new_sprite_id, pipeline_id);
+            // Register the sprite with our sprite rendering pipeline.
+            var sprites = sprite.pipelines.get(pipeline_id, .render_list);
+            try sprites.append(app.allocator, new_sprite_id);
+            sprite.pipelines.set(pipeline_id, .render_list, sprites);
             app.sprites += 1;
         }
     }
@@ -303,16 +308,14 @@ pub fn appTick(
     const window = core.windows.getValue(app.window);
 
     // Rotate all sprites in the pipeline.
-    var pipeline_children = try sprite.pipelines.getChildren(pipeline_id);
-    defer pipeline_children.deinit();
-    for (pipeline_children.items) |sprite_id| {
+    const pipeline_sprites = sprite.pipelines.get(pipeline_id, .render_list);
+    for (pipeline_sprites.items) |sprite_id| {
         if (!sprite.objects.is(sprite_id)) continue;
         if (sprite_id == player_id) continue; // don't rotate the player
         var s = sprite.objects.getValue(sprite_id);
         const location = s.transform.translation();
 
         if (location.x() < -@as(f32, @floatFromInt(window.width)) / 1.5 or location.x() > @as(f32, @floatFromInt(window.width)) / 1.5 or location.y() < -@as(f32, @floatFromInt(window.height)) / 1.5 or location.y() > @as(f32, @floatFromInt(window.height)) / 1.5) {
-            try sprite.objects.setParent(sprite_id, null);
             sprite.objects.delete(sprite_id);
             app.sprites -= 1;
             continue;

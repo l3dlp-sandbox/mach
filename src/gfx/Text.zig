@@ -55,7 +55,7 @@ const BuiltPipeline = struct {
 };
 
 const BuiltText = struct {
-    glyphs: std.ArrayListUnmanaged(Glyph),
+    glyphs: std.ArrayList(Glyph),
 };
 
 const Glyph = extern struct {
@@ -155,7 +155,7 @@ const TextObjects = mach.Objects(.{ .track_fields = true }, struct {
     built: ?BuiltText = null,
 });
 
-/// A text pipeline renders all text objects that are parented to it.
+/// A text pipeline renders all text objects in its `.render_list`
 const TextPipelines = mach.Objects(.{ .track_fields = true }, struct {
     /// Which window (device/queue) to use. If not set, this pipeline will not be rendered.
     window: ?mach.ObjectID = null,
@@ -233,12 +233,23 @@ const TextPipelines = mach.Objects(.{ .track_fields = true }, struct {
     /// Read-only, updated as part of Text.snapshot
     num_glyphs: u32 = 0,
 
+    /// The text objects this pipeline will render. Add to it to render text:
+    ///
+    /// ```
+    /// var render_list = text.pipelines.get(pipeline_id, .render_list);
+    /// try render_list.append(allocator, text_id);
+    /// text.pipelines.set(pipeline_id, .render_list, render_list);
+    /// ```
+    ///
+    /// Text objects are removed from this list automatically when they are deleted (via Text.cleanup).
+    render_list: std.ArrayList(mach.ObjectID) = .empty,
+
     /// Internal pipeline state.
     built_index: ?u32 = null,
 });
 
 allocator: std.mem.Allocator,
-glyph_update_buffer: ?std.ArrayListUnmanaged(Glyph) = null,
+glyph_update_buffer: ?std.ArrayList(Glyph) = null,
 font_once: ?gfx.Font = null,
 
 styles: Styles,
@@ -250,11 +261,16 @@ render_objects: TextObjects,
 render_pipelines: TextPipelines,
 built_pipelines: std.ArrayList(?BuiltPipeline) = .empty,
 
+// Per-pipeline render-side `.render_list` storage, indexed by `built_index` (parallel to
+// `built_pipelines`). Owned by us across frames so the allocated capacity can be reused rather
+// than freed and re-allocated on each `copyFrom`.
+cached_render_lists: std.ArrayList(std.ArrayList(mach.ObjectID)) = .empty,
+
 // Tracks render-side deep-copied segments so they can be freed next frame.
 render_segments: ?[][]Segment = null,
 
 // Temporary buffer used during updatePipelineBuffers, retained to avoid re-allocation.
-cp_transforms: std.ArrayListUnmanaged(gpu.Mat4x4) = .empty,
+cp_transforms: std.ArrayList(gpu.Mat4x4) = .empty,
 
 pub fn init(text: *Text) !void {
     // TODO(allocator): find a better way to get an allocator here
@@ -272,6 +288,9 @@ pub fn init(text: *Text) !void {
 
 /// Creates a managed text object with formatted segments. Each element of `specs` is a
 /// `.{ style, fmt, args }` tuple.
+///
+/// The caller is responsible for registering the returned text object with a pipeline by appending
+/// it to `pipeline.render_list`.
 ///
 /// Allocations are managed by the Text module and freed automatically by `cleanup()`.
 ///
@@ -388,8 +407,25 @@ fn hashValue(hasher: anytype, value: anytype) void {
 }
 
 /// Cleans up text objects that have been marked for deletion via `delete()`.
-/// Frees managed segment text, segments slice, built glyph data, and releases the object.
+///
+/// Each deleted text object is removed from any pipeline's `.render_list` it appears in.
 pub fn cleanup(text: *Text) void {
+    // Fast path: no deletions, no work.
+    if (text.objects.numDeleted() == 0) return;
+
+    // Remove deleted text IDs from every pipeline's render_list.
+    var pipeline_ids = text.pipelines.slice();
+    while (pipeline_ids.next()) |pipeline_id| {
+        var render_list = text.pipelines.get(pipeline_id, .render_list);
+        var i: usize = render_list.items.len;
+        while (i > 0) {
+            i -= 1;
+            if (text.objects.isDeleted(render_list.items[i])) _ = render_list.swapRemove(i);
+        }
+        text.pipelines.setRaw(pipeline_id, .render_list, render_list);
+    }
+
+    // Now free the deleted text slots.
     var deleted = text.objects.sliceDeleted();
     while (deleted.next()) |text_id| {
         if (text.objects.get(text_id, .managed)) |managed| {
@@ -422,18 +458,21 @@ pub fn snapshot(text: *Text, core: *mach.Core) !void {
                 }
                 break :blk false;
             };
+            const built_idx = text.render_pipelines.get(render_pid, .built_index).?;
             if (alive) {
                 // The app pipeline is still alive, so update it with stats from the last .render.
                 text.pipelines.setRaw(render_pid, .num_texts, text.render_pipelines.get(render_pid, .num_texts));
                 text.pipelines.setRaw(render_pid, .num_segments, text.render_pipelines.get(render_pid, .num_segments));
                 text.pipelines.setRaw(render_pid, .num_glyphs, text.render_pipelines.get(render_pid, .num_glyphs));
+
+                // Clear our cached render_list for re-use after copyFrom; capacity is retained.
+                text.cached_render_lists.items[built_idx].clearRetainingCapacity();
             } else {
                 // The app wants to delete the pipeline, so deinit it.
-                const pipeline = text.render_pipelines.getValue(render_pid);
-                if (pipeline.built_index) |built_idx| {
-                    if (text.built_pipelines.items[built_idx]) |*b| b.deinit(text.allocator);
-                    text.built_pipelines.items[built_idx] = null;
-                }
+                text.cached_render_lists.items[built_idx].deinit(text.allocator);
+                text.cached_render_lists.items[built_idx] = .empty;
+                if (text.built_pipelines.items[built_idx]) |*b| b.deinit(text.allocator);
+                text.built_pipelines.items[built_idx] = null;
             }
         }
     }
@@ -445,6 +484,7 @@ pub fn snapshot(text: *Text, core: *mach.Core) !void {
             if (text.pipelines.get(app_pid, .built_index) == null) {
                 const idx: u32 = @intCast(text.built_pipelines.items.len);
                 try text.built_pipelines.append(text.allocator, null);
+                try text.cached_render_lists.append(text.allocator, .empty);
                 text.pipelines.setRaw(app_pid, .built_index, idx);
             }
         }
@@ -453,6 +493,19 @@ pub fn snapshot(text: *Text, core: *mach.Core) !void {
     // Snapshot the text objects and pipelines.
     try text.render_objects.copyFrom(&text.objects);
     try text.render_pipelines.copyFrom(&text.pipelines);
+
+    // Deep-copy each pipeline's .render_list. copyFrom shallow-aliased the field to the app-side
+    // backing memory; re-attach our owned cached_render_lists entry (with its retained capacity)
+    // and re-fill it from the app-side items.
+    var render_pipeline_ids = text.render_pipelines.slice();
+    while (render_pipeline_ids.next()) |render_pipeline_id| {
+        const src = text.render_pipelines.get(render_pipeline_id, .render_list);
+        const built_idx = text.render_pipelines.get(render_pipeline_id, .built_index).?;
+        var dst = text.cached_render_lists.items[built_idx];
+        try dst.appendSlice(text.allocator, src.items);
+        text.cached_render_lists.items[built_idx] = dst;
+        text.render_pipelines.setRaw(render_pipeline_id, .render_list, dst);
+    }
 
     // Deep-copy segment text for managed text objects so the render thread has
     // its own stable copy that won't be modified by the app thread's setFmt.
@@ -537,6 +590,7 @@ pub fn render(text: *Text, core: *mach.Core) !void {
         _ = text.render_pipelines.updated(pipeline_id, .num_segments);
         _ = text.render_pipelines.updated(pipeline_id, .num_glyphs);
         _ = text.render_pipelines.updated(pipeline_id, .built_index);
+        _ = text.render_pipelines.updated(pipeline_id, .render_list);
 
         // A pipeline rebuild is required if the slot hasn't been built yet, or if any
         // pipeline fields (texture, shader, blend state, etc.) have been updated.
@@ -544,20 +598,19 @@ pub fn render(text: *Text, core: *mach.Core) !void {
             text.render_pipelines.anyUpdated(pipeline_id);
         if (needs_rebuild) try rebuildPipeline(core, text, pipeline_id);
 
-        // Find text objects parented to this pipeline.
-        var pipeline_children = try text.render_pipelines.getChildren(pipeline_id);
-        defer pipeline_children.deinit();
+        // Get text objects registered with this pipeline
+        const render_list = text.render_pipelines.get(pipeline_id, .render_list).items;
 
         // If the pipeline was just rebuilt, or any text objects were updated, we need to
         // upload all text data to the GPU storage buffers.
         const any_updated = needs_rebuild or blk: {
-            for (pipeline_children.items) |text_id| {
+            for (render_list) |text_id| {
                 if (!text.render_objects.is(text_id)) continue;
                 if (text.render_objects.peekAnyUpdated(text_id)) break :blk true;
             }
             break :blk false;
         };
-        if (any_updated) try updatePipelineBuffers(text, core, pipeline_id, pipeline_children.items);
+        if (any_updated) try updatePipelineBuffers(text, core, pipeline_id, render_list);
 
         // Do we actually have any glyphs to render?
         if (text.render_pipelines.get(pipeline_id, .num_glyphs) == 0) continue;
@@ -756,7 +809,7 @@ fn updatePipelineBuffers(
 
     var glyphs = if (text.glyph_update_buffer) |*b| b else blk: {
         // TODO(text): better default allocation size
-        const b = try std.ArrayListUnmanaged(Glyph).initCapacity(text.allocator, 256);
+        const b = try std.ArrayList(Glyph).initCapacity(text.allocator, 256);
         text.glyph_update_buffer = b;
         break :blk &text.glyph_update_buffer.?;
     };
@@ -788,7 +841,7 @@ fn updatePipelineBuffers(
         // Where we will store the built glyphs for this text entity.
         var built_text = if (t.built) |bt| bt else BuiltText{
             // TODO(text): better default allocations
-            .glyphs = try std.ArrayListUnmanaged(Glyph).initCapacity(text.allocator, 64),
+            .glyphs = try std.ArrayList(Glyph).initCapacity(text.allocator, 64),
         };
         built_text.glyphs.clearRetainingCapacity();
 
