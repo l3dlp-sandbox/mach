@@ -16,11 +16,14 @@ pub const mach_systems = .{
     .main,
     .init,
     .deinit,
+    .appTick,
+    .tick,
     .render,
 };
 
 title_timer: mach.time.Timer,
 pipeline: ?*gpu.RenderPipeline = null,
+app_thread: mach.Thread,
 
 pub const main = mach.schedule(.{
     .{ mach.Core, .init },
@@ -29,6 +32,7 @@ pub const main = mach.schedule(.{
 });
 
 pub fn deinit(app: *App) void {
+    app.app_thread.join();
     if (app.pipeline) |p| p.release();
 }
 
@@ -36,6 +40,7 @@ pub fn init(
     app: *App,
     core: *mach.Core,
     app_mod: mach.Mod(App),
+    core_mod: mach.Mod(mach.Core),
     io: std.Io,
 ) !void {
     core.on_exit = app_mod.id.deinit;
@@ -48,10 +53,28 @@ pub fn init(
     // Store our render pipeline in our module's state, so we can access it later on.
     app.* = .{
         .title_timer = mach.time.Timer.start(io),
+        .app_thread = try mach.startThread(core, app_mod.id.tick, core_mod, .app),
     };
 
     // TODO(object): window-title
     // try updateWindowTitle(core);
+}
+
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Core, .snapshotStart },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(core: *mach.Core) void {
+    // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
+    var iter = core.events(.poll);
+    while (iter.next()) |event| {
+        switch (event) {
+            .close => core.exit(),
+            else => {},
+        }
+    }
 }
 
 fn setupPipeline(core: *mach.Core, app: *App) !void {
@@ -91,18 +114,7 @@ fn setupPipeline(core: *mach.Core, app: *App) !void {
     app.pipeline = window.device.createRenderPipeline(&pipeline_descriptor);
 }
 
-/// Single-threaded example: all tick + render logic runs in on_render on the main thread.
 pub fn render(core: *mach.Core, app: *App) !void {
-    // Handle events inline (no separate app thread).
-    // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
-    var iter = core.events(.poll);
-    while (iter.next()) |event| {
-        switch (event) {
-            .close => core.exit(),
-            else => {},
-        }
-    }
-
     const pipeline = app.pipeline orelse {
         try setupPipeline(core, app);
         return;

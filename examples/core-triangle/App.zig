@@ -15,6 +15,7 @@ pub const mach_module = .app;
 pub const mach_systems = .{
     .main,
     .init,
+    .appTick,
     .tick,
     .render,
     .deinit,
@@ -91,7 +92,13 @@ fn setupPipeline(core: *mach.Core, app: *App) !void {
 // TODO(object): window-title
 // try updateWindowTitle(core);
 
-pub fn tick(core: *mach.Core) void {
+pub const tick = mach.schedule(.{
+    .{ App, .appTick },
+    .{ mach.Core, .snapshotStart },
+    .{ mach.Core, .snapshotEnd },
+});
+
+pub fn appTick(core: *mach.Core) void {
     // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
     var iter = core.events(.poll);
     while (iter.next()) |event| {
