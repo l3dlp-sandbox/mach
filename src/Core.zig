@@ -498,6 +498,8 @@ pub fn deinit(core: *Core) !void {
 }
 
 pub const EventMode = union(enum) {
+    /// Picks either `.poll` (if any window has vsync disabled) or `.adaptive` otherwise.
+    default,
     /// Never blocks.
     poll,
     /// Blocks until there is at least one event.
@@ -533,26 +535,25 @@ pub const EventIterator = struct {
     }
 };
 
-/// Suggests EventMode based on the current vsync state of all windows. If any window has vsync
-/// disabled (.none_ modes), it returns `.poll` for uncapped event handling frequency. Otherwise it
-/// returns `.adaptive` to run at a limited frequency while scaling up to meet the frequency
-/// required for timely event handling.
-pub fn suggestEventPacing(core: *@This()) EventMode {
-    core.windows.lock(); // TODO: use rlock
-    defer core.windows.unlock();
-    var windows = core.windows.slice();
-    while (windows.next()) |wid| {
-        if (core.windows.get(wid, .vsync_mode).isNone()) return .poll;
-    }
-    return .adaptive;
-}
-
 /// Returns an iterator over events using the specified mode for pacing/blocking.
 ///
 /// Events are always buffered between calls to events() so none are lost, the mode strictly
 /// controls pacing of your event handling loop itself.
 pub fn events(core: *@This(), mode_arg: EventMode) EventIterator {
-    const mode = if (mode_arg == .adaptive) EventMode{ .adaptive_frequency = .{ .min = 120 } } else mode_arg;
+    // Resolve .default and .adaptive aliases to a concrete mode.
+    const mode: EventMode = switch (mode_arg) {
+        .default => blk: {
+            core.windows.lock(); // TODO: use rlock
+            defer core.windows.unlock();
+            var windows = core.windows.slice();
+            while (windows.next()) |wid| {
+                if (core.windows.get(wid, .vsync_mode).isNone()) break :blk .poll;
+            }
+            break :blk .{ .adaptive_frequency = .{ .min = 120 } };
+        },
+        .adaptive => .{ .adaptive_frequency = .{ .min = 120 } },
+        else => mode_arg,
+    };
 
     // Set target before tick so delay_ns is computed correctly.
     switch (mode) {
@@ -594,7 +595,7 @@ pub fn events(core: *@This(), mode_arg: EventMode) EventIterator {
             }
             core.backend_events_mu.lockUncancelable(core.io);
         },
-        .adaptive => unreachable,
+        .adaptive, .default => unreachable,
     }
 
     // Reset the event now that we hold the mutex and are about to drain all events.

@@ -239,7 +239,7 @@ pub fn appTick(
 
     var direction = app.direction;
     var spawning = app.spawning;
-    var iter = core.events(core.suggestEventPacing());
+    var iter = core.events(.default);
     while (iter.next()) |event| {
         switch (event) {
             .key_press => |ev| {

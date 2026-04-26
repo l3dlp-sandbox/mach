@@ -104,7 +104,7 @@ pub const tick = mach.schedule(.{
 pub fn appTick(app: *App, core: *mach.Core) void {
     const label = @tagName(mach_module) ++ ".tick";
     _ = label;
-    var iter = core.events(core.suggestEventPacing());
+    var iter = core.events(.default);
     while (iter.next()) |event| {
         switch (event) {
             .key_repeat, .key_press => |ev| {
