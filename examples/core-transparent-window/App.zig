@@ -109,8 +109,7 @@ pub const tick = mach.schedule(.{
 pub fn appTick(app: *App, core: *mach.Core) void {
     const label = @tagName(mach_module) ++ ".tick";
     _ = label;
-    // Note: this example runs input handling on the render thread, so we use .poll instead of .adaptive here.
-    var iter = core.events(.poll);
+    var iter = core.events(core.suggestEventPacing());
     while (iter.next()) |event| {
         switch (event) {
             .key_repeat, .key_press => |ev| {
