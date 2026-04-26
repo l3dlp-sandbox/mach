@@ -131,12 +131,16 @@ const RenderLoop = struct {
 
         // The render thread may be blocked on dispatch_semaphore_wait for a vsync signal. Stop each
         // window's display link and signal its semaphore to unblock the render thread.
-        var windows = self.core.windows.slice();
-        while (windows.next()) |window_id| {
-            if (self.core.windows.get(window_id, .native)) |native| {
-                if (native.display_link_ctx) |ctx| {
-                    native.view.stopDisplayLink();
-                    _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
+        {
+            self.core.windows.lock(); // TODO: use rlock
+            defer self.core.windows.unlock();
+            var windows = self.core.windows.slice();
+            while (windows.next()) |window_id| {
+                if (self.core.windows.get(window_id, .native)) |native| {
+                    if (native.display_link_ctx) |ctx| {
+                        native.view.stopDisplayLink();
+                        _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
+                    }
                 }
             }
         }
@@ -169,6 +173,9 @@ const RenderLoop = struct {
                 var all_have_display_link = true;
                 var wait_ctx: ?*DisplayLinkContext = null;
                 {
+                    self.core.windows.lock(); // TODO: use rlock
+                    defer self.core.windows.unlock();
+
                     var windows = self.core.windows.slice();
                     while (windows.next()) |window_id| {
                         const native_opt = self.core.windows.get(window_id, .native);
@@ -201,6 +208,8 @@ const RenderLoop = struct {
 
             // Apply any pending swap chain updates (resizes, vsync changes) before rendering.
             {
+                self.core.windows.lock();
+                defer self.core.windows.unlock();
                 var windows = self.core.windows.slice();
                 while (windows.next()) |window_id| {
                     var core_window = self.core.windows.getValue(window_id);
@@ -309,6 +318,10 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 /// Called by Core.tick on the main thread each application tick. Creates new windows, applies
 /// changes (window title, size, vsync, etc.), and handles pending window destruction.
 pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
+    core.windows.lock();
+    var unlocked = false;
+    defer if (!unlocked) core.windows.unlock();
+
     // Tear down native resources for deleted windows on the main thread where AppKit calls are safe.
     var deleted_windows = core.windows.sliceDeleted();
     while (deleted_windows.next()) |window_id| {
@@ -435,6 +448,10 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         }
     }
 
+    // Release the windows lock before stopping the render loop: rl.stop() acquires it itself.
+    core.windows.unlock();
+    unlocked = true;
+
     // Consider mach.Core exiting/exited state.
     const state = core.state.load(.acquire);
     if (state == .exiting or state == .exited) {
@@ -481,7 +498,11 @@ fn initWindow(
                 const core_: *Core = block.context.core;
                 const window_id_ = block.context.window_id;
 
-                if (core_.windows.get(window_id_, .native)) |native| {
+                core_.windows.lock(); // TODO: use rlock
+                const native_opt = core_.windows.get(window_id_, .native);
+                core_.windows.unlock();
+
+                if (native_opt) |native| {
                     const native_window: *objc.app_kit.Window = native.window;
 
                     if (event.modifierFlags() & objc.app_kit.EventModifierFlagCommand != 0)
@@ -673,6 +694,10 @@ const WindowDelegateCallbacks = struct {
     pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
+
+        core.windows.lock();
+        defer core.windows.unlock();
+
         const core_window = core.windows.getValue(window_id);
 
         const native = core_window.native orelse return;
@@ -722,7 +747,10 @@ const ViewCallbacks = struct {
         const core: *Core = block.context.core;
         const window_id = block.context.window_id;
         const mouse_location = event.locationInWindow();
+
+        core.windows.lock(); // TODO: use rlock
         const window_height: f32 = @floatFromInt(core.windows.get(window_id, .height));
+        core.windows.unlock();
 
         core.pushEvent(.{ .mouse_motion = .{
             .window_id = window_id,

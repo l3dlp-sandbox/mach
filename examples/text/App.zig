@@ -266,11 +266,15 @@ pub fn render(
     command.release();
     render_pass.release();
 
-    try core.fmtTitle(
-        app.window,
-        "text [ {d}fps ] [ Input {d}hz ]",
-        .{ core.frame.rate, core.input.rate },
-    );
+    {
+        core.windows.lock();
+        defer core.windows.unlock();
+        try core.fmtTitle(
+            app.window,
+            "text [ {d}fps ] [ Input {d}hz ]",
+            .{ core.frame.rate, core.input.rate },
+        );
+    }
 }
 
 pub fn deinit(

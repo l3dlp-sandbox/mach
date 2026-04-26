@@ -147,9 +147,13 @@ pub fn render(app: *App, core: *mach.Core) !void {
     defer command.release();
     window.queue.submit(&[_]*gpu.CommandBuffer{command});
 
-    try core.fmtTitle(app.window, "core-triangle [ {d}fps ] [ Input {d}hz ]", .{
-        core.frame.rate, core.input.rate,
-    });
+    {
+        core.windows.lock();
+        defer core.windows.unlock();
+        try core.fmtTitle(app.window, "core-triangle [ {d}fps ] [ Input {d}hz ]", .{
+            core.frame.rate, core.input.rate,
+        });
+    }
 }
 
 pub fn deinit(app: *App) void {

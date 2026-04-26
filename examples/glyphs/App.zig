@@ -383,9 +383,13 @@ pub fn render(
     command.release();
     render_pass.release();
 
-    try core.fmtTitle(
-        app.window,
-        "glyphs [ {d}fps ] [ Input {d}hz ] [ Sprites: {d} ]",
-        .{ core.frame.rate, core.input.rate, app.sprites },
-    );
+    {
+        core.windows.lock();
+        defer core.windows.unlock();
+        try core.fmtTitle(
+            app.window,
+            "glyphs [ {d}fps ] [ Input {d}hz ] [ Sprites: {d} ]",
+            .{ core.frame.rate, core.input.rate, app.sprites },
+        );
+    }
 }

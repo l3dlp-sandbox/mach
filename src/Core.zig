@@ -185,6 +185,7 @@ pub fn init(core: *Core, io: std.Io) !void {
     core.input.start(io);
 }
 
+/// Caller must hold core.windows.lock
 pub fn initWindow(core: *Core, window_id: mach.ObjectID) !void {
     var core_window = core.windows.getValue(window_id);
     defer core.windows.setValueRaw(window_id, core_window);
@@ -292,17 +293,21 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         core.render_mu.lockUncancelable(io);
         defer core.render_mu.unlock(io);
 
+        core.windows.lock(); // TODO: use rlock
+        defer core.windows.unlock();
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             const core_window = core.windows.getValue(window_id);
             if (core_window.native == null) continue;
+            const on_render = core_window.on_render orelse continue;
 
             // Allow on_render to read the current window being rendered.
             core.window = window_id;
 
-            // Run on_render for the window
-            const on_render = core_window.on_render orelse continue;
+            // Run on_render for the window with the windows lock released so user code may take it.
+            core.windows.unlock();
             core_mod.run(on_render);
+            core.windows.lock();
 
             // Ensure nobody reads the window outside on_render.
             core.window = undefined;
@@ -313,6 +318,8 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // prepare the next frame during GPU submission.
     var shared_device: ?*gpu.Device = null;
     {
+        core.windows.lock(); // TODO: use rlock
+        defer core.windows.unlock();
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             const core_window = core.windows.getValue(window_id);
@@ -340,10 +347,14 @@ pub fn snapshotStart(core: *Core, io: std.Io) !void {
     // Free windows whose native resources have been torn down already by the platform backend. This
     // happens here on the app thread before the snapshot so that the render thread never sees a
     // freed window.
-    var deleted_windows = core.windows.sliceDeleted();
-    while (deleted_windows.next()) |window_id| {
-        if (core.windows.get(window_id, .native) != null) continue;
-        core.windows.free(window_id);
+    {
+        core.windows.lock();
+        defer core.windows.unlock();
+        var deleted_windows = core.windows.sliceDeleted();
+        while (deleted_windows.next()) |window_id| {
+            if (core.windows.get(window_id, .native) != null) continue;
+            core.windows.free(window_id);
+        }
     }
 
     core.render_mu.lockUncancelable(io);
@@ -365,6 +376,8 @@ pub fn snapshotEnd(core: *Core, io: std.Io) void {
 ///
 /// Example:
 /// ```
+/// core.windows.lock();
+/// defer core.windows.unlock();
 /// try core.fmtTitle(window_id, "myapp [ {d}fps ] [ Input {d}hz ]", .{
 ///     core.frame.rate, core.input.rate,
 /// });
@@ -525,6 +538,8 @@ pub const EventIterator = struct {
 /// returns `.adaptive` to run at a limited frequency while scaling up to meet the frequency
 /// required for timely event handling.
 pub fn suggestEventPacing(core: *@This()) EventMode {
+    core.windows.lock(); // TODO: use rlock
+    defer core.windows.unlock();
     var windows = core.windows.slice();
     while (windows.next()) |wid| {
         if (core.windows.get(wid, .vsync_mode).isNone()) return .poll;

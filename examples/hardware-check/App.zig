@@ -340,11 +340,15 @@ pub fn appTick(
                 },
             });
 
-            try core.fmtTitle(
-                window_id,
-                "hardware-check window {d} [ {d}fps ] [ Input {d}hz ] [ Sprites: {d} ]",
-                .{ window_num, core.frame.rate, core.input.rate, num_spawned },
-            );
+            {
+                core.windows.lock();
+                defer core.windows.unlock();
+                try core.fmtTitle(
+                    window_id,
+                    "hardware-check window {d} [ {d}fps ] [ Input {d}hz ] [ Sprites: {d} ]",
+                    .{ window_num, core.frame.rate, core.input.rate, num_spawned },
+                );
+            }
         }
     }
 

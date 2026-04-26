@@ -206,9 +206,13 @@ pub fn appTick(
         child.position = new_position.lerp(&vec3(0, 0, 0), move_speed / avoidance_div);
     }
 
-    try core.fmtTitle(app.window, "custom-renderer [ {d}fps ] [ Input {d}hz ]", .{
-        core.frame.rate, core.input.rate,
-    });
+    {
+        core.windows.lock();
+        defer core.windows.unlock();
+        try core.fmtTitle(app.window, "custom-renderer [ {d}fps ] [ Input {d}hz ]", .{
+            core.frame.rate, core.input.rate,
+        });
+    }
 }
 
 pub fn render(
