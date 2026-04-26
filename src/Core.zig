@@ -23,10 +23,19 @@ pub const mach_systems = .{
 windows: mach.Objects(
     .{ .track_fields = true },
     struct {
-        /// Window title string
-        // TODO: document how to set this using a format string
-        // TODO: allocation/free strategy
+        /// Window title string. May be a static string literal, or owned memory managed via
+        /// `core.fmtTitle(window_id, fmt, args)` (which sets `title_owned` to track ownership).
         title: [:0]const u8 = "Mach Window",
+
+        /// If non-null, a heap allocation backing `title` that Core owns and frees when a new
+        /// title is set via `fmtTitle` or when the window is destroyed. Set/managed exclusively
+        /// by `core.fmtTitle`; do not set this field directly.
+        title_owned: ?[:0]u8 = null,
+
+        /// Hash of the previous `fmtTitle` arguments. `fmtTitle` uses this to skip allocation
+        /// and `setTitle` work when the inputs haven't changed since the last call, so that calling
+        /// `fmtTitle` frequently is less expensive.
+        title_hash: u64 = 0,
 
         /// Render callback
         on_render: ?mach.FunctionID = null,
@@ -347,6 +356,57 @@ pub fn snapshotEnd(core: *Core, io: std.Io) void {
     core.frame_ready.set(io);
 }
 
+/// Sets the window title using a format string. Core owns the resulting allocation and frees it
+/// on the next `fmtTitle` call (or when the window is destroyed), so callers do not need to manage
+/// the buffer's lifetime.
+///
+/// The hashed inputs are compared against the previous call's inputs and the work is skipped when
+/// they are unchanged, so it is safe and cheap to call this every frame.
+///
+/// Example:
+/// ```
+/// try core.fmtTitle(window_id, "myapp [ {d}fps ] [ Input {d}hz ]", .{
+///     core.frame.rate, core.input.rate,
+/// });
+/// ```
+pub fn fmtTitle(
+    core: *Core,
+    window_id: mach.ObjectID,
+    comptime fmt: []const u8,
+    args: anytype,
+) std.mem.Allocator.Error!void {
+    // If the hashed inputs wouldn't actually change the title, nothing to do.
+    const hash = hashTitleArgs(fmt, args);
+    if (core.windows.get(window_id, .title_hash) == hash) return;
+
+    const new_title = try std.fmt.allocPrintSentinel(core.allocator, fmt, args, 0);
+    if (core.windows.get(window_id, .title_owned)) |prev| core.allocator.free(prev);
+    core.windows.set(window_id, .title_owned, new_title);
+    core.windows.set(window_id, .title, new_title);
+    core.windows.set(window_id, .title_hash, hash);
+}
+
+fn hashTitleArgs(comptime fmt: []const u8, args: anytype) u64 {
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(fmt);
+    inline for (args) |arg| hashValue(&hasher, arg);
+    return hasher.final();
+}
+
+fn hashValue(hasher: anytype, value: anytype) void {
+    const T = @TypeOf(value);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (ptr.size == .slice) {
+                hasher.update(std.mem.sliceAsBytes(value));
+            } else {
+                std.hash.autoHash(hasher, value);
+            }
+        },
+        else => std.hash.autoHash(hasher, value),
+    }
+}
+
 /// Core.main enters the platform's main loop, which drives rendering on the main thread.
 ///
 /// The app is responsible for running its own tick logic, either:
@@ -398,6 +458,10 @@ pub fn deinit(core: *Core) !void {
     var windows = core.windows.slice();
     while (windows.next()) |window_id| {
         var core_window = core.windows.getValue(window_id);
+
+        // Free any heap-allocated title owned by Core via fmtTitle().
+        if (core_window.title_owned) |owned| core.allocator.free(owned);
+
         if (core_window.native == null) continue;
 
         core_window.swap_chain.release();
