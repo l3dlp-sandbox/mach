@@ -67,7 +67,7 @@ pub const Instance = struct {
         _ = try vkb.enumerateInstanceLayerProperties(&count, available_layers.ptr);
 
         var layers_buf: [instance_layers.len][*:0]const u8 = undefined;
-        var layers = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&layers_buf);
+        var layers = std.ArrayList([*:0]const u8).initBuffer(&layers_buf);
         for (instance_layers) |optional| {
             for (available_layers) |available| {
                 if (std.mem.eql(
@@ -89,7 +89,7 @@ pub const Instance = struct {
         _ = try vkb.enumerateInstanceExtensionProperties(null, &count, available_extensions.ptr);
 
         var extensions_buf: [instance_extensions.len][*:0]const u8 = undefined;
-        var extensions = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&extensions_buf);
+        var extensions = std.ArrayList([*:0]const u8).initBuffer(&extensions_buf);
 
         for (instance_extensions) |required| {
             for (available_extensions) |available| {
@@ -462,8 +462,8 @@ pub const Device = struct {
     memory_allocator: MemoryAllocator,
     queue: ?Queue = null,
     streaming_manager: StreamingManager = undefined,
-    submit_objects: std.ArrayListUnmanaged(SubmitObject) = .empty,
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
+    submit_objects: std.ArrayList(SubmitObject) = .empty,
+    map_callbacks: std.ArrayList(MapCallback) = .empty,
     /// Supported Depth-Stencil formats
     supported_ds_formats: std.AutoHashMapUnmanaged(vk.Format, void),
 
@@ -516,7 +516,7 @@ pub const Device = struct {
         _ = try vki.enumerateDeviceLayerProperties(adapter.physical_device, &count, available_layers.ptr);
 
         var layers_buf: [device_layers.len][*:0]const u8 = undefined;
-        var layers = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&layers_buf);
+        var layers = std.ArrayList([*:0]const u8).initBuffer(&layers_buf);
         for (device_layers) |optional| {
             for (available_layers) |available| {
                 if (std.mem.eql(
@@ -538,7 +538,7 @@ pub const Device = struct {
         _ = try vki.enumerateDeviceExtensionProperties(adapter.physical_device, null, &count, available_extensions.ptr);
 
         var extensions_buf: [device_extensions.len][*:0]const u8 = undefined;
-        var extensions = std.ArrayListUnmanaged([*:0]const u8).initBuffer(&extensions_buf);
+        var extensions = std.ArrayList([*:0]const u8).initBuffer(&extensions_buf);
         for (device_extensions) |required| {
             for (available_extensions) |available| {
                 if (std.mem.eql(
@@ -780,11 +780,11 @@ pub const Device = struct {
         if (device.render_passes.get(key)) |render_pass| return render_pass;
 
         var attachments_buf: [8]vk.AttachmentDescription = undefined;
-        var attachments = std.ArrayListUnmanaged(vk.AttachmentDescription).initBuffer(&attachments_buf);
+        var attachments = std.ArrayList(vk.AttachmentDescription).initBuffer(&attachments_buf);
         var color_refs_buf: [8]vk.AttachmentReference = undefined;
-        var color_refs = std.ArrayListUnmanaged(vk.AttachmentReference).initBuffer(&color_refs_buf);
+        var color_refs = std.ArrayList(vk.AttachmentReference).initBuffer(&color_refs_buf);
         var resolve_refs_buf: [8]vk.AttachmentReference = undefined;
-        var resolve_refs = std.ArrayListUnmanaged(vk.AttachmentReference).initBuffer(&resolve_refs_buf);
+        var resolve_refs = std.ArrayList(vk.AttachmentReference).initBuffer(&resolve_refs_buf);
         for (key.colors_buf[0..key.colors_len]) |attach| {
             attachments.appendAssumeCapacity(.{
                 .format = attach.format,
@@ -902,7 +902,7 @@ pub const Device = struct {
 pub const SubmitObject = struct {
     device: *Device,
     fence: vk.Fence,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
+    reference_trackers: std.ArrayList(*ReferenceTracker) = .empty,
 
     pub fn init(device: *Device) !SubmitObject {
         const vk_device = device.vk_device;
@@ -932,7 +932,7 @@ pub const SubmitObject = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
+    free_buffers: std.ArrayList(*Buffer) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -1617,16 +1617,16 @@ pub const BindGroupLayout = struct {
     device: *Device,
     vk_layout: vk.DescriptorSetLayout,
     desc_types: std.AutoArrayHashMapUnmanaged(vk.DescriptorType, u32),
-    entries: std.ArrayListUnmanaged(Entry),
+    entries: std.ArrayList(Entry),
 
     pub fn init(device: *Device, desc: *const sysgpu.BindGroupLayout.Descriptor) !*BindGroupLayout {
-        var bindings = try std.ArrayListUnmanaged(vk.DescriptorSetLayoutBinding).initCapacity(allocator, desc.entry_count);
+        var bindings = try std.ArrayList(vk.DescriptorSetLayoutBinding).initCapacity(allocator, desc.entry_count);
         defer bindings.deinit(allocator);
 
         var desc_types = std.AutoArrayHashMap(vk.DescriptorType, u32).init(allocator);
         errdefer desc_types.deinit();
 
-        var entries = try std.ArrayListUnmanaged(Entry).initCapacity(allocator, desc.entry_count);
+        var entries = try std.ArrayList(Entry).initCapacity(allocator, desc.entry_count);
         errdefer entries.deinit(allocator);
 
         for (0..desc.entry_count) |entry_index| {
@@ -1700,9 +1700,9 @@ pub const BindGroup = struct {
     layout: *BindGroupLayout,
     desc_pool: vk.DescriptorPool,
     desc_set: vk.DescriptorSet,
-    buffers: std.ArrayListUnmanaged(BufferAccess),
-    texture_views: std.ArrayListUnmanaged(TextureViewAccess),
-    samplers: std.ArrayListUnmanaged(*Sampler),
+    buffers: std.ArrayList(BufferAccess),
+    texture_views: std.ArrayList(TextureViewAccess),
+    samplers: std.ArrayList(*Sampler),
 
     pub fn init(device: *Device, desc: *const sysgpu.BindGroup.Descriptor) !*BindGroup {
         const layout: *BindGroupLayout = @ptrCast(@alignCast(desc.layout));
@@ -1801,13 +1801,13 @@ pub const BindGroup = struct {
         vkd.updateDescriptorSets(device.vk_device, writes, null);
 
         // Resource tracking
-        var buffers = std.ArrayListUnmanaged(BufferAccess).empty;
+        var buffers = std.ArrayList(BufferAccess).empty;
         errdefer buffers.deinit(allocator);
 
-        var texture_views = std.ArrayListUnmanaged(TextureViewAccess).empty;
+        var texture_views = std.ArrayList(TextureViewAccess).empty;
         errdefer texture_views.deinit(allocator);
 
-        var samplers = std.ArrayListUnmanaged(*Sampler).empty;
+        var samplers = std.ArrayList(*Sampler).empty;
         errdefer samplers.deinit(allocator);
 
         for (0..desc.entry_count) |i| {
@@ -1911,7 +1911,7 @@ pub const PipelineLayout = struct {
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
         const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
         var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
-        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
+        var bind_group_layouts = std.ArrayList(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
             for (bind_group_layouts.items) |bind_group_layout| bind_group_layout.release();
         }
@@ -2056,7 +2056,7 @@ pub const RenderPipeline = struct {
         const vk_device = device.vk_device;
 
         var stages_buf: [2]vk.PipelineShaderStageCreateInfo = undefined;
-        var stages = std.ArrayListUnmanaged(vk.PipelineShaderStageCreateInfo).initBuffer(&stages_buf);
+        var stages = std.ArrayList(vk.PipelineShaderStageCreateInfo).initBuffer(&stages_buf);
 
         const vertex_module: *ShaderModule = @ptrCast(@alignCast(desc.vertex.module));
         stages.appendAssumeCapacity(.{
@@ -2354,8 +2354,8 @@ pub const CommandBuffer = struct {
     manager: utils.Manager(CommandBuffer) = .{},
     device: *Device,
     vk_command_buffer: vk.CommandBuffer,
-    wait_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .empty,
-    wait_dst_stage_masks: std.ArrayListUnmanaged(vk.PipelineStageFlags) = .empty,
+    wait_semaphores: std.ArrayList(vk.Semaphore) = .empty,
+    wait_dst_stage_masks: std.ArrayList(vk.PipelineStageFlags) = .empty,
     reference_tracker: *ReferenceTracker,
     upload_buffer: ?*Buffer = null,
     upload_map: ?[*]u8 = null,
@@ -2419,14 +2419,14 @@ pub const CommandBuffer = struct {
 pub const ReferenceTracker = struct {
     device: *Device,
     vk_command_buffer: vk.CommandBuffer,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
-    textures: std.ArrayListUnmanaged(*Texture) = .empty,
-    texture_views: std.ArrayListUnmanaged(*TextureView) = .empty,
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
-    compute_pipelines: std.ArrayListUnmanaged(*ComputePipeline) = .empty,
-    render_pipelines: std.ArrayListUnmanaged(*RenderPipeline) = .empty,
-    upload_pages: std.ArrayListUnmanaged(*Buffer) = .empty,
-    framebuffers: std.ArrayListUnmanaged(vk.Framebuffer) = .empty,
+    buffers: std.ArrayList(*Buffer) = .empty,
+    textures: std.ArrayList(*Texture) = .empty,
+    texture_views: std.ArrayList(*TextureView) = .empty,
+    bind_groups: std.ArrayList(*BindGroup) = .empty,
+    compute_pipelines: std.ArrayList(*ComputePipeline) = .empty,
+    render_pipelines: std.ArrayList(*RenderPipeline) = .empty,
+    upload_pages: std.ArrayList(*Buffer) = .empty,
+    framebuffers: std.ArrayList(vk.Framebuffer) = .empty,
 
     pub fn init(device: *Device, vk_command_buffer: vk.CommandBuffer) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);
@@ -2763,7 +2763,7 @@ pub const StateTracker = struct {
     copy_buffers: std.AutoHashMapUnmanaged(*Buffer, void) = .{},
     written_textures: std.AutoHashMapUnmanaged(*Texture, TextureState) = .{},
     copy_textures: std.AutoHashMapUnmanaged(*Texture, void) = .{},
-    image_barriers: std.ArrayListUnmanaged(vk.ImageMemoryBarrier) = .empty,
+    image_barriers: std.ArrayList(vk.ImageMemoryBarrier) = .empty,
     src_stage_mask: vk.PipelineStageFlags = .{},
     dst_stage_mask: vk.PipelineStageFlags = .{},
     src_access_mask: vk.AccessFlags = .{},
@@ -2962,7 +2962,7 @@ pub const StateTracker = struct {
             return;
 
         var memory_barriers_buf: [1]vk.MemoryBarrier = undefined;
-        var memory_barriers = std.ArrayListUnmanaged(vk.MemoryBarrier).initBuffer(&memory_barriers_buf);
+        var memory_barriers = std.ArrayList(vk.MemoryBarrier).initBuffer(&memory_barriers_buf);
         if (tracker.src_access_mask.merge(tracker.dst_access_mask).toInt() != 0) {
             memory_barriers.appendAssumeCapacity(.{
                 .src_access_mask = tracker.src_access_mask,
@@ -3467,10 +3467,10 @@ pub const Queue = struct {
     manager: utils.Manager(Queue) = .{},
     device: *Device,
     vk_queue: vk.Queue,
-    command_buffers: std.ArrayListUnmanaged(*CommandBuffer) = .empty,
-    wait_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .empty,
-    wait_dst_stage_masks: std.ArrayListUnmanaged(vk.PipelineStageFlags) = .empty,
-    signal_semaphores: std.ArrayListUnmanaged(vk.Semaphore) = .empty,
+    command_buffers: std.ArrayList(*CommandBuffer) = .empty,
+    wait_semaphores: std.ArrayList(vk.Semaphore) = .empty,
+    wait_dst_stage_masks: std.ArrayList(vk.PipelineStageFlags) = .empty,
+    signal_semaphores: std.ArrayList(vk.Semaphore) = .empty,
     command_encoder: ?*CommandEncoder = null,
 
     pub fn init(device: *Device) !Queue {
@@ -3524,7 +3524,7 @@ pub const Queue = struct {
         const vk_queue = queue.vk_queue;
 
         var submit_object = try SubmitObject.init(queue.device);
-        var vk_command_buffers = try std.ArrayListUnmanaged(vk.CommandBuffer).initCapacity(
+        var vk_command_buffers = try std.ArrayList(vk.CommandBuffer).initCapacity(
             allocator,
             queue.command_buffers.items.len,
         );

@@ -15,8 +15,8 @@ source: []const u8,
 tok_i: TokenIndex = @enumFromInt(0),
 tokens: std.MultiArrayList(Token),
 nodes: std.MultiArrayList(Node) = .empty,
-extra: std.ArrayListUnmanaged(u32) = .empty,
-scratch: std.ArrayListUnmanaged(NodeIndex) = .empty,
+extra: std.ArrayList(u32) = .empty,
+scratch: std.ArrayList(NodeIndex) = .empty,
 extensions: Extensions = .{},
 errors: *ErrorList,
 
@@ -49,7 +49,7 @@ fn parameterizeTemplates(p: *Parser) !void {
         depth: u32,
     };
     var discovered_tmpls_buf: [16]UnclosedCandidate = undefined;
-    var discovered_tmpls = std.ArrayListUnmanaged(UnclosedCandidate).initBuffer(&discovered_tmpls_buf);
+    var discovered_tmpls = std.ArrayList(UnclosedCandidate).initBuffer(&discovered_tmpls_buf);
     var depth: u32 = 0;
 
     var i: u32 = 0;

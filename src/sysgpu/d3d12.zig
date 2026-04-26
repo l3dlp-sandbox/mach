@@ -344,12 +344,12 @@ pub const Device = struct {
     dsv_heap: DescriptorHeap = undefined,
     command_manager: CommandManager = undefined,
     streaming_manager: StreamingManager = undefined,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
+    reference_trackers: std.ArrayList(*ReferenceTracker) = .empty,
     mem_allocator: MemoryAllocator = undefined,
 
     mem_allocator_textures: MemoryAllocator = undefined,
 
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
+    map_callbacks: std.ArrayList(MapCallback) = .empty,
 
     lost_cb: ?sysgpu.Device.LostCallback = null,
     lost_cb_userdata: ?*anyopaque = null,
@@ -803,7 +803,7 @@ pub const MemoryAllocator = struct {
         heap_category: HeapCategory,
         heap_properties: c.D3D12_HEAP_PROPERTIES,
 
-        heaps: std.ArrayListUnmanaged(?MemoryHeap),
+        heaps: std.ArrayList(?MemoryHeap),
 
         pub const GroupAllocation = struct {
             allocation: gpu_allocator.Allocation,
@@ -1120,7 +1120,7 @@ const DescriptorHeap = struct {
     descriptor_count: u32,
     block_size: u32,
     next_alloc: u32,
-    free_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .empty,
+    free_blocks: std.ArrayList(DescriptorAllocation) = .empty,
 
     pub fn init(
         device: *Device,
@@ -1226,8 +1226,8 @@ const DescriptorHeap = struct {
 
 const CommandManager = struct {
     device: *Device,
-    free_allocators: std.ArrayListUnmanaged(*c.ID3D12CommandAllocator) = .empty,
-    free_command_lists: std.ArrayListUnmanaged(*c.ID3D12GraphicsCommandList) = .empty,
+    free_allocators: std.ArrayList(*c.ID3D12CommandAllocator) = .empty,
+    free_command_lists: std.ArrayList(*c.ID3D12GraphicsCommandList) = .empty,
 
     pub fn init(device: *Device) CommandManager {
         return .{
@@ -1332,7 +1332,7 @@ const CommandManager = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(Resource) = .empty,
+    free_buffers: std.ArrayList(Resource) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -1431,11 +1431,11 @@ pub const SwapChain = struct {
 
         // Views
         var textures_buf: [max_back_buffer_count]*Texture = undefined;
-        var textures = std.ArrayListUnmanaged(*Texture).initBuffer(&textures_buf);
+        var textures = std.ArrayList(*Texture).initBuffer(&textures_buf);
         var views_buf: [max_back_buffer_count]*TextureView = undefined;
-        var views = std.ArrayListUnmanaged(*TextureView).initBuffer(&views_buf);
+        var views = std.ArrayList(*TextureView).initBuffer(&views_buf);
         var fence_values_buf: [max_back_buffer_count]u64 = undefined;
-        var fence_values = std.ArrayListUnmanaged(u64).initBuffer(&fence_values_buf);
+        var fence_values = std.ArrayList(u64).initBuffer(&fence_values_buf);
         errdefer {
             for (views.items) |view| view.manager.release();
             for (textures.items) |texture| texture.manager.release();
@@ -1976,18 +1976,18 @@ pub const BindGroupLayout = struct {
     };
 
     manager: utils.Manager(BindGroupLayout) = .{},
-    entries: std.ArrayListUnmanaged(Entry),
-    dynamic_entries: std.ArrayListUnmanaged(DynamicEntry),
+    entries: std.ArrayList(Entry),
+    dynamic_entries: std.ArrayList(DynamicEntry),
     general_table_size: u32,
     sampler_table_size: u32,
 
     pub fn init(device: *Device, desc: *const sysgpu.BindGroupLayout.Descriptor) !*BindGroupLayout {
         _ = device;
 
-        var entries = std.ArrayListUnmanaged(Entry).empty;
+        var entries = std.ArrayList(Entry).empty;
         errdefer entries.deinit(allocator);
 
-        var dynamic_entries = std.ArrayListUnmanaged(DynamicEntry).empty;
+        var dynamic_entries = std.ArrayList(DynamicEntry).empty;
         errdefer dynamic_entries.deinit(allocator);
 
         var general_table_size: u32 = 0;
@@ -2067,9 +2067,9 @@ pub const BindGroup = struct {
     sampler_allocation: ?DescriptorAllocation,
     sampler_table: ?c.D3D12_GPU_DESCRIPTOR_HANDLE,
     dynamic_resources: []DynamicResource,
-    buffers: std.ArrayListUnmanaged(*Buffer),
-    textures: std.ArrayListUnmanaged(*Texture),
-    accesses: std.ArrayListUnmanaged(ResourceAccess),
+    buffers: std.ArrayList(*Buffer),
+    textures: std.ArrayList(*Texture),
+    accesses: std.ArrayList(ResourceAccess),
 
     pub fn init(device: *Device, desc: *const sysgpu.BindGroup.Descriptor) !*BindGroup {
         const d3d_device = device.d3d_device;
@@ -2223,13 +2223,13 @@ pub const BindGroup = struct {
         var dynamic_resources = try allocator.alloc(DynamicResource, layout.dynamic_entries.items.len);
         errdefer allocator.free(dynamic_resources);
 
-        var buffers = std.ArrayListUnmanaged(*Buffer).empty;
+        var buffers = std.ArrayList(*Buffer).empty;
         errdefer buffers.deinit(allocator);
 
-        var textures = std.ArrayListUnmanaged(*Texture).empty;
+        var textures = std.ArrayList(*Texture).empty;
         errdefer textures.deinit(allocator);
 
-        var accesses = std.ArrayListUnmanaged(ResourceAccess).empty;
+        var accesses = std.ArrayList(ResourceAccess).empty;
         errdefer accesses.deinit(allocator);
 
         for (0..desc.entry_count) |i| {
@@ -2331,7 +2331,7 @@ pub const PipelineLayout = struct {
         errdefer allocator.free(group_layouts);
 
         var group_parameter_indices_buf: [limits.max_bind_groups]u32 = undefined;
-        var group_parameter_indices = std.ArrayListUnmanaged(u32).initBuffer(&group_parameter_indices_buf);
+        var group_parameter_indices = std.ArrayList(u32).initBuffer(&group_parameter_indices_buf);
 
         var parameter_count: u32 = 0;
         var range_count: u32 = 0;
@@ -2361,10 +2361,10 @@ pub const PipelineLayout = struct {
                 parameter_count += 1;
         }
 
-        var parameters = try std.ArrayListUnmanaged(c.D3D12_ROOT_PARAMETER).initCapacity(allocator, parameter_count);
+        var parameters = try std.ArrayList(c.D3D12_ROOT_PARAMETER).initCapacity(allocator, parameter_count);
         defer parameters.deinit(allocator);
 
-        var ranges = try std.ArrayListUnmanaged(c.D3D12_DESCRIPTOR_RANGE).initCapacity(allocator, range_count);
+        var ranges = try std.ArrayList(c.D3D12_DESCRIPTOR_RANGE).initCapacity(allocator, range_count);
         defer ranges.deinit(allocator);
 
         for (0..desc.bind_group_layout_count) |group_index| {
@@ -2495,7 +2495,7 @@ pub const PipelineLayout = struct {
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
         const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
         var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
-        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
+        var bind_group_layouts = std.ArrayList(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
             for (bind_group_layouts.items) |bind_group_layout| bind_group_layout.release();
         }
@@ -2727,9 +2727,9 @@ pub const RenderPipeline = struct {
 
         // PSO
         var input_elements_buf: [limits.max_vertex_buffers]c.D3D12_INPUT_ELEMENT_DESC = undefined;
-        var input_elements = std.ArrayListUnmanaged(c.D3D12_INPUT_ELEMENT_DESC).initBuffer(&input_elements_buf);
+        var input_elements = std.ArrayList(c.D3D12_INPUT_ELEMENT_DESC).initBuffer(&input_elements_buf);
         var vertex_strides_buf: [limits.max_vertex_buffers]c.UINT = undefined;
-        var vertex_strides = std.ArrayListUnmanaged(c.UINT).initBuffer(&vertex_strides_buf);
+        var vertex_strides = std.ArrayList(c.UINT).initBuffer(&vertex_strides_buf);
         for (0..desc.vertex.buffer_count) |i| {
             const buffer = desc.vertex.buffers.?[i];
             for (0..buffer.attribute_count) |j| {
@@ -2930,14 +2930,14 @@ pub const ReferenceTracker = struct {
     device: *Device,
     command_allocator: *c.ID3D12CommandAllocator,
     fence_value: u64 = 0,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
-    textures: std.ArrayListUnmanaged(*Texture) = .empty,
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
-    compute_pipelines: std.ArrayListUnmanaged(*ComputePipeline) = .empty,
-    render_pipelines: std.ArrayListUnmanaged(*RenderPipeline) = .empty,
-    rtv_descriptor_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .empty,
-    dsv_descriptor_blocks: std.ArrayListUnmanaged(DescriptorAllocation) = .empty,
-    upload_pages: std.ArrayListUnmanaged(Resource) = .empty,
+    buffers: std.ArrayList(*Buffer) = .empty,
+    textures: std.ArrayList(*Texture) = .empty,
+    bind_groups: std.ArrayList(*BindGroup) = .empty,
+    compute_pipelines: std.ArrayList(*ComputePipeline) = .empty,
+    render_pipelines: std.ArrayList(*RenderPipeline) = .empty,
+    rtv_descriptor_blocks: std.ArrayList(DescriptorAllocation) = .empty,
+    dsv_descriptor_blocks: std.ArrayList(DescriptorAllocation) = .empty,
+    upload_pages: std.ArrayList(Resource) = .empty,
 
     pub fn init(device: *Device, command_allocator: *c.ID3D12CommandAllocator) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);
@@ -3321,7 +3321,7 @@ pub const CommandEncoder = struct {
 pub const StateTracker = struct {
     device: *Device = undefined,
     written_set: std.AutoArrayHashMapUnmanaged(*Resource, c.D3D12_RESOURCE_STATES) = .{},
-    barriers: std.ArrayListUnmanaged(c.D3D12_RESOURCE_BARRIER) = .empty,
+    barriers: std.ArrayList(c.D3D12_RESOURCE_BARRIER) = .empty,
 
     pub fn init(tracker: *StateTracker, device: *Device) void {
         tracker.device = device;
@@ -3557,7 +3557,7 @@ pub const RenderPassEncoder = struct {
         var width: u32 = 0;
         var height: u32 = 0;
         var color_attachments_buf: [limits.max_color_attachments]sysgpu.RenderPassColorAttachment = undefined;
-        var color_attachments = std.ArrayListUnmanaged(sysgpu.RenderPassColorAttachment).initBuffer(&color_attachments_buf);
+        var color_attachments = std.ArrayList(sysgpu.RenderPassColorAttachment).initBuffer(&color_attachments_buf);
         var rtv_handles = try cmd_encoder.command_buffer.allocateRtvDescriptors(desc.color_attachment_count);
         const descriptor_size = cmd_encoder.device.rtv_heap.descriptor_size;
 
@@ -4059,7 +4059,7 @@ pub const Queue = struct {
         var command_manager = &queue.device.command_manager;
         const d3d_command_queue = queue.d3d_command_queue;
 
-        var command_lists = try std.ArrayListUnmanaged(*c.ID3D12GraphicsCommandList).initCapacity(
+        var command_lists = try std.ArrayList(*c.ID3D12GraphicsCommandList).initCapacity(
             allocator,
             command_buffers.len + 1,
         );

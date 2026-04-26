@@ -222,7 +222,7 @@ pub fn calcExtent(dimension: sysgpu.Texture.Dimension, extent: sysgpu.Extent3D) 
 }
 
 pub const DefaultPipelineLayoutDescriptor = struct {
-    pub const Group = std.ArrayListUnmanaged(sysgpu.BindGroupLayout.Entry);
+    pub const Group = std.ArrayList(sysgpu.BindGroupLayout.Entry);
 
     allocator: std.mem.Allocator,
     groups_buf: [limits.max_bind_groups]Group = undefined,

@@ -2,7 +2,7 @@ const std = @import("std");
 const main = @import("main.zig");
 
 pub const DevicesInfo = struct {
-    list: std.ArrayListUnmanaged(main.Device),
+    list: std.ArrayList(main.Device),
     default_output: ?usize,
     default_input: ?usize,
 

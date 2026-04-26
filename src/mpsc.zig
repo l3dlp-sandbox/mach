@@ -26,7 +26,7 @@ pub fn Pool(comptime Node: type) type {
         // Tracks chunks of allocated nodes, used for freeing them at deinit() time.
         io: std.Io,
         cleanup_mu: std.Io.Mutex = .init,
-        cleanup: std.ArrayListUnmanaged([*]Node) = .empty,
+        cleanup: std.ArrayList([*]Node) = .empty,
 
         // How many nodes to allocate at once for each chunk in the pool.
         // Must not be modified past init()

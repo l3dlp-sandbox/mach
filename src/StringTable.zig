@@ -10,7 +10,7 @@ const std = @import("std");
 
 const StringTable = @This();
 
-string_bytes: std.ArrayListUnmanaged(u8) = .empty,
+string_bytes: std.ArrayList(u8) = .empty,
 
 /// Key is string_bytes index.
 string_table: std.HashMapUnmanaged(u32, void, IndexContext, std.hash_map.default_max_load_percentage) = .{},
@@ -58,7 +58,7 @@ pub fn deinit(table: *StringTable, allocator: std.mem.Allocator) void {
 }
 
 const IndexContext = struct {
-    string_bytes: *const std.ArrayListUnmanaged(u8),
+    string_bytes: *const std.ArrayList(u8),
 
     pub fn eql(ctx: IndexContext, a: u32, b: u32) bool {
         _ = ctx;
@@ -72,7 +72,7 @@ const IndexContext = struct {
 };
 
 const SliceAdapter = struct {
-    string_bytes: *const std.ArrayListUnmanaged(u8),
+    string_bytes: *const std.ArrayList(u8),
 
     pub fn eql(adapter: SliceAdapter, a_slice: []const u8, b: u32) bool {
         const b_slice = std.mem.span(@as([*:0]const u8, @ptrCast(adapter.string_bytes.items.ptr)) + b);

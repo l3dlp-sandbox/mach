@@ -104,10 +104,10 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
 
             /// The current generation number of data[i], when data[i] becomes freed and then alive
             /// again, this number is incremented by one.
-            generation: std.ArrayListUnmanaged(Generation) = .empty,
+            generation: std.ArrayList(Generation) = .empty,
 
             /// The recycling bin which tells which data indices are freed and can be reused.
-            recycling_bin: std.ArrayListUnmanaged(Index) = .empty,
+            recycling_bin: std.ArrayList(Index) = .empty,
 
             /// The number of objects that could not fit in the recycling bin and hence were thrown
             /// on the floor and forgotten about. This means there are freed items recorded by freed.set(index)

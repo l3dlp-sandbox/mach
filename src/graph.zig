@@ -91,7 +91,7 @@ const Op = union(enum) {
     /// Query the children of the given node
     get_children: struct {
         node_id: u64,
-        result: *std.ArrayListUnmanaged(u64),
+        result: *std.ArrayList(u64),
         err: *?Error,
         done: *std.atomic.Value(bool),
     },
@@ -145,7 +145,7 @@ pub const Graph = struct {
 
     /// Pool of ArrayLists for query results
     result_lists: struct {
-        available: std.ArrayListUnmanaged(*std.ArrayListUnmanaged(u64)) = .empty,
+        available: std.ArrayList(*std.ArrayList(u64)) = .empty,
         lock: std.Io.Mutex = .init,
     } = .{},
 
@@ -209,7 +209,7 @@ pub const Graph = struct {
         }
 
         for (0..preallocate.num_result_lists) |_| {
-            var list = try allocator.create(std.ArrayListUnmanaged(u64));
+            var list = try allocator.create(std.ArrayList(u64));
             errdefer allocator.destroy(list);
             list.* = .empty;
             try list.ensureTotalCapacity(allocator, preallocate.result_list_size);
@@ -455,7 +455,7 @@ pub const Graph = struct {
         items: []const u64,
 
         // Internal / private fields.
-        internal_list: *std.ArrayListUnmanaged(u64),
+        internal_list: *std.ArrayList(u64),
         internal_graph: *Graph,
 
         // Deinit returns the allocation back to the Graph memory pool for reuse in the future.
@@ -490,7 +490,7 @@ pub const Graph = struct {
         };
     }
 
-    fn acquireResultList(graph: *Graph, allocator: std.mem.Allocator, min_capacity: usize) !*std.ArrayListUnmanaged(u64) {
+    fn acquireResultList(graph: *Graph, allocator: std.mem.Allocator, min_capacity: usize) !*std.ArrayList(u64) {
         // Try to get an existing list first
         graph.result_lists.lock.lockUncancelable(graph.io);
         const list = graph.result_lists.available.pop();
@@ -507,14 +507,14 @@ pub const Graph = struct {
         }
 
         // Create new result list if needed
-        var new_list = try allocator.create(std.ArrayListUnmanaged(u64));
+        var new_list = try allocator.create(std.ArrayList(u64));
         errdefer allocator.destroy(new_list);
         new_list.* = .empty;
         try new_list.ensureTotalCapacity(allocator, graph.preallocate_result_list_size);
         return new_list;
     }
 
-    fn releaseResultList(graph: *Graph, list: *std.ArrayListUnmanaged(u64)) void {
+    fn releaseResultList(graph: *Graph, list: *std.ArrayList(u64)) void {
         list.clearRetainingCapacity();
 
         graph.result_lists.lock.lockUncancelable(graph.io);
@@ -595,7 +595,7 @@ pub const Graph = struct {
         // copy result_lists
         try dst.result_lists.available.ensureTotalCapacity(allocator, src.result_lists.available.capacity);
         while (dst.result_lists.available.items.len < src.result_lists.available.items.len) {
-            var list = try allocator.create(std.ArrayListUnmanaged(u64));
+            var list = try allocator.create(std.ArrayList(u64));
             list.* = .empty;
             try list.ensureTotalCapacity(allocator, dst.preallocate_result_list_size);
             dst.result_lists.available.appendAssumeCapacity(list);

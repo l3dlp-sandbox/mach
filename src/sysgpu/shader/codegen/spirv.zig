@@ -34,8 +34,8 @@ struct_map: std.AutoHashMapUnmanaged(InstIndex, IdRef) = .{},
 /// Map storage variables and fields with runtime array type into their parent struct pointer
 runtiem_arr_vars: std.AutoHashMapUnmanaged(IdRef, IdRef) = .{},
 decorated: std.AutoHashMapUnmanaged(IdRef, void) = .{},
-capabilities: std.ArrayListUnmanaged(spec.Capability) = .empty,
-fn_stack: std.ArrayListUnmanaged(FnInfo) = .empty,
+capabilities: std.ArrayList(spec.Capability) = .empty,
+fn_stack: std.ArrayList(FnInfo) = .empty,
 extended_instructions: ?IdRef = null,
 emit_debug_names: bool,
 next_result_id: Word = 1,
@@ -2022,7 +2022,7 @@ fn emitTripleIntrinsic(spv: *SpirV, section: *Section, triple: Inst.TripleIntrin
     if (triple.op == .mix and spv.air.getInst(triple.result_type) == .vector) {
         const vec_type_inst = spv.air.getInst(triple.result_type).vector;
         var constituents_buf: [4]IdRef = undefined;
-        var constituents = std.ArrayListUnmanaged(IdRef).initBuffer(&constituents_buf);
+        var constituents = std.ArrayList(IdRef).initBuffer(&constituents_buf);
         constituents.appendNTimesAssumeCapacity(a3, @intFromEnum(vec_type_inst.size));
         a3 = spv.allocId();
         try section.emit(.OpCompositeConstruct, .{

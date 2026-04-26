@@ -396,8 +396,8 @@ pub const Device = struct {
     pixel_format: if (builtin.target.os.tag == .windows) c_int else void,
     gl: proc.DeviceGL,
     streaming_manager: StreamingManager = undefined,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
+    reference_trackers: std.ArrayList(*ReferenceTracker) = .empty,
+    map_callbacks: std.ArrayList(MapCallback) = .empty,
 
     lost_cb: ?sysgpu.Device.LostCallback = null,
     lost_cb_userdata: ?*anyopaque = null,
@@ -602,7 +602,7 @@ pub const Device = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
+    free_buffers: std.ArrayList(*Buffer) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -668,9 +668,9 @@ pub const SwapChain = struct {
         const back_buffer_count: u32 = if (desc.present_mode == .mailbox) 3 else 2;
 
         var textures_buf: [max_back_buffer_count]*Texture = undefined;
-        var textures = std.ArrayListUnmanaged(*Texture).initBuffer(&textures_buf);
+        var textures = std.ArrayList(*Texture).initBuffer(&textures_buf);
         var views_buf: [max_back_buffer_count]*TextureView = undefined;
-        var views = std.ArrayListUnmanaged(*TextureView).initBuffer(&views_buf);
+        var views = std.ArrayList(*TextureView).initBuffer(&views_buf);
         errdefer {
             for (views.items) |view| view.manager.release();
             for (textures.items) |texture| texture.manager.release();
@@ -1202,7 +1202,7 @@ pub const PipelineLayout = struct {
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
         const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
         var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
-        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
+        var bind_group_layouts = std.ArrayList(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
             for (bind_group_layouts.items) |bind_group_layout_raw| {
                 const bind_group_layout: *BindGroupLayout = @ptrCast(@alignCast(bind_group_layout_raw));
@@ -1891,7 +1891,7 @@ pub const CommandBuffer = struct {
 
     manager: utils.Manager(CommandBuffer) = .{},
     device: *Device,
-    commands: std.ArrayListUnmanaged(Command) = .empty,
+    commands: std.ArrayList(Command) = .empty,
     reference_tracker: *ReferenceTracker,
 
     pub fn init(device: *Device) !*CommandBuffer {
@@ -1984,7 +1984,7 @@ pub const CommandBuffer = struct {
                         gl.bindFramebuffer(c.GL_DRAW_FRAMEBUFFER, fbo);
 
                         var draw_buffers_buf: [limits.max_color_attachments]c.GLenum = undefined;
-                        var draw_buffers = std.ArrayListUnmanaged(c.GLenum).initBuffer(&draw_buffers_buf);
+                        var draw_buffers = std.ArrayList(c.GLenum).initBuffer(&draw_buffers_buf);
 
                         for (cmd.color_attachments_buf[0..cmd.color_attachments_len], 0..) |attach, i| {
                             if (attach.view) |view_raw| {
@@ -2321,9 +2321,9 @@ pub const CommandBuffer = struct {
 pub const ReferenceTracker = struct {
     device: *Device,
     sync: c.GLsync = undefined,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
-    upload_pages: std.ArrayListUnmanaged(*Buffer) = .empty,
+    buffers: std.ArrayList(*Buffer) = .empty,
+    bind_groups: std.ArrayList(*BindGroup) = .empty,
+    upload_pages: std.ArrayList(*Buffer) = .empty,
 
     pub fn init(device: *Device) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);
@@ -2401,7 +2401,7 @@ pub const CommandEncoder = struct {
     manager: utils.Manager(CommandEncoder) = .{},
     device: *Device,
     command_buffer: *CommandBuffer,
-    commands: *std.ArrayListUnmanaged(Command),
+    commands: *std.ArrayList(Command),
     reference_tracker: *ReferenceTracker,
     upload_buffer: ?*Buffer = null,
     upload_map: ?[*]u8 = null,
@@ -2555,7 +2555,7 @@ pub const CommandEncoder = struct {
 
 pub const ComputePassEncoder = struct {
     manager: utils.Manager(ComputePassEncoder) = .{},
-    commands: *std.ArrayListUnmanaged(Command),
+    commands: *std.ArrayList(Command),
     reference_tracker: *ReferenceTracker,
 
     pub fn init(cmd_encoder: *CommandEncoder, desc: *const sysgpu.ComputePassDescriptor) !*ComputePassEncoder {
@@ -2623,7 +2623,7 @@ pub const ComputePassEncoder = struct {
 
 pub const RenderPassEncoder = struct {
     manager: utils.Manager(RenderPassEncoder) = .{},
-    commands: *std.ArrayListUnmanaged(Command),
+    commands: *std.ArrayList(Command),
     reference_tracker: *ReferenceTracker,
 
     pub fn init(cmd_encoder: *CommandEncoder, desc: *const sysgpu.RenderPassDescriptor) !*RenderPassEncoder {

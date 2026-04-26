@@ -12,7 +12,7 @@ const Glsl = @This();
 
 air: *const Air,
 allocator: std.mem.Allocator,
-storage: *std.ArrayListUnmanaged(u8),
+storage: *std.ArrayList(u8),
 bindings: *const BindingTable,
 entrypoint_inst: ?Inst.Fn = null,
 indent: u32 = 0,
@@ -26,7 +26,7 @@ pub fn gen(
 ) ![]const u8 {
     _ = debug_info;
 
-    var storage = std.ArrayListUnmanaged(u8).empty;
+    var storage = std.ArrayList(u8).empty;
     var glsl = Glsl{
         .air = air,
         .allocator = allocator,

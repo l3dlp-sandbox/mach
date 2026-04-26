@@ -15,7 +15,7 @@ var ft_library: ft.FT_Library = null;
 
 face: ft.FT_Face,
 font_bytes: []const u8,
-bitmap: std.ArrayListUnmanaged(RGBA32) = .empty,
+bitmap: std.ArrayList(RGBA32) = .empty,
 
 pub fn initFreetype() !void {
     freetype_ready_mu.lockUncancelable(std.Options.debug_io);

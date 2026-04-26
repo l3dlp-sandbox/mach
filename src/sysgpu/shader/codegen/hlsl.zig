@@ -7,14 +7,14 @@ const Builtin = Air.Inst.Builtin;
 
 const Hlsl = @This();
 
-const Section = std.ArrayListUnmanaged(u8);
+const Section = std.ArrayList(u8);
 
 air: *const Air,
 allocator: std.mem.Allocator,
 arena: std.heap.ArenaAllocator,
 emitted_decls: std.AutoArrayHashMapUnmanaged(InstIndex, []const u8) = .{},
-scratch: std.ArrayListUnmanaged(u8) = .empty,
-output: std.ArrayListUnmanaged(u8) = .empty,
+scratch: std.ArrayList(u8) = .empty,
+output: std.ArrayList(u8) = .empty,
 indent: u32 = 0,
 
 pub fn gen(allocator: std.mem.Allocator, air: *const Air, debug_info: DebugInfo) ![]const u8 {
@@ -200,7 +200,7 @@ fn emitStruct(hlsl: *Hlsl, inst_idx: InstIndex, kind: StructKind) !void {
     hlsl.enterScope();
     defer hlsl.exitScope();
 
-    var sorted_members = std.ArrayListUnmanaged(InstIndex).empty;
+    var sorted_members = std.ArrayList(InstIndex).empty;
     defer sorted_members.deinit(hlsl.allocator);
 
     const struct_members = hlsl.air.refToList(inst.members);
@@ -497,7 +497,7 @@ fn emitFn(hlsl: *Hlsl, inst_idx: InstIndex) !void {
         defer hlsl.exitScope();
 
         if (inst.params != .none) {
-            var fn_params = std.ArrayListUnmanaged(InstIndex).empty;
+            var fn_params = std.ArrayList(InstIndex).empty;
             defer fn_params.deinit(hlsl.allocator);
             for (hlsl.air.refToList(inst.params)) |param_index| {
                 try fn_params.append(hlsl.allocator, param_index);

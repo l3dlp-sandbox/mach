@@ -170,9 +170,9 @@ pub const Device = struct {
     err_cb: ?sysgpu.ErrorCallback = null,
     err_cb_userdata: ?*anyopaque = null,
     streaming_manager: StreamingManager = undefined,
-    reference_trackers: std.ArrayListUnmanaged(*ReferenceTracker) = .empty,
-    map_callbacks: std.ArrayListUnmanaged(MapCallback) = .empty,
-    free_lengths_buffers: std.ArrayListUnmanaged(*mtl.Buffer) = .empty,
+    reference_trackers: std.ArrayList(*ReferenceTracker) = .empty,
+    map_callbacks: std.ArrayList(MapCallback) = .empty,
+    free_lengths_buffers: std.ArrayList(*mtl.Buffer) = .empty,
 
     pub fn init(adapter: *Adapter, desc: ?*const sysgpu.Device.Descriptor) !*Device {
         // TODO
@@ -332,7 +332,7 @@ pub const Device = struct {
 
 pub const StreamingManager = struct {
     device: *Device,
-    free_buffers: std.ArrayListUnmanaged(*mtl.Buffer) = .empty,
+    free_buffers: std.ArrayList(*mtl.Buffer) = .empty,
 
     pub fn init(device: *Device) !StreamingManager {
         return .{
@@ -989,7 +989,7 @@ pub const PipelineLayout = struct {
     pub fn initDefault(device: *Device, default_pipeline_layout: utils.DefaultPipelineLayoutDescriptor) !*PipelineLayout {
         const groups = default_pipeline_layout.groups_buf[0..default_pipeline_layout.groups_len];
         var bind_group_layouts_buf: [limits.max_bind_groups]*sysgpu.BindGroupLayout = undefined;
-        var bind_group_layouts = std.ArrayListUnmanaged(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
+        var bind_group_layouts = std.ArrayList(*sysgpu.BindGroupLayout).initBuffer(&bind_group_layouts_buf);
         defer {
             for (bind_group_layouts.items) |bind_group_layout_raw| {
                 const bind_group_layout: *BindGroupLayout = @ptrCast(@alignCast(bind_group_layout_raw));
@@ -1498,9 +1498,9 @@ pub const CommandBuffer = struct {
 pub const ReferenceTracker = struct {
     device: *Device,
     fence_value: u64 = 0,
-    buffers: std.ArrayListUnmanaged(*Buffer) = .empty,
-    bind_groups: std.ArrayListUnmanaged(*BindGroup) = .empty,
-    upload_pages: std.ArrayListUnmanaged(*mtl.Buffer) = .empty,
+    buffers: std.ArrayList(*Buffer) = .empty,
+    bind_groups: std.ArrayList(*BindGroup) = .empty,
+    upload_pages: std.ArrayList(*mtl.Buffer) = .empty,
 
     pub fn init(device: *Device) !*ReferenceTracker {
         const tracker = try allocator.create(ReferenceTracker);

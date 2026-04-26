@@ -617,7 +617,7 @@ fn renderFieldName(writer: anytype, operands: []const g.Operand, field_index: us
 
     // Should be enough for all names - adjust as needed.
     var name_buffer_buf: [64]u8 = undefined;
-    var name_buffer = std.ArrayListUnmanaged(u8).initBuffer(&name_buffer_buf);
+    var name_buffer = std.ArrayList(u8).initBuffer(&name_buffer_buf);
 
     derive_from_kind: {
         // Operand names are often in the json encoded as "'Name'" (with two sets of quotes).
