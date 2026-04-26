@@ -76,8 +76,7 @@ pub fn init(
     audio.on_state_change = app_mod.id.audioStateChange;
 
     const bgm = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.bgm.bit_bit_loop });
-    // TODO(object): bgm here is not freed inside of deinit(), if we had object-scoped allocators we
-    // could do this more nicely in real applications
+    defer allocator.free(bgm.samples);
 
     const sfx = try mach.Audio.Opus.decodeStream(allocator, .{ .data = assets.sfx.sword1 });
 
@@ -88,8 +87,14 @@ pub fn init(
         audio.buffers.lock();
         defer audio.buffers.unlock();
 
+        // Audio.cleanup will free this samples buffer when the bgm buffer is deleted, so we must
+        // allocate it with audio.allocSamples and copy into it (rather than passing the
+        // user-owned bgm.samples directly).
+        const bgm_samples = try audio.allocSamples(bgm.samples.len);
+        @memcpy(bgm_samples, bgm.samples);
+
         const bgm_buffer = try audio.buffers.new(.{
-            .samples = bgm.samples,
+            .samples = bgm_samples,
             .channels = bgm.channels,
         });
         // Tag the buffer as background music
@@ -103,7 +108,11 @@ pub fn init(
 }
 
 pub fn deinitApp(app: *App) void {
+    // TODO(allocator): find a better way to get an allocator here
+    const allocator = std.heap.c_allocator;
+
     app.app_thread.join();
+    allocator.free(app.sfx.samples);
 }
 
 /// Called on the high-priority audio OS thread when the audio driver needs more audio samples, so
@@ -152,12 +161,17 @@ pub fn appTick(
                     std.debug.print("[volume] {d:.0}%\n", .{vol * 100.0});
                 },
                 else => {
-                    // Play a new SFX
+                    // Play a new SFX. Audio.cleanup will free the samples buffer when this audio
+                    // buffer is deleted, so we allocate a fresh copy here rather than reusing
+                    // app.sfx.samples (which is owned by App).
+                    const samples = try audio.allocSamples(app.sfx.samples.len);
+                    @memcpy(samples, app.sfx.samples);
+
                     audio.buffers.lock();
                     defer audio.buffers.unlock();
 
                     _ = try audio.buffers.new(.{
-                        .samples = app.sfx.samples,
+                        .samples = samples,
                         .channels = app.sfx.channels,
 
                         // Start 0.15s into the sfx, which removes the silence at the start of the
