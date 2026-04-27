@@ -94,7 +94,6 @@ pub fn init(
     const window = try core.windows.new(.{
         .title = "hardware check",
         .on_render = app_mod.id.render,
-        .vsync_mode = .double,
     });
 
     // TODO(allocator): find a better way to get an allocator here
@@ -244,7 +243,6 @@ pub fn appTick(
                         const new_window = core.windows.new(.{
                             .title = title_z,
                             .on_render = app_mod.id.render,
-                            .vsync_mode = .double,
                         }) catch break;
 
                         const meta = app.window_meta.new(.{

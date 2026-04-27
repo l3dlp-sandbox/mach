@@ -46,7 +46,6 @@ pub fn init(
     const window = try core.windows.new(.{
         .title = "core-transparent-window",
         .on_render = app_mod.id.render,
-        .vsync_mode = .double,
         .transparent = true,
     });
 
