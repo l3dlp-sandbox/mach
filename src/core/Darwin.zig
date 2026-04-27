@@ -132,8 +132,8 @@ const RenderLoop = struct {
         // The render thread may be blocked on dispatch_semaphore_wait for a vsync signal. Stop each
         // window's display link and signal its semaphore to unblock the render thread.
         {
-            self.core.windows.lock(); // TODO: use rlock
-            defer self.core.windows.unlock();
+            self.core.windows.lockShared();
+            defer self.core.windows.unlockShared();
             var windows = self.core.windows.slice();
             while (windows.next()) |window_id| {
                 if (self.core.windows.get(window_id, .native)) |native| {
@@ -173,8 +173,8 @@ const RenderLoop = struct {
                 var all_have_display_link = true;
                 var wait_ctx: ?*DisplayLinkContext = null;
                 {
-                    self.core.windows.lock(); // TODO: use rlock
-                    defer self.core.windows.unlock();
+                    self.core.windows.lockShared();
+                    defer self.core.windows.unlockShared();
 
                     var windows = self.core.windows.slice();
                     while (windows.next()) |window_id| {
@@ -498,9 +498,9 @@ fn initWindow(
                 const core_: *Core = block.context.core;
                 const window_id_ = block.context.window_id;
 
-                core_.windows.lock(); // TODO: use rlock
+                core_.windows.lockShared();
                 const native_opt = core_.windows.get(window_id_, .native);
-                core_.windows.unlock();
+                core_.windows.unlockShared();
 
                 if (native_opt) |native| {
                     const native_window: *objc.app_kit.Window = native.window;
@@ -748,9 +748,9 @@ const ViewCallbacks = struct {
         const window_id = block.context.window_id;
         const mouse_location = event.locationInWindow();
 
-        core.windows.lock(); // TODO: use rlock
+        core.windows.lockShared();
         const window_height: f32 = @floatFromInt(core.windows.get(window_id, .height));
-        core.windows.unlock();
+        core.windows.unlockShared();
 
         core.pushEvent(.{ .mouse_motion = .{
             .window_id = window_id,

@@ -126,7 +126,7 @@ pub const Graph = struct {
 
     const PoolDeleteInfo = struct {
         bitset: *std.bit_set.DynamicBitSetUnmanaged,
-        mu: *std.Io.Mutex,
+        mu: *std.Io.RwLock,
     };
 
     /// Queue of read/write/mutation operations to the graph.
@@ -252,7 +252,7 @@ pub const Graph = struct {
     ///
     /// The type_id must equal the current length of the list (i.e. type_ids must be registered in
     /// order).
-    pub fn registerDeletePool(graph: *Graph, allocator: std.mem.Allocator, type_id: u16, bitset: *std.bit_set.DynamicBitSetUnmanaged, mu: *std.Io.Mutex) !void {
+    pub fn registerDeletePool(graph: *Graph, allocator: std.mem.Allocator, type_id: u16, bitset: *std.bit_set.DynamicBitSetUnmanaged, mu: *std.Io.RwLock) !void {
         std.debug.assert(type_id == graph.pending_delete_pools.items.len);
         try graph.pending_delete_pools.append(allocator, .{ .bitset = bitset, .mu = mu });
     }

@@ -293,8 +293,8 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         core.render_mu.lockUncancelable(io);
         defer core.render_mu.unlock(io);
 
-        core.windows.lock(); // TODO: use rlock
-        defer core.windows.unlock();
+        core.windows.lockShared();
+        defer core.windows.unlockShared();
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             const core_window = core.windows.getValue(window_id);
@@ -305,9 +305,9 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
             core.window = window_id;
 
             // Run on_render for the window with the windows lock released so user code may take it.
-            core.windows.unlock();
+            core.windows.unlockShared();
             core_mod.run(on_render);
-            core.windows.lock();
+            core.windows.lockShared();
 
             // Ensure nobody reads the window outside on_render.
             core.window = undefined;
@@ -318,8 +318,8 @@ pub fn renderFrame(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // prepare the next frame during GPU submission.
     var shared_device: ?*gpu.Device = null;
     {
-        core.windows.lock(); // TODO: use rlock
-        defer core.windows.unlock();
+        core.windows.lockShared();
+        defer core.windows.unlockShared();
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             const core_window = core.windows.getValue(window_id);
@@ -543,8 +543,8 @@ pub fn events(core: *@This(), mode_arg: EventMode) EventIterator {
     // Resolve .default and .adaptive aliases to a concrete mode.
     const mode: EventMode = switch (mode_arg) {
         .default => blk: {
-            core.windows.lock(); // TODO: use rlock
-            defer core.windows.unlock();
+            core.windows.lockShared();
+            defer core.windows.unlockShared();
             var windows = core.windows.slice();
             while (windows.next()) |wid| {
                 if (core.windows.get(wid, .vsync_mode).isNone()) break :blk .poll;

@@ -85,8 +85,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
             io: std.Io,
 
             /// Mutex to be held when operating on these objects.
-            /// TODO(object): replace with RwLock and update website docs to indicate this
-            mu: std.Io.Mutex = .init,
+            mu: std.Io.RwLock = .init,
 
             /// A registered ID indicating the type of objects being represented. This can be
             /// thought of as a hash of the module name + field name where this objects list is
@@ -177,7 +176,7 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// Returns `false` if the calling thread would have to block to acquire it.
         /// Otherwise, returns `true` and the caller should `unlock()` the Mutex to release it.
         pub fn tryLock(objs: *@This()) bool {
-            return objs.internal.mu.tryLock();
+            return objs.internal.mu.tryLock(objs.internal.io);
         }
 
         /// Acquires the mutex, blocking the caller's thread until it can.
@@ -191,6 +190,28 @@ pub fn Objects(options: ObjectsOptions, comptime T: type) type {
         /// It is undefined behavior if the mutex is unlocked from a different thread that it was locked from.
         pub fn unlock(objs: *@This()) void {
             objs.internal.mu.unlock(objs.internal.io);
+        }
+
+        /// Tries to acquire a shared (read) lock without blocking the caller's thread.
+        ///
+        /// Returns `false` if the calling thread would have to block to acquire it.
+        /// Otherwise, returns `true` and the caller should call `unlockShared()` to release it.
+        pub fn tryLockShared(objs: *@This()) bool {
+            return objs.internal.mu.tryLockShared(objs.internal.io);
+        }
+
+        /// Acquires a shared (read) lock, blocking the caller's thread until it can.
+        /// Multiple readers may hold the lock concurrently, but no writer may hold it while readers
+        /// do.
+        /// Once acquired, call `unlockShared()` on the Mutex to release it.
+        pub fn lockShared(objs: *@This()) void {
+            objs.internal.mu.lockSharedUncancelable(objs.internal.io);
+        }
+
+        /// Releases the shared (reader) lock which was previously acquired with `lockShared()` or
+        /// `tryLockShared()`.
+        pub fn unlockShared(objs: *@This()) void {
+            objs.internal.mu.unlockShared(objs.internal.io);
         }
 
         pub fn new(objs: *@This(), value: T) std.mem.Allocator.Error!ObjectID {
