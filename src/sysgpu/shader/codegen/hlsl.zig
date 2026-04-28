@@ -753,7 +753,15 @@ fn emitIntCast(hlsl: *Hlsl, dest_type: Inst.Int, cast: Inst.ScalarCast) !void {
 
 fn emitFloat(hlsl: *Hlsl, inst: Inst.Float) !void {
     switch (hlsl.air.getValue(Inst.Float.Value, inst.value.?)) {
-        .literal => |lit| try hlsl.print("{}", .{lit}),
+        .literal => |lit| {
+            // Always emit floating-point literals with an explicit decimal so that integer-valued
+            // floats (e.g. 0.0, 1.0) are typed as floats, not ints, in the generated shader.
+            if (std.math.isFinite(lit) and lit == @trunc(lit)) {
+                try hlsl.print("{d}.0", .{lit});
+            } else {
+                try hlsl.print("{d}", .{lit});
+            }
+        },
         .cast => |cast| try hlsl.emitFloatCast(inst, cast),
     }
 }

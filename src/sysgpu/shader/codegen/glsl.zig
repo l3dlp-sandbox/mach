@@ -701,7 +701,15 @@ fn emitIntCast(glsl: *Glsl, dest_type: Inst.Int, cast: Inst.ScalarCast) !void {
 
 fn emitFloat(glsl: *Glsl, inst: Inst.Float) !void {
     switch (glsl.air.getValue(Inst.Float.Value, inst.value.?)) {
-        .literal => |lit| try glsl.print("{}", .{lit}),
+        .literal => |lit| {
+            // Always emit floating-point literals with an explicit decimal so that integer-valued
+            // floats (e.g. 0.0, 1.0) are typed as floats, not ints, in the generated shader.
+            if (std.math.isFinite(lit) and lit == @trunc(lit)) {
+                try glsl.print("{d}.0", .{lit});
+            } else {
+                try glsl.print("{d}", .{lit});
+            }
+        },
         .cast => |cast| try glsl.emitFloatCast(inst, cast),
     }
 }

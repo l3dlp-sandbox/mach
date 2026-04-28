@@ -709,7 +709,15 @@ fn emitIntCast(msl: *Msl, dest_type: Inst.Int, cast: Inst.ScalarCast) !void {
 
 fn emitFloat(msl: *Msl, inst: Inst.Float) !void {
     return switch (msl.air.getValue(Inst.Float.Value, inst.value.?)) {
-        .literal => |lit| try msl.print("{}", .{lit}),
+        .literal => |lit| {
+            // Always emit floating-point literals with an explicit decimal so that Metal
+            // treats integer-valued floats (e.g. 0.0, 1.0) as floats rather than ints.
+            if (std.math.isFinite(lit) and lit == @trunc(lit)) {
+                try msl.print("{d}.0", .{lit});
+            } else {
+                try msl.print("{d}", .{lit});
+            }
+        },
         .cast => |cast| msl.emitFloatCast(inst, cast),
     };
 }
