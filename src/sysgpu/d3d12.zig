@@ -807,7 +807,7 @@ pub const MemoryAllocator = struct {
 
         pub const GroupAllocation = struct {
             allocation: gpu_allocator.Allocation,
-            heap: *MemoryHeap,
+            heap_index: usize,
             size: u64,
         };
 
@@ -851,7 +851,7 @@ pub const MemoryAllocator = struct {
                     };
                     return GroupAllocation{
                         .allocation = allocation,
-                        .heap = h,
+                        .heap_index = index,
                         .size = size,
                     };
                 } else if (empty_heap_index == null) {
@@ -864,7 +864,7 @@ pub const MemoryAllocator = struct {
             const allocation = try heap.gpu_allocator.allocate(@intCast(size));
             return GroupAllocation{
                 .allocation = allocation,
-                .heap = heap,
+                .heap_index = heap.index,
                 .size = size,
             };
         }
@@ -879,19 +879,18 @@ pub const MemoryAllocator = struct {
             const allocation = try memory_block.gpu_allocator.allocate(@intCast(size));
             return GroupAllocation{
                 .allocation = allocation,
-                .heap = memory_block,
+                .heap_index = memory_block.index,
                 .size = size,
             };
         }
 
         pub fn free(self: *MemoryGroup, allocation: GroupAllocation) gpu_allocator.Error!void {
-            const heap = allocation.heap;
+            const heap = &self.heaps.items[allocation.heap_index].?;
             try heap.gpu_allocator.free(allocation.allocation);
 
             if (heap.gpu_allocator.isEmpty()) {
-                const index = heap.index;
                 heap.deinit();
-                self.heaps.items[index] = null;
+                self.heaps.items[allocation.heap_index] = null;
             }
         }
 
@@ -910,20 +909,19 @@ pub const MemoryAllocator = struct {
             };
             errdefer _ = self.heaps.pop();
 
-            const heap = &self.heaps.items[heap_index].?;
-            heap.* = try MemoryHeap.init(
+            self.heaps.items[heap_index] = try MemoryHeap.init(
                 self,
                 heap_index,
                 size,
                 dedicated,
             );
-            return heap;
+            return &self.heaps.items[heap_index].?;
         }
     };
 
     pub const Allocation = struct {
         allocation: gpu_allocator.Allocation,
-        heap: *MemoryHeap,
+        heap_index: usize,
         size: u64,
         group: *MemoryGroup,
     };
@@ -1033,7 +1031,7 @@ pub const MemoryAllocator = struct {
             const allocation = try memory_group.allocate(desc.size);
             return Allocation{
                 .allocation = allocation.allocation,
-                .heap = allocation.heap,
+                .heap_index = allocation.heap_index,
                 .size = allocation.size,
                 .group = memory_group,
             };
@@ -1046,7 +1044,7 @@ pub const MemoryAllocator = struct {
         const group = allocation.group;
         try group.free(MemoryGroup.GroupAllocation{
             .allocation = allocation.allocation,
-            .heap = allocation.heap,
+            .heap_index = allocation.heap_index,
             .size = allocation.size,
         });
     }
@@ -1074,10 +1072,11 @@ pub const MemoryAllocator = struct {
 
         const allocation = try self.allocate(&allocation_desc);
 
+        const mem_heap = &allocation.group.heaps.items[allocation.heap_index].?;
         var d3d_resource: ?*c.ID3D12Resource = null;
         const hr = d3d_device.lpVtbl.*.CreatePlacedResource.?(
             d3d_device,
-            allocation.heap.heap,
+            mem_heap.heap,
             allocation.allocation.offset,
             desc.resource_desc,
             desc.initial_state,
