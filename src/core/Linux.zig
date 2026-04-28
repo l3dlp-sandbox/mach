@@ -62,32 +62,44 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 }
 
 pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
-    // Window management: create new windows, handle property changes, pump display server events.
-    var windows = core.windows.slice();
-    while (windows.next()) |window_id| {
-        const native_opt: ?Native = core.windows.get(window_id, .native);
-        if (native_opt) |native| {
-            // checks for updates in mach object fields
-            const core_window = core.windows.getValue(window_id);
-            if (core.windows.updated(window_id, .title)) {
-                setTitle(&native, core_window.title);
+    {
+        core.windows.lock();
+        defer core.windows.unlock();
+
+        // Window management: create new windows, handle property changes, pump display server events.
+        var windows = core.windows.slice();
+        while (windows.next()) |window_id| {
+            const native_opt: ?Native = core.windows.get(window_id, .native);
+            if (native_opt) |native| {
+                const core_window = core.windows.getValue(window_id);
+
+                // Update window title
+                if (core.windows.updated(window_id, .title)) {
+                    setTitle(&native, core_window.title);
+                }
+
+                // Update display mode, decorations
+                if (core.windows.updated(window_id, .display_mode) or core.windows.updated(window_id, .decorated)) {
+                    setDisplayMode(&native, core_window.display_mode, core_window.decorated);
+                    setBorder(&native, core_window.decorated);
+                }
+
+                // Check for display server events
+                switch (native) {
+                    .x11 => try X11.tick(window_id),
+                    .wayland => try Wayland.tick(window_id),
+                }
+
+                // Renew swap chain
+                renewSwapChain(core, window_id);
+            } else {
+                try initWindow(core, window_id);
+
+                // Consume the initial updated flags so we don't spuriously
+                // call setDisplayMode/setBorder on the next tick.
+                _ = core.windows.updated(window_id, .display_mode);
+                _ = core.windows.updated(window_id, .decorated);
             }
-            if (core.windows.updated(window_id, .display_mode) or core.windows.updated(window_id, .decorated)) {
-                setDisplayMode(&native, core_window.display_mode, core_window.decorated);
-                setBorder(&native, core_window.decorated);
-            }
-            // check for display server events
-            switch (native) {
-                .x11 => try X11.tick(window_id),
-                .wayland => try Wayland.tick(window_id),
-            }
-            renewSwapChain(core, window_id);
-        } else {
-            try initWindow(core, window_id);
-            // Consume the initial updated flags so we don't spuriously
-            // call setDisplayMode/setBorder on the next tick.
-            _ = core.windows.updated(window_id, .display_mode);
-            _ = core.windows.updated(window_id, .decorated);
         }
     }
 
