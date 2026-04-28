@@ -304,6 +304,8 @@ fn getKeyboardModifiers() mach.Core.KeyMods {
         or (w.GetKeyState(@as(i32, @intFromEnum(w.VK_RWIN)))) < 0, // & 0x8000 == 0x8000),
         .caps_lock = w.GetKeyState(@as(i32, @intFromEnum(w.VK_CAPITAL))) & 1 == 1,
         .num_lock = w.GetKeyState(@as(i32, @intFromEnum(w.VK_NUMLOCK))) & 1 == 1,
+        .help = w.GetKeyState(@as(i32, @intFromEnum(w.VK_HELP))) < 0,
+        .function = false,
     };
 }
 

@@ -742,6 +742,8 @@ fn toMachMods(mods: c_uint) KeyMods {
         .super = mods & c.Mod4Mask != 0,
         .caps_lock = mods & c.LockMask != 0,
         .num_lock = mods & c.Mod2Mask != 0,
+        .help = false,
+        .function = false,
     };
 }
 

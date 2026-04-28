@@ -127,6 +127,8 @@ pub fn initWindow(
                 .num_lock = false,
                 .shift = false,
                 .super = false,
+                .help = false,
+                .function = false,
             },
             .modifier_indices = .{ // TODO: make sure these are always getting initialized, we don't want undefined behavior
                 .control_index = undefined,
