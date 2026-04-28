@@ -602,6 +602,10 @@ fn emitVar(hlsl: *Hlsl, inst: Inst.Var) !void {
     if (inst.init != .none) {
         try hlsl.writeAll(" = ");
         try hlsl.emitExpr(inst.init);
+    } else {
+        try hlsl.writeAll(" = (");
+        try hlsl.emitType(t);
+        try hlsl.writeAll(")0");
     }
     try hlsl.writeAll(";\n");
 }
