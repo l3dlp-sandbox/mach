@@ -1399,7 +1399,7 @@ pub const SwapChain = struct {
         device.processQueuedOperations();
 
         // Swap Chain
-        const back_buffer_count: u32 = if (desc.present_mode == .mailbox) 3 else 2;
+        const back_buffer_count: u32 = @min(desc.max_buffered_frames, max_back_buffer_count);
         var swap_chain_desc = c.DXGI_SWAP_CHAIN_DESC1{
             .Width = desc.width,
             .Height = desc.height,

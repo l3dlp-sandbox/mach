@@ -665,7 +665,7 @@ pub const SwapChain = struct {
     pub fn init(device: *Device, surface: *Surface, desc: *const sysgpu.SwapChain.Descriptor) !*SwapChain {
         const swapchain = try allocator.create(SwapChain);
 
-        const back_buffer_count: u32 = if (desc.present_mode == .mailbox) 3 else 2;
+        const back_buffer_count: u32 = @min(desc.max_buffered_frames, max_back_buffer_count);
 
         var textures_buf: [max_back_buffer_count]*Texture = undefined;
         var textures = std.ArrayList(*Texture).initBuffer(&textures_buf);

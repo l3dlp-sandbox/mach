@@ -1026,7 +1026,12 @@ pub const SwapChain = struct {
             }
             break :blk vk.CompositeAlphaFlagsKHR{};
         };
-        const image_count = @max(capabilities.min_image_count + 1, capabilities.max_image_count);
+        const image_count = blk: {
+            const requested = desc.max_buffered_frames;
+            const min = capabilities.min_image_count;
+            const max = if (capabilities.max_image_count == 0) requested else capabilities.max_image_count;
+            break :blk std.math.clamp(requested, min, max);
+        };
         const format = conv.vulkanFormat(device, desc.format);
         const extent = vk.Extent2D{
             .width = std.math.clamp(

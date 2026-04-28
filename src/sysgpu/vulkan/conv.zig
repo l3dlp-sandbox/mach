@@ -405,6 +405,7 @@ pub fn vulkanPresentMode(present_mode: sysgpu.PresentMode) vk.PresentModeKHR {
     return switch (present_mode) {
         .immediate => .immediate_khr,
         .fifo => .fifo_khr,
+        .fifo_relaxed => .fifo_relaxed_khr,
         .mailbox => .mailbox_khr,
     };
 }
