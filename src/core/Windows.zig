@@ -40,6 +40,9 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
 pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // Window management: create new windows, handle property changes.
     {
+        core.windows.lock();
+        defer core.windows.unlock();
+
         var windows = core.windows.slice();
         while (windows.next()) |window_id| {
             if (core.windows.get(window_id, .native) != null) {
