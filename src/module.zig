@@ -855,7 +855,8 @@ pub fn Modules(module_lists: anytype) type {
         validate(module);
     }
     return struct {
-        /// All modules
+        /// All modules.
+        // These already pass validate()
         pub const modules = moduleTuple(module_lists);
 
         /// Enum describing every module name compiled into the program.
@@ -946,8 +947,8 @@ pub fn Modules(module_lists: anytype) type {
                 break :blk module_tag_or_type.mach_module;
             };
 
+            // Note: no need to validate(module) here because it is derived from `modules`.
             const module = @field(ModuleTypesByName(modules){}, @tagName(module_name));
-            validate(module);
 
             return struct {
                 mods: *ModulesByName(modules),
@@ -1046,8 +1047,8 @@ pub fn Modules(module_lists: anytype) type {
                 inline else => |mod_name| {
                     const module_fn_name: ModuleFunctionName(mod_name) = @enumFromInt(f.fn_id);
                     const mod: Module(mod_name) = .{ .mods = &m.mods, .modules = m };
-                    const module = @field(ModuleTypesByName(modules){}, @tagName(mod_name));
-                    validate(module);
+                    // Note: we don't need to validate the module here because it is derived from
+                    // `modules`.
 
                     switch (module_fn_name) {
                         inline else => |fn_name| mod.run(fn_name),
