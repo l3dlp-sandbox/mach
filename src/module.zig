@@ -862,6 +862,11 @@ pub fn Modules(module_lists: anytype) type {
         /// Enum describing every module name compiled into the program.
         pub const ModuleName = NameEnum(modules);
 
+        /// A struct whose comptime field of name `<module_name>` is the module type.
+        // This is hoisted up here, not written inline, to avoid expending needless comptime eval
+        // branches.
+        const module_types_by_name = ModuleTypesByName(modules){};
+
         mods: ModulesByName(modules),
         io: std.Io,
 
@@ -875,8 +880,9 @@ pub fn Modules(module_lists: anytype) type {
 
         /// Enum describing all declarations for a given comptime-known module.
         fn ModuleFunctionName(comptime module_name: ModuleName) type {
-            const module = @field(ModuleTypesByName(modules){}, @tagName(module_name));
-            validate(module);
+            // No validate here — modules in `modules` were already validated by
+            // moduleTupleCollect when Modules(...) was defined.
+            const module = @field(module_types_by_name, @tagName(module_name));
 
             var enum_names: []const []const u8 = &.{};
             inline for (module.mach_systems) |fn_tag| {
@@ -948,7 +954,7 @@ pub fn Modules(module_lists: anytype) type {
             };
 
             // Note: no need to validate(module) here because it is derived from `modules`.
-            const module = @field(ModuleTypesByName(modules){}, @tagName(module_name));
+            const module = @field(module_types_by_name, @tagName(module_name));
 
             return struct {
                 mods: *ModulesByName(modules),
