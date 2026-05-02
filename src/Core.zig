@@ -22,6 +22,13 @@ pub const mach_systems = .{
 ///
 /// Note: Core does not expose a concept of monitors, because it aims to support a broad range of
 /// platforms (mobile phones, consoles, browser, etc.) where such a concept does not make sense.
+///
+/// Note: Core does not expose a concept of 'requesting a window framebuffer at lower than native
+/// resolution' - on macOS/iOS this is possible with the ability to choose nearest/bilinear/trilinear
+/// upscaling, on Windows this is only possible with bilinear, on Android this is not possible, and
+/// on Wayland this is usually bilinear but depends on the compositor and available extensions. As
+/// a result, Core always renders at the native resolution and it is on your app to handle any
+/// scaled rendering it needs appropriately.
 windows: mach.Objects(
     // Set track_fields to true so that when these field values change, we know about it
     // and can update the platform windows.
