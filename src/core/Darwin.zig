@@ -48,7 +48,6 @@ pub const Native = struct {
     /// Set by the main thread (windowDidResize / vsync change); consumed by the render thread to
     /// recreate the swap chain before the next frame.
     pending_swap_chain_update: ?PendingSwapChainUpdate = null,
-
 };
 
 /// Per-window context for CAMetalDisplayLink. Heap-allocated so the pointer remains stable when
@@ -280,20 +279,45 @@ const WindowContext = struct {
     io: std.Io,
 };
 
-/// Application entry point called by Core.main. Sets up the NSApplication delegate and run loop,
-/// then repeatedly calls on_each_update_fn via dispatch_async on the main queue.
+// TODO(core): port libdispatch and use it instead of doing this directly.
+extern "System" fn dispatch_async(queue: *anyopaque, block: *objc.foundation.Block(fn () void)) void;
+extern "System" var _dispatch_main_q: anyopaque;
+
+// Called by wakeMainThread when set.
+var main_tick_block: ?*objc.foundation.Block(fn () void) = null;
+
+// When true, a main tick is already enqueued on the main dispatch queue and additional wakes are
+// deduplicated. Required because `dispatch_async` (unlike e.g. `std.Io.Event.set`) does NOT
+// coalesce, so without this flag every wake would enqueue another tick with no upper bound on
+// backlog.
+var main_tick_pending: std.atomic.Value(bool) = .init(false);
+
+// Called by Core when the user calls Core.snapshotStart, Core.events, core.exit
+pub fn wakeMainThread(_: *Core) void {
+    if (main_tick_pending.cmpxchgStrong(false, true, .acq_rel, .acquire) == null) {
+        const block = main_tick_block orelse return;
+        dispatch_async(&_dispatch_main_q, block);
+    }
+}
+
+/// Application entry point called by Core.main. Sets up the NSApplication delegate and run loop.
+/// The main thread does NOT busy-loop: each tick runs once per call to `wakeMainThread`, which
+/// is invoked by the app thread from `events()` and `snapshotStart()`.
 pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@TypeOf(on_each_update_fn))) noreturn {
     const Args = @TypeOf(args_tuple);
     const args_bytes = std.mem.asBytes(&args_tuple);
     const ArgsBytes = @TypeOf(args_bytes.*);
     const Helper = struct {
-        // TODO(core): port libdispatch and use it instead of doing this directly.
-        extern "System" fn dispatch_async(queue: *anyopaque, block: *objc.foundation.Block(fn () void)) void;
-        extern "System" var _dispatch_main_q: anyopaque;
         pub fn cCallback(block: *objc.foundation.BlockLiteral(ArgsBytes)) callconv(.c) void {
             const args: *Args = @ptrCast(&block.context);
+
+            // Reset the wake flag BEFORE running tick so any wake that arrives during tick
+            // re-arms a follow-up dispatch.
+            main_tick_pending.store(false, .release);
+
             if (@call(.auto, on_each_update_fn, args.*) catch false) {
-                dispatch_async(&_dispatch_main_q, block.asBlockWithSignature(fn () void));
+                // Do not auto-redispatch. The next tick happens only when `wakeMainThread`
+                // is called (e.g. from the app thread's `events()` / `snapshotStart()`).
             } else {
                 // We copied the block when we called `setRunBlock()`, so we release it here when the looping will end.
                 block.release();
@@ -304,11 +328,18 @@ pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@
     };
     var block_literal = objc.foundation.stackBlockLiteral(Helper.cCallback, args_bytes.*, null, null);
 
+    // Copy the block once; this stable, heap-owned reference is what `wakeMainThread` will
+    // re-dispatch for the lifetime of Core.
+    const dispatch_block = block_literal.asBlock().copy();
+    main_tick_block = dispatch_block;
+
     // `NSApplicationMain()` and `UIApplicationMain()` never return, so there's no point in trying to add any kind of cleanup work here.
     const ns_app = objc.app_kit.Application.sharedApplication();
 
     const delegate = objc.mach.AppDelegate.allocInit();
-    delegate.setRunBlock(block_literal.asBlock().copy());
+    // AppDelegate.applicationDidFinishLaunching invokes this block synchronously once, kicking
+    // off the very first main tick. Subsequent main ticks are driven by `wakeMainThread`.
+    delegate.setRunBlock(dispatch_block);
     ns_app.setDelegate(@ptrCast(delegate));
 
     ns_app.run();
@@ -381,7 +412,9 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
             frame.size.width = @floatFromInt(core.windows.get(window_id, .width));
             frame.size.height = @floatFromInt(core.windows.get(window_id, .height));
             native_window.setFrame_display_animate(
-                native_window.frameRectForContentRect(frame), true, true,
+                native_window.frameRectForContentRect(frame),
+                true,
+                true,
             );
         }
 

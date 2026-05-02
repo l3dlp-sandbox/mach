@@ -358,6 +358,7 @@ pub fn snapshotStart(core: *Core, io: std.Io) !void {
     }
 
     core.render_mu.lockUncancelable(io);
+    Platform.wakeMainThread(core);
     try core.render_graph.copyFrom(core.windows.internal.graph, core.allocator);
 }
 
@@ -455,9 +456,8 @@ fn handleExit(core: *Core, core_mod: mach.Mod(Core)) !void {
 pub fn exit(core: *Core) void {
     core.state.store(.exiting, .release);
     core.events_ready.set(core.io);
+    Platform.wakeMainThread(core);
 }
-
-
 
 pub fn deinit(core: *Core) !void {
     core.state.store(.exited, .release);
@@ -540,6 +540,8 @@ pub const EventIterator = struct {
 /// Events are always buffered between calls to events() so none are lost, the mode strictly
 /// controls pacing of your event handling loop itself.
 pub fn events(core: *@This(), mode_arg: EventMode) EventIterator {
+    Platform.wakeMainThread(core);
+
     // Resolve .default and .adaptive aliases to a concrete mode.
     const mode: EventMode = switch (mode_arg) {
         .default => blk: {

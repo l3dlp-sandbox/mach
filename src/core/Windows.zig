@@ -33,6 +33,11 @@ pub const Native = struct {
     // dinput: *w.IDirectInput8W = undefined,
 };
 
+// Called by Core when the user calls Core.snapshotStart, Core.events, core.exit
+pub fn wakeMainThread(core: *Core) void {
+    _ = core;
+}
+
 pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@TypeOf(on_each_update_fn))) void {
     while (@call(.auto, on_each_update_fn, args_tuple) catch false) {}
 }
