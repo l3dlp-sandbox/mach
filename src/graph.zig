@@ -168,6 +168,10 @@ pub const Graph = struct {
     /// Set by copyFrom to signal the processing thread to release process_mu promptly.
     copy_pending: std.atomic.Value(bool) = .init(false),
 
+    /// Signaled by producers after pushing to the queue (and by deinit) so the processing thread
+    /// can sleep instead of busy-spinning when there is no work to do.
+    wake_event: std.Io.Event = .unset,
+
     /// Initialize the graph with the given pre-allocated space for nodes and operations.
     ///
     /// Spawns a backgroound thread for processing operations to the graph.
@@ -221,6 +225,7 @@ pub const Graph = struct {
 
     pub fn deinit(graph: *Graph, allocator: std.mem.Allocator) void {
         graph.should_stop.store(true, .release);
+        graph.wake_event.set(graph.io); // wake the processing thread so it observes should_stop
         graph.thread.?.join();
         for (graph.result_lists.available.items) |list| {
             list.deinit(allocator);
@@ -263,6 +268,7 @@ pub const Graph = struct {
     /// Processed asynchronously by the graph's background thread, use sync() to observe completion.
     pub fn cascadeDelete(graph: *Graph, allocator: std.mem.Allocator, id: u64) Error!void {
         try graph.queue.push(allocator, .{ .cascade_delete = .{ .id = id } });
+        graph.wake_event.set(graph.io);
     }
 
     fn doCascadeDelete(graph: *Graph, node: *Node) void {
@@ -282,13 +288,29 @@ pub const Graph = struct {
     /// The thread that runs continuously in the background to process queue submissions.
     fn processThread(graph: *Graph, allocator: std.mem.Allocator) void {
         while (!graph.should_stop.load(.acquire)) {
-            graph.process_mu.lockUncancelable(graph.io);
-            while (graph.queue.pop()) |op| {
-                graph.processOp(allocator, op);
-                if (graph.copy_pending.load(.acquire)) break;
-            }
-            graph.process_mu.unlock(graph.io);
-            std.Thread.yield() catch {};
+            graph.drainQueue(allocator);
+            if (graph.should_stop.load(.acquire)) break;
+
+            // We must reset BEFORE the final drain to close the lost-wakeup race:
+            //   - If a producer pushes between the first drain and the reset, the reset clears
+            //     their wake; the second drain after reset will pick up their item and we loop
+            //     again without sleeping.
+            //   - If a producer pushes after the reset, their set() will keep the event armed so
+            //     the wait() returns immediately.
+            graph.wake_event.reset();
+            graph.drainQueue(allocator);
+            if (graph.should_stop.load(.acquire)) break;
+
+            graph.wake_event.waitUncancelable(graph.io);
+        }
+    }
+
+    fn drainQueue(graph: *Graph, allocator: std.mem.Allocator) void {
+        graph.process_mu.lockUncancelable(graph.io);
+        defer graph.process_mu.unlock(graph.io);
+        while (graph.queue.pop()) |op| {
+            graph.processOp(allocator, op);
+            if (graph.copy_pending.load(.acquire)) break;
         }
     }
 
@@ -415,6 +437,7 @@ pub const Graph = struct {
             .parent_id = parent_id,
             .child_id = child_id,
         } });
+        graph.wake_event.set(graph.io);
     }
 
     pub fn removeChild(graph: *Graph, allocator: std.mem.Allocator, parent_id: u64, child_id: u64) Error!void {
@@ -423,6 +446,7 @@ pub const Graph = struct {
             .parent_id = parent_id,
             .child_id = child_id,
         } });
+        graph.wake_event.set(graph.io);
     }
 
     pub fn setParent(graph: *Graph, allocator: std.mem.Allocator, child_id: u64, parent_id: u64) Error!void {
@@ -432,6 +456,7 @@ pub const Graph = struct {
             .child_id = child_id,
             .parent_id = parent_id,
         } });
+        graph.wake_event.set(graph.io);
     }
 
     /// Waits for all prior operations enqueued by this thread to be processed by the background
@@ -439,15 +464,18 @@ pub const Graph = struct {
     pub fn sync(graph: *Graph, allocator: std.mem.Allocator) Error!void {
         var done = std.atomic.Value(bool).init(false);
         try graph.queue.push(allocator, .{ .sync = .{ .done = &done } });
-        while (!done.load(.acquire)) {
-            std.Thread.yield() catch {};
-        }
+        graph.wake_event.set(graph.io);
+
+        // Graph operations are sub-microsecond, so a futex round-trip would dominate. Instead, we
+        // spinLoopHint to keep us friendly to SMT siblings and let the CPU clock down.
+        while (!done.load(.acquire)) std.atomic.spinLoopHint();
     }
 
     pub fn removeParent(graph: *Graph, allocator: std.mem.Allocator, child_id: u64) Error!void {
         try graph.queue.push(allocator, .{ .remove_parent = .{
             .child_id = child_id,
         } });
+        graph.wake_event.set(graph.io);
     }
 
     pub const Results = struct {
@@ -477,10 +505,10 @@ pub const Graph = struct {
             .err = &err,
             .done = &done,
         } });
+        graph.wake_event.set(graph.io);
 
-        while (!done.load(.acquire)) {
-            std.Thread.yield() catch {};
-        }
+        // See sync() for the rationale on spinning rather than blocking.
+        while (!done.load(.acquire)) std.atomic.spinLoopHint();
 
         if (err) |e| return e;
         return Results{
@@ -614,10 +642,10 @@ pub const Graph = struct {
             .result = &result,
             .done = &done,
         } });
+        graph.wake_event.set(graph.io);
 
-        while (!done.load(.acquire)) {
-            std.Thread.yield() catch {};
-        }
+        // See sync() for the rationale on spinning rather than blocking.
+        while (!done.load(.acquire)) std.atomic.spinLoopHint();
 
         return result;
     }
