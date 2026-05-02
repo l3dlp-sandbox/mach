@@ -18,9 +18,13 @@ pub const mach_systems = .{
     .deinit,
 };
 
-// Set track_fields to true so that when these field values change, we know about it
-// and can update the platform windows.
+/// Window objects managed by the platform.
+///
+/// Note: Core does not expose a concept of monitors, because it aims to support a broad range of
+/// platforms (mobile phones, consoles, browser, etc.) where such a concept does not make sense.
 windows: mach.Objects(
+    // Set track_fields to true so that when these field values change, we know about it
+    // and can update the platform windows.
     .{ .track_fields = true },
     struct {
         /// Window title string. May be a static string literal, or owned memory managed via
