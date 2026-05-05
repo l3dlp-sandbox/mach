@@ -773,62 +773,76 @@ pub const InputState = struct {
 };
 
 pub const Event = union(enum) {
-    key_press: KeyEvent,
-    key_repeat: KeyEvent,
-    key_release: KeyEvent,
-    char_input: struct {
+    open: Open,
+    close: Close,
+    resize: Resize,
+    focus_gained: FocusGained,
+    focus_lost: FocusLost,
+    key_press: Key,
+    key_repeat: Key,
+    key_release: Key,
+    char_input: CharInput,
+    mouse_motion: MouseMotion,
+    mouse_press: MouseButton,
+    mouse_release: MouseButton,
+    mouse_scroll: MouseScroll,
+    zoom_gesture: ZoomGesture,
+
+    pub const Key = struct {
+        window_id: mach.ObjectID,
+        key: KeyButtonID,
+        mods: KeyMods,
+    };
+
+    pub const CharInput = struct {
         window_id: mach.ObjectID,
         codepoint: u21,
-    },
-    mouse_motion: struct {
+    };
+
+    pub const MouseMotion = struct {
         window_id: mach.ObjectID,
         pos: Position,
-    },
-    mouse_press: MouseButtonEvent,
-    mouse_release: MouseButtonEvent,
-    mouse_scroll: struct {
+    };
+
+    pub const MouseButton = struct {
+        window_id: mach.ObjectID,
+        button: MouseButtonID,
+        pos: Position,
+        mods: KeyMods,
+    };
+
+    pub const MouseScroll = struct {
         window_id: mach.ObjectID,
         xoffset: f32,
         yoffset: f32,
-    },
-    resize: ResizeEvent,
-    open: struct {
-        window_id: mach.ObjectID,
-    },
-    zoom_gesture: ZoomGestureEvent,
-    focus_gained: struct {
-        window_id: mach.ObjectID,
-    },
-    focus_lost: struct {
-        window_id: mach.ObjectID,
-    },
-    close: struct {
-        window_id: mach.ObjectID,
-    },
-};
+    };
 
-pub const KeyEvent = struct {
-    window_id: mach.ObjectID,
-    key: KeyButtonID,
-    mods: KeyMods,
-};
+    pub const Resize = struct {
+        window_id: mach.ObjectID,
+        size: Size,
+    };
 
-pub const MouseButtonEvent = struct {
-    window_id: mach.ObjectID,
-    button: MouseButtonID,
-    pos: Position,
-    mods: KeyMods,
-};
+    pub const Open = struct {
+        window_id: mach.ObjectID,
+    };
 
-pub const ResizeEvent = struct {
-    window_id: mach.ObjectID,
-    size: Size,
-};
+    pub const ZoomGesture = struct {
+        window_id: mach.ObjectID,
+        phase: GesturePhase,
+        zoom: f32,
+    };
 
-pub const ZoomGestureEvent = struct {
-    window_id: mach.ObjectID,
-    phase: GesturePhase,
-    zoom: f32,
+    pub const FocusGained = struct {
+        window_id: mach.ObjectID,
+    };
+
+    pub const FocusLost = struct {
+        window_id: mach.ObjectID,
+    };
+
+    pub const Close = struct {
+        window_id: mach.ObjectID,
+    };
 };
 
 pub const GesturePhase = enum {
@@ -1130,8 +1144,6 @@ test {
     @import("std").testing.refAllDecls(Size);
     @import("std").testing.refAllDecls(Position);
     @import("std").testing.refAllDecls(Event);
-    @import("std").testing.refAllDecls(KeyEvent);
-    @import("std").testing.refAllDecls(MouseButtonEvent);
     @import("std").testing.refAllDecls(MouseButtonID);
     @import("std").testing.refAllDecls(KeyButtonID);
     @import("std").testing.refAllDecls(KeyMods);

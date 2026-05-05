@@ -4,7 +4,7 @@ const gpu = mach.gpu;
 const Linux = @import("../Linux.zig");
 const Core = @import("../../Core.zig");
 const InitOptions = Core.InitOptions;
-const KeyEvent = Core.KeyEvent;
+const KeyEvent = Core.Event.Key;
 const DisplayMode = Core.DisplayMode;
 const log = std.log.scoped(.mach);
 

@@ -7,8 +7,8 @@ const windowmsg = @import("windowmsg.zig");
 
 const gpu = mach.gpu;
 const Event = Core.Event;
-const KeyEvent = Core.KeyEvent;
-const MouseButtonEvent = Core.MouseButtonEvent;
+const KeyEvent = Core.Event.Key;
+const MouseButtonEvent = Core.Event.MouseButton;
 const MouseButton = Core.MouseButtonID;
 const Size = Core.Size;
 const DisplayMode = Core.DisplayMode;
