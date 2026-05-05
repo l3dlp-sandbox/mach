@@ -857,7 +857,7 @@ const pointer_listener = struct {
         _ = time;
         const wl = &core_ptr.windows.getValue(window_id).native.?.wayland;
 
-        const mouse_button: Core.MouseButton = @enumFromInt(button - c.BTN_LEFT);
+        const mouse_button: Core.MouseButtonID = @enumFromInt(button - c.BTN_LEFT);
         const pressed = state == c.WL_POINTER_BUTTON_STATE_PRESSED;
         const x = core_ptr.input_state.mouse_position.x;
         const y = core_ptr.input_state.mouse_position.y;
@@ -1090,7 +1090,7 @@ fn composeSymbol(wl: *const Native, sym: c.xkb_keysym_t) c.xkb_keysym_t {
     };
 }
 
-fn toMachKey(key: u32) Core.Key {
+fn toMachKey(key: u32) Core.KeyButtonID {
     return switch (key) {
         c.KEY_GRAVE => .grave,
         c.KEY_1 => .one,

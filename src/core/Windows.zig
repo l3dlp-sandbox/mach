@@ -9,14 +9,14 @@ const gpu = mach.gpu;
 const Event = Core.Event;
 const KeyEvent = Core.KeyEvent;
 const MouseButtonEvent = Core.MouseButtonEvent;
-const MouseButton = Core.MouseButton;
+const MouseButton = Core.MouseButtonID;
 const Size = Core.Size;
 const DisplayMode = Core.DisplayMode;
 const CursorShape = Core.CursorShape;
 const VSyncMode = Core.VSyncMode;
 const CursorMode = Core.CursorMode;
 const Position = Core.Position;
-const Key = Core.Key;
+const Key = Core.KeyButtonID;
 const KeyMods = Core.KeyMods;
 
 const log = std.log.scoped(.mach);

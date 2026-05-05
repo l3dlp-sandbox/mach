@@ -274,7 +274,7 @@ fn fillTone(_: *App, audio: *mach.Audio, frequency: f32) ![]align(mach.Audio.ali
 }
 
 // TODO(Core)
-fn keyToFrequency(key: mach.Core.Key) f32 {
+fn keyToFrequency(key: mach.Core.KeyButtonID) f32 {
     // The frequencies here just come from a piano frequencies chart. You can google for them.
     return switch (key) {
         // First row of piano keys, the highest.

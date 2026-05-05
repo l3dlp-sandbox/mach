@@ -5,14 +5,14 @@ const gpu = mach.gpu;
 const Event = Core.Event;
 const KeyEvent = Core.KeyEvent;
 const MouseButtonEvent = Core.MouseButtonEvent;
-const MouseButton = Core.MouseButton;
+const MouseButton = Core.MouseButtonID;
 const Size = Core.Size;
 const DisplayMode = Core.DisplayMode;
 const CursorShape = Core.CursorShape;
 const VSyncMode = Core.VSyncMode;
 const CursorMode = Core.CursorMode;
 const Position = Core.Position;
-const Key = Core.Key;
+const Key = Core.KeyButtonID;
 const KeyMods = Core.KeyMods;
 const objc = @import("objc");
 const metal = @import("../sysgpu/metal.zig");
@@ -893,7 +893,7 @@ const ViewCallbacks = struct {
         };
 
         if (event.modifierFlags() & key_flag != 0) {
-            if (core.input_state.isKeyPressed(key)) {
+            if (core.input_state.keyPressed(key)) {
                 core.pushEvent(.{ .key_release = .{ .window_id = window_id, .key = key, .mods = mods } });
             } else {
                 core.pushEvent(.{ .key_press = .{ .window_id = window_id, .key = key, .mods = mods } });
@@ -956,7 +956,7 @@ fn machModifierFromModifierFlag(modifier_flag: usize) Core.KeyMods {
     return modifier;
 }
 
-fn machKeyFromKeycode(keycode: c_ushort) Core.Key {
+fn machKeyFromKeycode(keycode: c_ushort) Core.KeyButtonID {
     comptime var table: [256]Key = undefined;
     comptime for (&table, 1..) |*ptr, i| {
         ptr.* = switch (i) {

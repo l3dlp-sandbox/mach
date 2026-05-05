@@ -630,7 +630,7 @@ pub fn events(core: *@This(), mode_arg: EventMode) EventIterator {
             .mouse_motion => |ev| core.input_state.mouse_position = ev.pos,
             .focus_lost => {
                 // Clear input state that may be 'stuck' when focus is regained.
-                core.input_state.keys = InputState.KeyBitSet.initEmpty();
+                core.input_state.keys = InputState.KeyButtonBitSet.initEmpty();
                 core.input_state.mouse_buttons = InputState.MouseButtonSet.initEmpty();
             },
             else => {},
@@ -661,20 +661,20 @@ pub fn outOfMemory(core: *@This()) bool {
     return true;
 }
 
-pub fn keyPressed(core: *@This(), key: Key) bool {
-    return core.input_state.isKeyPressed(key);
+pub fn keyPressed(core: *@This(), key: KeyButtonID) bool {
+    return core.input_state.keyPressed(key);
 }
 
-pub fn keyReleased(core: *@This(), key: Key) bool {
-    return core.input_state.isKeyReleased(key);
+pub fn keyReleased(core: *@This(), key: KeyButtonID) bool {
+    return core.input_state.keyReleased(key);
 }
 
-pub fn mousePressed(core: *@This(), button: MouseButton) bool {
-    return core.input_state.isMouseButtonPressed(button);
+pub fn mousePressed(core: *@This(), button: MouseButtonID) bool {
+    return core.input_state.mousePressed(button);
 }
 
-pub fn mouseReleased(core: *@This(), button: MouseButton) bool {
-    return core.input_state.isMouseButtonReleased(button);
+pub fn mouseReleased(core: *@This(), button: MouseButtonID) bool {
+    return core.input_state.mouseReleased(button);
 }
 
 pub fn mousePosition(core: *@This()) Position {
@@ -748,27 +748,27 @@ const Platform = switch (builtin.target.os.tag) {
 };
 
 pub const InputState = struct {
-    const KeyBitSet = std.StaticBitSet(@as(u8, @intFromEnum(Key.max)) + 1);
-    const MouseButtonSet = std.StaticBitSet(@as(u4, @intFromEnum(MouseButton.max)) + 1);
+    const KeyButtonBitSet = std.StaticBitSet(@as(u8, @intFromEnum(KeyButtonID.max)) + 1);
+    const MouseButtonSet = std.StaticBitSet(@as(u4, @intFromEnum(MouseButtonID.max)) + 1);
 
-    keys: KeyBitSet = KeyBitSet.initEmpty(),
+    keys: KeyButtonBitSet = KeyButtonBitSet.initEmpty(),
     mouse_buttons: MouseButtonSet = MouseButtonSet.initEmpty(),
     mouse_position: Position = .{ .x = 0, .y = 0 },
 
-    pub inline fn isKeyPressed(input: InputState, key: Key) bool {
+    pub inline fn keyPressed(input: InputState, key: KeyButtonID) bool {
         return input.keys.isSet(@intFromEnum(key));
     }
 
-    pub inline fn isKeyReleased(input: InputState, key: Key) bool {
-        return !input.isKeyPressed(key);
+    pub inline fn keyReleased(input: InputState, key: KeyButtonID) bool {
+        return !input.keyPressed(key);
     }
 
-    pub inline fn isMouseButtonPressed(input: InputState, button: MouseButton) bool {
+    pub inline fn mousePressed(input: InputState, button: MouseButtonID) bool {
         return input.mouse_buttons.isSet(@intFromEnum(button));
     }
 
-    pub inline fn isMouseButtonReleased(input: InputState, button: MouseButton) bool {
-        return !input.isMouseButtonPressed(button);
+    pub inline fn mouseReleased(input: InputState, button: MouseButtonID) bool {
+        return !input.mousePressed(button);
     }
 };
 
@@ -809,13 +809,13 @@ pub const Event = union(enum) {
 
 pub const KeyEvent = struct {
     window_id: mach.ObjectID,
-    key: Key,
+    key: KeyButtonID,
     mods: KeyMods,
 };
 
 pub const MouseButtonEvent = struct {
     window_id: mach.ObjectID,
-    button: MouseButton,
+    button: MouseButtonID,
     pos: Position,
     mods: KeyMods,
 };
@@ -841,7 +841,7 @@ pub const GesturePhase = enum {
     cancelled,
 };
 
-pub const MouseButton = enum {
+pub const MouseButtonID = enum {
     left,
     right,
     middle,
@@ -851,10 +851,10 @@ pub const MouseButton = enum {
     seven,
     eight,
 
-    pub const max = MouseButton.eight;
+    pub const max = MouseButtonID.eight;
 };
 
-pub const Key = enum {
+pub const KeyButtonID = enum {
     a,
     b,
     c,
@@ -990,7 +990,7 @@ pub const Key = enum {
 
     unknown,
 
-    pub const max = Key.unknown;
+    pub const max = KeyButtonID.unknown;
 };
 
 pub const KeyMods = packed struct(u16) {
@@ -1132,8 +1132,8 @@ test {
     @import("std").testing.refAllDecls(Event);
     @import("std").testing.refAllDecls(KeyEvent);
     @import("std").testing.refAllDecls(MouseButtonEvent);
-    @import("std").testing.refAllDecls(MouseButton);
-    @import("std").testing.refAllDecls(Key);
+    @import("std").testing.refAllDecls(MouseButtonID);
+    @import("std").testing.refAllDecls(KeyButtonID);
     @import("std").testing.refAllDecls(KeyMods);
     @import("std").testing.refAllDecls(DisplayMode);
     @import("std").testing.refAllDecls(CursorMode);
