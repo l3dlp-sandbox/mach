@@ -21,24 +21,19 @@ pub const sysaudio = if (build_options.want_sysaudio) @import("sysaudio/main.zig
 pub const sysgpu = if (build_options.want_sysgpu) @import("sysgpu/main.zig") else struct {};
 pub const gpu = if (build_options.want_sysgpu) @import("sysgpu/main.zig").sysgpu else struct {};
 
-pub const Modules = @import("module.zig").Modules;
-pub const Thread = @import("module.zig").Thread;
-pub const startThread = @import("module.zig").startThread;
-
-pub const ModuleID = @import("module.zig").ModuleID;
-pub const ModuleFunctionID = @import("module.zig").ModuleFunctionID;
-pub const FunctionID = @import("module.zig").FunctionID;
-pub const Mod = @import("module.zig").Mod;
-pub const ObjectID = @import("module.zig").ObjectID;
-pub const Objects = @import("module.zig").Objects;
+const module = @import("module.zig");
+pub const FunctionID = module.FunctionID;
 pub const Graph = @import("graph.zig").Graph;
-pub const initGraph = @import("module.zig").initGraph;
-pub const Io = std.Io;
-
-// TODO(object): remove this?
-pub fn schedule(v: anytype) @TypeOf(v) {
-    return v;
-}
+pub const Mod = module.Mod;
+pub const ModuleID = module.ModuleID;
+pub const Modules = module.Modules;
+pub const ModuleFunctionID = module.ModuleFunctionID;
+pub const ObjectID = module.ObjectID;
+pub const Objects = module.Objects;
+pub const Thread = module.Thread;
+pub const initGraph = module.initGraph;
+pub const schedule = module.schedule;
+pub const startThread = module.startThread;
 
 // Instrumented function to load system libraries and print nicer error
 // messages. Accepts a tuple of library names to try in order (e.g.,

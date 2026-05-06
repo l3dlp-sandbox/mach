@@ -46,6 +46,61 @@ pub fn initGraph(graph: *Graph, allocator: std.mem.Allocator, io: std.Io, compti
     });
 }
 
+/// Validate that the given tuple is a valid schedule, returning true if so.
+fn validateSchedule(comptime entries: anytype) bool {
+    const Entries = @TypeOf(entries);
+    const entries_info = @typeInfo(Entries);
+    if (entries_info != .@"struct" or !entries_info.@"struct".is_tuple) {
+        @compileError("mach.schedule() expects a tuple of .{ Module, .fn_name } entries, found: " ++ @typeName(Entries));
+    }
+    inline for (entries) |tuple| {
+        const tuple_info = @typeInfo(@TypeOf(tuple));
+        // Check it's a 2-field tuple before accessing fields
+        if (tuple_info != .@"struct" or !tuple_info.@"struct".is_tuple or tuple_info.@"struct".fields.len != 2) {
+            @compileError("mach.schedule() entry expected tuple .{ Module, .fn_name }, found: " ++ @typeName(@TypeOf(tuple)));
+        }
+        const Module: type = tuple.@"0";
+        const fn_name = tuple.@"1";
+
+        // Validate first field is a valid module type
+        if (!isValid(Module)) {
+            @compileError("mach.schedule() entry first field must be a valid Mach module (has `pub const mach_module = .foo_name`), found: " ++ @typeName(Module));
+        }
+        if (!@hasDecl(Module, "mach_systems")) {
+            @compileError("mach.schedule() entry first field must have a `pub const mach_systems` declaration, found: " ++ @typeName(Module));
+        }
+
+        // Validate second field is an enum literal
+        if (@typeInfo(@TypeOf(fn_name)) != .enum_literal) {
+            @compileError("mach.schedule() entry expected tuple .{ Module, .fn_name }, second value not an enum literal, found: " ++ @typeName(@TypeOf(fn_name)));
+        }
+
+        // Validate function name exists in module's mach_systems
+        if (!@hasField(ModuleFunctionName2(Module), @tagName(fn_name))) {
+            @compileError("mach.schedule() entry references ." ++ @tagName(fn_name) ++ " but module " ++ @typeName(Module) ++ " has no such entry in `mach_systems`");
+        }
+    }
+
+    return true;
+}
+
+/// When a schedule is called, the list of module functions described within are executed in order.
+///
+/// Example:
+/// ```
+/// pub const foo = mach.schedule(.{
+///     .{ App, .init },
+///     .{ Physics, .init },
+///     .{ App, .main },
+/// });
+/// ...
+/// my_mod.call(.foo); // runs App.init, Physics.init, App.main in order
+/// ```
+pub fn schedule(entries: anytype) @TypeOf(entries) {
+    _ = comptime validateSchedule(entries);
+    return entries;
+}
+
 /// An ID representing a mach object. This is an opaque identifier which effectively encodes:
 ///
 /// * An array index that can be used to O(1) lookup the actual data / struct fields of the object.
