@@ -64,7 +64,6 @@ test {
     _ = sysgpu;
     _ = gfx;
     _ = Audio;
-    _ = Audio;
     _ = math;
     _ = testing;
     _ = time;
