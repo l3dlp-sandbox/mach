@@ -57,9 +57,10 @@ pub fn build(b: *std.Build) !void {
     const want_examples = build_all or (build_examples orelse false);
     const want_libs = build_all or (build_libs orelse false);
     const want_mach = build_all or (build_mach orelse false);
-    const want_core = build_all or want_mach or (build_core orelse false);
-    const want_sysaudio = build_all or want_mach or (build_sysaudio orelse false);
-    const want_sysgpu = build_all or want_mach or want_core or (build_sysgpu orelse false);
+    // libmach requires sysgpu, core, and sysaudio.
+    const want_core = build_all or want_mach or want_libs or (build_core orelse false);
+    const want_sysaudio = build_all or want_mach or want_libs or (build_sysaudio orelse false);
+    const want_sysgpu = build_all or want_mach or want_libs or want_core or (build_sysgpu orelse false);
 
     const build_options = b.addOptions();
     build_options.addOption(bool, "want_mach", want_mach);
@@ -198,10 +199,13 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
             })) |dep| module.addImport("objc", dep.module("mach-objc"));
         }
-        if (want_libs) {
-            // TODO(build): make this 'libmach' and test the build of this in CI.
+    }
+
+    if (want_libs) {
+        inline for (&[_]std.builtin.LinkMode{ .static, .dynamic }) |linkage| {
             const lib = b.addLibrary(.{
-                .name = "mach-sysgpu",
+                .name = "mach",
+                .linkage = linkage,
                 .root_module = b.createModule(.{
                     .root_source_file = b.path("src/main.zig"),
                     .target = target,
@@ -213,6 +217,9 @@ pub fn build(b: *std.Build) !void {
                 lib.root_module.addImport(e.key_ptr.*, e.value_ptr.*);
             }
             linkSysgpu(b, lib.root_module);
+            linkCore(b, lib.root_module);
+            linkSysaudio(b, lib.root_module);
+            lib.installHeader(b.path("include/libmach.h"), "libmach.h");
             b.installArtifact(lib);
         }
     }
