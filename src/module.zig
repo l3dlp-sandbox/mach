@@ -1106,6 +1106,7 @@ pub fn Modules(module_lists: anytype) type {
         }
 
         pub fn callDynamic(m: *@This(), f: FunctionID) void {
+            if (comptime modules.len == 0) return;
             const module_name: ModuleName = @enumFromInt(f.module_id);
             switch (module_name) {
                 inline else => |mod_name| {
@@ -1144,7 +1145,7 @@ fn NameEnum(comptime mods: anytype) type {
         validate(module);
         enum_names = enum_names ++ [_][]const u8{@tagName(module.mach_module)};
     }
-    const TagType = std.math.IntFittingRange(0, enum_names.len - 1);
+    const TagType = if (enum_names.len > 0) std.math.IntFittingRange(0, enum_names.len - 1) else u0;
     return @Enum(TagType, .exhaustive, enum_names, &std.simd.iota(TagType, enum_names.len));
 }
 
