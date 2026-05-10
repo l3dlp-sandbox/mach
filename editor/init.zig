@@ -83,7 +83,7 @@ pub fn run(
     // Generate build.zig.zon by performing substitutions on the embedded template.
     const mach_url = try std.fmt.allocPrint(
         arena,
-        "https://pkg.hexops.org/mach/{s}.tar.gz",
+        "https://pkg.hexops.org/pkg/hexops/mach/{s}.tar.gz",
         .{build_info.mach_version},
     );
     const zon_contents = try substituteZonTemplate(arena, build_zig_zon_template, .{
