@@ -88,6 +88,8 @@ pub fn build(b: *std.Build) !void {
 
     // Setup Steps
     const docs_step = b.step("docs", "Generate docs");
+    const editor_step = b.step("editor", "Build the 'mach' editor / CLI");
+    buildEditor(b, optimize, target, editor_step);
     for (&examples) |*example| {
         example.run_step = b.step(
             b.fmt("run-{s}", .{example.name}),
@@ -487,6 +489,120 @@ fn buildExamples(
         example.run_step.dependOn(&run_cmd.step);
     }
 }
+
+fn buildEditor(
+    b: *std.Build,
+    optimize: std.builtin.OptimizeMode,
+    target: std.Build.ResolvedTarget,
+    editor_step: *std.Build.Step,
+) void {
+    // Custom build step for producing build info (such as Mach and Zig version used.)
+    const version_step = BuildInfoStep.create(b);
+    const build_info_mod = b.createModule(.{
+        .root_source_file = version_step.getOutput(),
+    });
+
+    const editor_mod = b.createModule(.{
+        .root_source_file = b.path("editor/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    editor_mod.addImport("build_info", build_info_mod);
+
+    const editor_exe = b.addExecutable(.{
+        .name = "mach",
+        .root_module = editor_mod,
+    });
+
+    const install_editor = b.addInstallArtifact(editor_exe, .{});
+    editor_step.dependOn(&install_editor.step);
+}
+
+/// Custom build step for producing build info (such as Mach and Zig version used.)
+///
+/// Generates a build_info.zig file with `mach_version` (git tag or commit SHA) and
+/// `mach_zig_version` string constants.
+const BuildInfoStep = struct {
+    step: std.Build.Step,
+    generated_file: std.Build.GeneratedFile,
+
+    fn create(b: *std.Build) *BuildInfoStep {
+        const bs = b.allocator.create(BuildInfoStep) catch @panic("OOM");
+        bs.* = .{
+            .step = .init(.{
+                .id = .custom,
+                .name = "generate build_info.zig",
+                .owner = b,
+                .makeFn = make,
+            }),
+            .generated_file = .{ .step = &bs.step },
+        };
+        return bs;
+    }
+
+    fn getOutput(bs: *BuildInfoStep) std.Build.LazyPath {
+        return .{ .generated = .{ .file = &bs.generated_file } };
+    }
+
+    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
+        const b = step.owner;
+        const bs: *BuildInfoStep = @fieldParentPtr("step", step);
+
+        // Read the Mach Zig version from build.zig.zon.
+        const zon_bytes = b.build_root.handle.readFileAlloc(b.graph.io, "build.zig.zon", b.allocator, .limited(1 * 1024 * 1024)) catch |err|
+            return step.fail("unable to read build.zig.zon: {t}", .{err});
+        const mach_zig_version = parseMachZigVersion(zon_bytes) orelse
+            return step.fail("unable to find .mach_zig_version in build.zig.zon", .{});
+
+        // Run git: prefer exact-match tag, otherwise full commit SHA.
+        var code: u8 = 0;
+        const git_dir = b.build_root.path orelse ".";
+        const raw_version = b.runAllowFail(
+            &.{ "git", "-C", git_dir, "describe", "--tags", "--exact-match", "HEAD" },
+            &code,
+            .ignore,
+        ) catch b.runAllowFail(
+            &.{ "git", "-C", git_dir, "rev-parse", "HEAD" },
+            &code,
+            .ignore,
+        ) catch "unknown";
+        const mach_version = std.mem.trim(u8, raw_version, " \r\n\t");
+
+        const contents = try std.fmt.allocPrint(b.allocator,
+            \\pub const mach_version: []const u8 = "{s}";
+            \\pub const mach_zig_version: []const u8 = "{s}";
+            \\
+        , .{ mach_version, mach_zig_version });
+
+        // Write to a deterministic cache location, hashed by the file
+        // contents themselves.
+        const digest = std.Build.Cache.HashHelper.oneShot(contents);
+        const sub_path = b.pathJoin(&.{ "o", &digest, "build_info.zig" });
+        const cache_path = b.cache_root.join(b.allocator, &.{sub_path}) catch @panic("OOM");
+
+        b.cache_root.handle.createDirPath(b.graph.io, b.pathJoin(&.{ "o", &digest })) catch |err|
+            return step.fail("unable to create cache dir: {t}", .{err});
+        b.cache_root.handle.writeFile(b.graph.io, .{ .sub_path = sub_path, .data = contents }) catch |err|
+            return step.fail("unable to write {s}: {t}", .{ cache_path, err });
+
+        bs.generated_file.path = cache_path;
+    }
+
+    fn parseMachZigVersion(zon: []const u8) ?[]const u8 {
+        const key = ".mach_zig_version";
+        var idx: usize = 0;
+        while (std.mem.indexOfPos(u8, zon, idx, key)) |k| {
+            // Ensure preceding char is whitespace or start, to avoid matching .foo_mach_zig_version
+            const prev_ok = k == 0 or std.ascii.isWhitespace(zon[k - 1]) or zon[k - 1] == ',';
+            idx = k + key.len;
+            if (!prev_ok) continue;
+            const start_quote = std.mem.indexOfScalarPos(u8, zon, idx, '"') orelse return null;
+            const end_quote = std.mem.indexOfScalarPos(u8, zon, start_quote + 1, '"') orelse return null;
+            return zon[start_quote + 1 .. end_quote];
+        }
+        return null;
+    }
+};
 
 const SysAudioTest = struct {
     name: []const u8,
