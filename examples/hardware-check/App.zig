@@ -59,7 +59,6 @@ tick_timer: mach.time.Timer,
 spawn_timer: mach.time.Timer,
 rand: std.Random.DefaultPrng,
 
-
 info_text_style_id: mach.ObjectID = undefined,
 has_setup_shared: bool = false,
 sprite_texture: *gpu.Texture = undefined,
@@ -412,7 +411,6 @@ pub fn appTick(
     }
 }
 
-
 pub fn render(
     core: *mach.Core,
     app: *App,
@@ -470,7 +468,7 @@ pub fn render(
         }
     }
 
-    // Render 
+    // Render
     sprite_mod.call(.render);
     text_mod.call(.render);
 
