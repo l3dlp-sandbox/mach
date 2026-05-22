@@ -21,497 +21,417 @@ const log = std.log.scoped(.mach);
 
 pub const Darwin = @This();
 
-// Force the MACH* Obj-C class metadata to be emitted into the binary at link time. Each
-// `class_def` is the opaque returned by `objc.objc.DefineClass(...)`; simply referencing it runs
-// the comptime side effects that export the class, ivars, and method IMPs.
-comptime {
-    _ = MACHAppDelegate.class_def;
-    _ = MACHWindowDelegate.class_def;
-    _ = MACHView.class_def;
-}
+/// NSObject subclass implementing NSApplicationDelegate.
+const MACHAppDelegate = objc.objc.DefineClass(struct {
+    pub const class_name = "MACHAppDelegate";
+    pub const superclass = objc.foundation.ObjectInterface;
+    pub const protocols = &.{objc.app_kit.ApplicationDelegate};
 
-/// NSObject subclass implementing NSApplicationDelegate. Holds a single block that's invoked
-/// when the application finishes launching; mach.Core's `run()` installs the block.
-const MACHAppDelegate = opaque {
-    const class_def = objc.objc.DefineClass(struct {
-        pub const class_name = "MACHAppDelegate";
-        pub const superclass = objc.foundation.ObjectInterface;
+    pub const Self = objc.objc.Self(class_name);
 
-        pub const Self = objc.objc.Self(class_name);
+    pub const methods = struct {
+        /// Called by AppKit once at the start of `NSApp.run()`. Kicks off the very first main
+        /// tick synchronously on the main thread; subsequent ticks are driven by `wakeMainThread`.
+        pub fn @"applicationDidFinishLaunching:"(_: *Self, _: ?*objc.app_kit.Notification) void {
+            if (main_tick_fn) |f| f(main_tick_ctx);
+        }
 
-        pub const implementation = objc.objc.implementation(class_name, struct {
-            _runBlock: objc.objc.Block(fn () void),
-        });
+        pub fn @"applicationShouldTerminate:"(_: *Self, _: ?*objc.app_kit.Application) usize {
+            return 0; // NSTerminateCancel
+        }
 
-        pub const methods = struct {
-            pub fn @"applicationDidFinishLaunching:"(self: *Self, _: ?*objc.app_kit.Notification) void {
-                _ = implementation._runBlock.invoke(self, .{});
-            }
+        pub fn @"applicationShouldTerminateAfterLastWindowClosed:"(_: *Self, _: ?*objc.app_kit.Application) bool {
+            return true;
+        }
+    };
+});
 
-            pub fn @"applicationShouldTerminate:"(_: *Self, _: ?*objc.app_kit.Application) usize {
-                return 0; // NSTerminateCancel
-            }
+/// NSObject subclass implementing NSWindowDelegate.
+const MACHWindowDelegate = objc.objc.DefineClass(struct {
+    pub const class_name = "MACHWindowDelegate";
+    pub const superclass = objc.foundation.ObjectInterface;
+    pub const protocols = &.{objc.app_kit.WindowDelegate};
 
-            pub fn @"applicationShouldTerminateAfterLastWindowClosed:"(_: *Self, _: ?*objc.app_kit.Application) bool {
-                return true;
-            }
-        };
+    pub const Self = objc.objc.Self(class_name);
 
-        pub const direct_methods = struct {
-            pub fn @"setRunBlock:"(self: *Self, block: ?*anyopaque) callconv(.c) void {
-                implementation._runBlock.set(self, block);
-            }
-        };
+    pub const implementation = objc.objc.implementation(class_name, struct {
+        _state: *anyopaque, // -> *NativeState
     });
 
-    pub const InternalInfo = objc.objc.ExternClass(
-        "MACHAppDelegate",
-        @This(),
-        objc.foundation.ObjectInterface,
-        &.{objc.app_kit.ApplicationDelegate},
-    );
-    pub const as = InternalInfo.as;
-    pub const retain = InternalInfo.retain;
-    pub const release = InternalInfo.release;
-    pub const autorelease = InternalInfo.autorelease;
-    pub const new = InternalInfo.new;
-    pub const alloc = InternalInfo.alloc;
-    pub const allocInit = InternalInfo.allocInit;
-
-    pub fn setRunBlock(self: *@This(), block: *objc.foundation.Block(fn () void)) void {
-        setRunBlock_imp(self, block);
+    fn state(d: *Self) *NativeState {
+        return @ptrCast(@alignCast(implementation._state.get(d).?));
     }
-    const setRunBlock_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn () void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHAppDelegate setRunBlock:]" },
-    );
-};
 
-/// NSObject subclass implementing NSWindowDelegate. Each window delegate event of interest is
-/// dispatched to a user-installed block (`setBlock_*`).
-const MACHWindowDelegate = opaque {
-    const class_def = objc.objc.DefineClass(struct {
-        pub const class_name = "MACHWindowDelegate";
-        pub const superclass = objc.foundation.ObjectInterface;
+    /// Handles a potential window resize, framebuffer resize, or DPI change. Called from the
+    /// windowDidResize and windowDidChangeBackingProperties IMPs.
+    fn handleResize(n: *NativeState) void {
+        n.core.windows.lock();
+        defer n.core.windows.unlock();
 
-        pub const Self = objc.objc.Self(class_name);
+        const core_window = n.core.windows.getValue(n.window_id);
 
-        pub const implementation = objc.objc.implementation(class_name, struct {
-            _windowDidResize_block: objc.objc.Block(fn () void),
-            _windowShouldClose_block: objc.objc.Block(fn () bool),
-            _windowDidChangeBackingProperties_block: objc.objc.Block(fn () void),
-            _windowDidBecomeKey_block: objc.objc.Block(fn () void),
-            _windowDidResignKey_block: objc.objc.Block(fn () void),
-        });
+        // Determine the current width / height / pixel density of the window.
+        const frame = n.window.frame();
+        const content_rect = n.window.contentRectForFrameRect(frame);
+        const width: u32 = @intFromFloat(content_rect.size.width);
+        const height: u32 = @intFromFloat(content_rect.size.height);
+        const pixel_density: f32 = @floatCast(n.window.backingScaleFactor());
 
-        pub const methods = struct {
-            pub fn @"windowDidResize:"(self: *Self, _: ?*objc.app_kit.Notification) void {
-                _ = implementation._windowDidResize_block.invoke(self, .{});
-            }
+        // Skip the work if nothing actually changed (handleResize can be called for many reasons.)
+        if (core_window.width == width and
+            core_window.height == height and
+            core_window.pixel_density == pixel_density) return;
 
-            pub fn @"windowShouldClose:"(self: *Self, _: ?*objc.app_kit.Window) bool {
-                _ = implementation._windowShouldClose_block.invoke(self, .{});
-                return false;
-            }
+        const fb_width: u32 = @intFromFloat(@as(f32, @floatFromInt(width)) * pixel_density);
+        const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(height)) * pixel_density);
 
-            pub fn @"windowDidChangeBackingProperties:"(self: *Self, _: ?*objc.app_kit.Notification) void {
-                _ = implementation._windowDidChangeBackingProperties_block.invoke(self, .{});
-            }
-
-            pub fn @"windowDidBecomeKey:"(self: *Self, _: ?*objc.app_kit.Notification) void {
-                _ = implementation._windowDidBecomeKey_block.invoke(self, .{});
-            }
-
-            pub fn @"windowDidResignKey:"(self: *Self, _: ?*objc.app_kit.Notification) void {
-                _ = implementation._windowDidResignKey_block.invoke(self, .{});
-            }
-
-            pub fn @"windowWillClose:"(_: *Self, _: ?*objc.app_kit.Notification) void {
-                // TODO
-            }
+        // Queue a swap chain recreation for the render thread.
+        n.pending_swap_chain_update = .{
+            .width = width,
+            .height = height,
+            .framebuffer_width = fb_width,
+            .framebuffer_height = fb_height,
+            .pixel_density = pixel_density,
+            .vsync_mode = core_window.vsync_mode,
         };
+
+        n.core.pushEvent(.{ .resize = .{
+            .window_id = n.window_id,
+            .window_size = .{ .width = width, .height = height },
+            .framebuffer_size = .{ .width = fb_width, .height = fb_height },
+            .pixel_density = pixel_density,
+        } });
+    }
+
+    pub const methods = struct {
+        /// Called by AppKit when the user clicks the window's close button.
+        pub fn @"windowShouldClose:"(self: *Self, _: ?*objc.app_kit.Window) bool {
+            const n = state(self);
+            n.core.pushEvent(.{ .close = .{ .window_id = n.window_id } });
+            return false;
+        }
+
+        /// Called by AppKit when the window becomes key (focused).
+        pub fn @"windowDidBecomeKey:"(self: *Self, _: ?*objc.app_kit.Notification) void {
+            const n = state(self);
+            n.core.pushEvent(.{ .focus_gained = .{ .window_id = n.window_id } });
+        }
+
+        /// Called by AppKit when the window resigns key (loses focus).
+        pub fn @"windowDidResignKey:"(self: *Self, _: ?*objc.app_kit.Notification) void {
+            const n = state(self);
+            n.core.pushEvent(.{ .focus_lost = .{ .window_id = n.window_id } });
+        }
+
+        /// Called by AppKit when the user resizes the window.
+        pub fn @"windowDidResize:"(self: *Self, _: ?*objc.app_kit.Notification) void {
+            handleResize(state(self));
+        }
+
+        /// Called by AppKit when the window's backing scale factor changes (e.g. when the
+        /// window is dragged between displays of different DPI). In this case the framebuffer
+        /// size has changed so we need to consider it as a potential resize event.
+        pub fn @"windowDidChangeBackingProperties:"(self: *Self, _: ?*objc.app_kit.Notification) void {
+            handleResize(state(self));
+        }
+    };
+});
+
+/// NSView subclass implementing CAMetalDisplayLinkDelegate.
+const MACHView = objc.objc.DefineClass(struct {
+    pub const class_name = "MACHView";
+    pub const superclass = objc.app_kit.View;
+
+    pub const Self = objc.objc.Self(class_name);
+
+    pub const implementation = objc.objc.implementation(class_name, struct {
+        _state: *anyopaque, // -> *NativeState
+        trackingArea: objc.objc.StrongObject("NSTrackingArea"),
+        _displayLink: objc.objc.StrongObject("CAMetalDisplayLink"),
     });
 
-    pub const InternalInfo = objc.objc.ExternClass(
-        "MACHWindowDelegate",
-        @This(),
-        objc.foundation.ObjectInterface,
-        &.{objc.app_kit.WindowDelegate},
-    );
-    pub const as = InternalInfo.as;
-    pub const retain = InternalInfo.retain;
-    pub const release = InternalInfo.release;
-    pub const autorelease = InternalInfo.autorelease;
-    pub const new = InternalInfo.new;
-    pub const alloc = InternalInfo.alloc;
-    pub const allocInit = InternalInfo.allocInit;
-
-    pub fn setBlock_windowDidResize(self: *@This(), block: *objc.foundation.Block(fn () void)) void {
-        setBlock_windowDidResize_imp(self, block);
+    fn state(v: *Self) *NativeState {
+        return @ptrCast(@alignCast(implementation._state.get(v).?));
     }
-    const setBlock_windowDidResize_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn () void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHWindowDelegate setBlock_windowDidResize:]" },
-    );
 
-    pub fn setBlock_windowShouldClose(self: *@This(), block: *objc.foundation.Block(fn () bool)) void {
-        setBlock_windowShouldClose_imp(self, block);
+    /// Pushes a `mouse_motion` event with `event`'s window-relative position. Shared by all
+    /// the mouse{Moved,Dragged,rightMouseDragged,otherMouseDragged} IMPs.
+    fn pushMouseMotion(n: *NativeState, event: *objc.app_kit.Event) void {
+        const mouse_location = event.locationInWindow();
+        n.core.windows.lockShared();
+        const window_height: f32 = @floatFromInt(n.core.windows.get(n.window_id, .height));
+        n.core.windows.unlockShared();
+        n.core.pushEvent(.{ .mouse_motion = .{
+            .window_id = n.window_id,
+            .pos = .{ .x = mouse_location.x, .y = window_height - mouse_location.y },
+        } });
     }
-    const setBlock_windowShouldClose_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn () bool)) callconv(.c) void,
-        .{ .name = "\x01-[MACHWindowDelegate setBlock_windowShouldClose:]" },
-    );
 
-    pub fn setBlock_windowDidChangeBackingProperties(self: *@This(), block: *objc.foundation.Block(fn () void)) void {
-        setBlock_windowDidChangeBackingProperties_imp(self, block);
+    /// Pushes a `mouse_press` event. Shared by `mouseDown:`, `rightMouseDown:`, `otherMouseDown:`.
+    fn pushMousePress(n: *NativeState, event: *objc.app_kit.Event) void {
+        n.core.pushEvent(.{ .mouse_press = .{
+            .window_id = n.window_id,
+            .button = @enumFromInt(event.buttonNumber()),
+            .pos = .{ .x = event.locationInWindow().x, .y = event.locationInWindow().y },
+            .mods = machModifierFromModifierFlag(event.modifierFlags()),
+        } });
     }
-    const setBlock_windowDidChangeBackingProperties_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn () void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHWindowDelegate setBlock_windowDidChangeBackingProperties:]" },
-    );
 
-    pub fn setBlock_windowDidBecomeKey(self: *@This(), block: *objc.foundation.Block(fn () void)) void {
-        setBlock_windowDidBecomeKey_imp(self, block);
+    /// Pushes a `mouse_release` event. Shared by `mouseUp:`, `rightMouseUp:`, `otherMouseUp:`.
+    fn pushMouseRelease(n: *NativeState, event: *objc.app_kit.Event) void {
+        n.core.pushEvent(.{ .mouse_release = .{
+            .window_id = n.window_id,
+            .button = @enumFromInt(event.buttonNumber()),
+            .pos = .{ .x = event.locationInWindow().x, .y = event.locationInWindow().y },
+            .mods = machModifierFromModifierFlag(event.modifierFlags()),
+        } });
     }
-    const setBlock_windowDidBecomeKey_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn () void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHWindowDelegate setBlock_windowDidBecomeKey:]" },
-    );
 
-    pub fn setBlock_windowDidResignKey(self: *@This(), block: *objc.foundation.Block(fn () void)) void {
-        setBlock_windowDidResignKey_imp(self, block);
-    }
-    const setBlock_windowDidResignKey_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn () void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHWindowDelegate setBlock_windowDidResignKey:]" },
-    );
-};
+    pub const methods = struct {
+        /// Overrides NSView's designated initializer to install a tracking area covering the
+        /// view's visible rect, so we receive mouseEntered/Exited and mouseMoved callbacks.
+        pub fn @"initWithFrame:"(old_self: *Self, frame: objc.app_kit.Rect) ?*Self {
+            const super = objc.objc.superFn(objc.app_kit.View, "initWithFrame:", fn (*Self, objc.app_kit.Rect) ?*Self);
+            const self = super(old_self, frame) orelse return null;
 
-/// NSView subclass that:
-///  - Installs a tracking area on `initWithFrame:` so we receive mouseEntered/Exited and
-///    mouseMoved callbacks.
-///  - Forwards input events (key, mouse, scroll, magnify, insertText) to user-installed
-///    blocks via `setBlock_*` direct methods.
-///  - Optionally drives rendering off a CAMetalDisplayLink (`startDisplayLink` /
-///    `stopDisplayLink`), invoking the render block on every vsync.
-const MACHView = opaque {
-    const class_def = objc.objc.DefineClass(struct {
-        pub const class_name = "MACHView";
-        pub const superclass = objc.app_kit.View;
+            const opts: objc.app_kit.TrackingAreaOptions =
+                objc.app_kit.TrackingMouseEnteredAndExited |
+                objc.app_kit.TrackingMouseMoved |
+                objc.app_kit.TrackingActiveInActiveApp;
+            const rect = objc.app_kit.View.visibleRect(@ptrCast(self));
+            const tracking = objc.app_kit.TrackingArea.alloc().initWithRect_options_owner_userInfo(
+                rect,
+                opts,
+                @ptrCast(self),
+                null,
+            );
+            // Take ownership of the +1 retained tracking area into the
+            // strong ivar slot (no extra retain).
+            const slot = implementation.trackingArea.slot(self) orelse return self;
+            slot.* = @ptrCast(tracking);
 
-        pub const Self = objc.objc.Self(class_name);
+            objc.app_kit.View.addTrackingArea(@ptrCast(self), tracking);
+            return self;
+        }
 
-        pub const implementation = objc.objc.implementation(class_name, struct {
-            _keyDown_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _keyUp_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _flagsChanged_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _mouseMoved_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _mouseDown_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _mouseUp_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _scrollWheel_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _magnify_block: objc.objc.Block(fn (?*objc.app_kit.Event) void),
-            _insertText_block: objc.objc.Block(fn (?*objc.app_kit.Event, u32) void),
-            _render_block: objc.objc.Block(fn (?*objc.quartz_core.MetalDrawable) void),
-            trackingArea: objc.objc.StrongObject("NSTrackingArea"),
-            _displayLink: objc.objc.StrongObject("CAMetalDisplayLink"),
-        });
+        pub fn canBecomeKeyView(_: *Self) bool {
+            return true;
+        }
 
-        pub const methods = struct {
-            // Overrides NSView's designated initializer to install a tracking
-            // area covering the view's visible rect, so we receive
-            // mouseEntered/Exited and mouseMoved callbacks.
-            pub fn @"initWithFrame:"(old_self: *Self, frame: objc.app_kit.Rect) ?*Self {
-                const super = objc.objc.superFn(objc.app_kit.View, "initWithFrame:", fn (*Self, objc.app_kit.Rect) ?*Self);
-                const self = super(old_self, frame) orelse return null;
+        pub fn acceptsFirstResponder(_: *Self) bool {
+            return true;
+        }
 
-                const opts: objc.app_kit.TrackingAreaOptions =
-                    objc.app_kit.TrackingMouseEnteredAndExited |
-                    objc.app_kit.TrackingMouseMoved |
-                    objc.app_kit.TrackingActiveInActiveApp;
-                const rect = objc.app_kit.View.visibleRect(@ptrCast(self));
-                const tracking = objc.app_kit.TrackingArea.alloc().initWithRect_options_owner_userInfo(
-                    rect,
-                    opts,
-                    @ptrCast(self),
+        /// Prevent AppKit's default key handling (e.g. Esc exiting fullscreen) from firing.
+        pub fn @"doCommandBySelector:"(_: *Self, _: objc.objc.SEL) void {}
+
+        /// Pushes a `key_press` or `key_repeat` event, then forwards the event through
+        /// `interpretKeyEvents:` so AppKit can turn it into an `insertText:` call where
+        /// appropriate.
+        pub fn @"keyDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            const n = state(self);
+            const e = event.?;
+            if (e.isARepeat()) {
+                n.core.pushEvent(.{ .key_repeat = .{
+                    .window_id = n.window_id,
+                    .key = machKeyFromKeycode(e.keyCode()),
+                    .mods = machModifierFromModifierFlag(e.modifierFlags()),
+                } });
+            } else {
+                n.core.pushEvent(.{ .key_press = .{
+                    .window_id = n.window_id,
+                    .key = machKeyFromKeycode(e.keyCode()),
+                    .mods = machModifierFromModifierFlag(e.modifierFlags()),
+                } });
+            }
+            // [self interpretKeyEvents:[NSArray arrayWithObject:event]]
+            const arr = objc.foundation.Array(objc.app_kit.Event).arrayWithObject(e);
+            objc.app_kit.Responder.interpretKeyEvents(@ptrCast(self), @ptrCast(arr));
+        }
+
+        /// Pushes a `key_release` event.
+        pub fn @"keyUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            const n = state(self);
+            const e = event.?;
+            n.core.pushEvent(.{ .key_release = .{
+                .window_id = n.window_id,
+                .key = machKeyFromKeycode(e.keyCode()),
+                .mods = machModifierFromModifierFlag(e.modifierFlags()),
+            } });
+        }
+
+        /// Called when one of the modifier keys (shift, control, option, command, caps lock)
+        /// changes state. AppKit doesn't distinguish press from release for modifiers, so we
+        /// infer the transition by combining the new flag bitmask with `input_state`.
+        pub fn @"flagsChanged:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            const n = state(self);
+            const e = event.?;
+            const key = machKeyFromKeycode(e.keyCode());
+            const mods = machModifierFromModifierFlag(e.modifierFlags());
+            const key_flag = switch (key) {
+                .left_shift, .right_shift => objc.app_kit.EventModifierFlagShift,
+                .left_control, .right_control => objc.app_kit.EventModifierFlagControl,
+                .left_alt, .right_alt => objc.app_kit.EventModifierFlagOption,
+                .left_super, .right_super => objc.app_kit.EventModifierFlagCommand,
+                .caps_lock => objc.app_kit.EventModifierFlagCapsLock,
+                else => 0,
+            };
+
+            if (e.modifierFlags() & key_flag != 0) {
+                if (n.core.input_state.keyPressed(key)) {
+                    n.core.pushEvent(.{ .key_release = .{ .window_id = n.window_id, .key = key, .mods = mods } });
+                } else {
+                    n.core.pushEvent(.{ .key_press = .{ .window_id = n.window_id, .key = key, .mods = mods } });
+                }
+            } else {
+                n.core.pushEvent(.{ .key_release = .{ .window_id = n.window_id, .key = key, .mods = mods } });
+            }
+        }
+
+        pub fn @"mouseMoved:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseMotion(state(self), event.?);
+        }
+        pub fn @"mouseDragged:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseMotion(state(self), event.?);
+        }
+        pub fn @"rightMouseDragged:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseMotion(state(self), event.?);
+        }
+        pub fn @"otherMouseDragged:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseMotion(state(self), event.?);
+        }
+
+        pub fn @"mouseDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMousePress(state(self), event.?);
+        }
+        pub fn @"rightMouseDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMousePress(state(self), event.?);
+        }
+        pub fn @"otherMouseDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMousePress(state(self), event.?);
+        }
+
+        pub fn @"mouseUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseRelease(state(self), event.?);
+        }
+        pub fn @"rightMouseUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseRelease(state(self), event.?);
+        }
+        pub fn @"otherMouseUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            pushMouseRelease(state(self), event.?);
+        }
+
+        /// Pushes a `mouse_scroll` event. Trackpad scrolls report precise pixel deltas, which
+        /// we scale down to roughly match the line-based units of a wheel scroll.
+        pub fn @"scrollWheel:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            const n = state(self);
+            const e = event.?;
+            var scroll_delta_x = e.scrollingDeltaX();
+            var scroll_delta_y = e.scrollingDeltaY();
+            if (e.hasPreciseScrollingDeltas()) {
+                scroll_delta_x *= 0.1;
+                scroll_delta_y *= 0.1;
+            }
+            n.core.pushEvent(.{ .mouse_scroll = .{
+                .window_id = n.window_id,
+                .xoffset = @floatCast(scroll_delta_x),
+                .yoffset = @floatCast(scroll_delta_y),
+            } });
+        }
+
+        /// Pushes a `zoom_gesture` event. e.g. fired on macOS using a trackpad pinch.
+        pub fn @"magnifyWithEvent:"(self: *Self, event: ?*objc.app_kit.Event) void {
+            const n = state(self);
+            const e = event.?;
+            n.core.pushEvent(.{ .zoom_gesture = .{
+                .window_id = n.window_id,
+                .zoom = @floatCast(e.magnification()),
+                .phase = machPhaseFromPhase(e.phase()),
+            } });
+        }
+
+        /// Called by AppKit (via `interpretKeyEvents:` invoked from `keyDown:`) to deliver
+        /// composed/translated text input. Walks the (possibly attributed) string codepoint by
+        /// codepoint and pushes one `char_input` event per codepoint, skipping AppKit's
+        /// private-use function-key codes (arrows etc.).
+        pub fn @"insertText:"(self: *Self, string: ?*objc.foundation.String) void {
+            const n = state(self);
+
+            // Unwrap NSAttributedString → NSString if needed.
+            const characters: ?*objc.foundation.String = blk: {
+                if (objc.objc.isKindOf(string, objc.foundation.AttributedString)) {
+                    const attr: *objc.foundation.AttributedString = @ptrCast(string.?);
+                    break :blk attr.string();
+                }
+                break :blk string;
+            };
+            const chars = characters orelse return;
+
+            var range: objc.foundation.Range = .init(0, chars.length());
+            while (range.length > 0) {
+                var codepoint: u32 = 0;
+                const got = chars.getBytes_maxLength_usedLength_encoding_options_range_remainingRange(
+                    @ptrCast(&codepoint),
+                    @sizeOf(u32),
                     null,
+                    objc.foundation.UTF32StringEncoding,
+                    0,
+                    range,
+                    &range,
                 );
-                // Take ownership of the +1 retained tracking area into the
-                // strong ivar slot (no extra retain).
-                const slot = implementation.trackingArea.slot(self) orelse return self;
-                slot.* = @ptrCast(tracking);
-
-                objc.app_kit.View.addTrackingArea(@ptrCast(self), tracking);
-                return self;
+                if (!got) break;
+                if (codepoint >= 0xf700 and codepoint <= 0xf7ff) continue;
+                n.core.pushEvent(.{ .char_input = .{ .codepoint = @intCast(codepoint), .window_id = n.window_id } });
             }
+        }
 
-            pub fn canBecomeKeyView(_: *Self) bool {
-                return true;
+        /// CAMetalDisplayLinkDelegate callback invoked on every vsync. Forwards the new
+        /// drawable to `displayLinkWake` via the view's `*NativeState` ivar. Gated by
+        /// `surface.use_display_link` to drop in-flight callbacks that race with detach.
+        pub fn @"metalDisplayLink:needsUpdate:"(
+            self: *Self,
+            _: ?*objc.quartz_core.MetalDisplayLink, // unused
+            update: ?*objc.quartz_core.MetalDisplayLinkUpdate,
+        ) void {
+            const u = update orelse return;
+            const n = state(self);
+            if (!@atomicLoad(bool, &n.surface.use_display_link, .acquire)) return;
+            displayLinkWake(n, u.drawable());
+        }
+    };
+
+    pub const direct_methods = struct {
+        /// Start driving rendering off a CAMetalDisplayLink, so `metalDisplayLink:needsUpdate:`
+        /// fires on every vsync.
+        pub fn startDisplayLink(self: *Self) callconv(.c) bool {
+            if (implementation._displayLink.get(self) != null) return true;
+
+            const base_layer = objc.app_kit.View.layer(@ptrCast(self));
+            if (!objc.objc.isKindOf(base_layer, objc.quartz_core.MetalLayer)) return false;
+            const metal_layer: *objc.quartz_core.MetalLayer = @ptrCast(base_layer);
+
+            const link = objc.quartz_core.MetalDisplayLink.alloc().initWithMetalLayer(metal_layer);
+            // Take ownership of the +1 retained `link` directly into the
+            // ivar slot (no extra retain). Subsequent `set(self, …)` calls
+            // would balance through `objc_storeStrong`.
+            const slot = implementation._displayLink.slot(self) orelse return false;
+            slot.* = link;
+
+            link.setDelegate(@ptrCast(self));
+            link.addToRunLoop_forMode(objc.foundation.RunLoop.mainRunLoop(), objc.app_kit.NSRunLoopCommonModes);
+            return true;
+        }
+
+        /// Stop the CAMetalDisplayLink so `metalDisplayLink:needsUpdate:` stops firing.
+        pub fn stopDisplayLink(self: *Self) callconv(.c) void {
+            if (implementation._displayLink.get(self)) |link_ptr| {
+                const link: *objc.quartz_core.MetalDisplayLink = @ptrCast(link_ptr);
+                link.invalidate();
             }
-
-            pub fn acceptsFirstResponder(_: *Self) bool {
-                return true;
-            }
-
-            /// Prevent AppKit's default key handling (e.g. Esc exiting fullscreen)
-            /// from firing.
-            pub fn @"doCommandBySelector:"(_: *Self, _: objc.objc.SEL) void {}
-
-            pub fn @"keyDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._keyDown_block.invoke(self, .{event});
-                // [self interpretKeyEvents:[NSArray arrayWithObject:event]]
-                const arr = objc.foundation.Array(objc.app_kit.Event).arrayWithObject(event.?);
-                objc.app_kit.Responder.interpretKeyEvents(@ptrCast(self), @ptrCast(arr));
-            }
-
-            pub fn @"keyUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._keyUp_block.invoke(self, .{event});
-            }
-
-            pub fn @"flagsChanged:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._flagsChanged_block.invoke(self, .{event});
-            }
-
-            pub fn @"mouseMoved:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseMoved_block.invoke(self, .{event});
-            }
-
-            pub fn @"mouseDragged:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseMoved_block.invoke(self, .{event});
-            }
-
-            pub fn @"rightMouseDragged:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseMoved_block.invoke(self, .{event});
-            }
-
-            pub fn @"otherMouseDragged:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseMoved_block.invoke(self, .{event});
-            }
-
-            pub fn @"mouseDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseDown_block.invoke(self, .{event});
-            }
-
-            pub fn @"rightMouseDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseDown_block.invoke(self, .{event});
-            }
-
-            pub fn @"otherMouseDown:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseDown_block.invoke(self, .{event});
-            }
-
-            pub fn @"mouseUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseUp_block.invoke(self, .{event});
-            }
-
-            pub fn @"rightMouseUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseUp_block.invoke(self, .{event});
-            }
-
-            pub fn @"otherMouseUp:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._mouseUp_block.invoke(self, .{event});
-            }
-
-            pub fn @"scrollWheel:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._scrollWheel_block.invoke(self, .{event});
-            }
-
-            pub fn @"magnifyWithEvent:"(self: *Self, event: ?*objc.app_kit.Event) void {
-                _ = implementation._magnify_block.invoke(self, .{event});
-            }
-
-            pub fn @"insertText:"(self: *Self, string: ?*objc.foundation.String) void {
-                const event = objc.app_kit.Application.sharedApplication().currentEvent();
-
-                // Unwrap NSAttributedString → NSString if needed.
-                const characters: ?*objc.foundation.String = blk: {
-                    if (objc.objc.isKindOf(string, objc.foundation.AttributedString)) {
-                        const attr: *objc.foundation.AttributedString = @ptrCast(string.?);
-                        break :blk attr.string();
-                    }
-                    break :blk string;
-                };
-                const chars = characters orelse return;
-
-                var range: objc.foundation.Range = .init(0, chars.length());
-                while (range.length > 0) {
-                    var codepoint: u32 = 0;
-                    const got = chars.getBytes_maxLength_usedLength_encoding_options_range_remainingRange(
-                        @ptrCast(&codepoint),
-                        @sizeOf(u32),
-                        null,
-                        objc.foundation.UTF32StringEncoding,
-                        0,
-                        range,
-                        &range,
-                    );
-                    if (!got) break;
-                    // Skip Unicode "private use" function-key range that AppKit
-                    // synthesises for arrow keys etc.
-                    if (codepoint >= 0xf700 and codepoint <= 0xf7ff) continue;
-                    _ = implementation._insertText_block.invoke(self, .{ event, codepoint });
-                }
-            }
-
-            pub fn @"metalDisplayLink:needsUpdate:"(
-                self: *Self,
-                _: ?*objc.quartz_core.MetalDisplayLink, // unused
-                update: ?*objc.quartz_core.MetalDisplayLinkUpdate,
-            ) void {
-                const drawable = if (update) |u| u.drawable() else null;
-                _ = implementation._render_block.invoke(self, .{drawable});
-            }
-        };
-
-        pub const direct_methods = struct {
-            pub fn startDisplayLink(self: *Self) callconv(.c) bool {
-                if (implementation._displayLink.get(self) != null) return true;
-
-                const base_layer = objc.app_kit.View.layer(@ptrCast(self));
-                if (!objc.objc.isKindOf(base_layer, objc.quartz_core.MetalLayer)) return false;
-                const metal_layer: *objc.quartz_core.MetalLayer = @ptrCast(base_layer);
-
-                const link = objc.quartz_core.MetalDisplayLink.alloc().initWithMetalLayer(metal_layer);
-                // Take ownership of the +1 retained `link` directly into the
-                // ivar slot (no extra retain). Subsequent `set(self, …)` calls
-                // would balance through `objc_storeStrong`.
-                const slot = implementation._displayLink.slot(self) orelse return false;
-                slot.* = link;
-
-                link.setDelegate(@ptrCast(self));
-                link.addToRunLoop_forMode(objc.foundation.RunLoop.mainRunLoop(), objc.app_kit.NSRunLoopCommonModes);
-                return true;
-            }
-
-            pub fn stopDisplayLink(self: *Self) callconv(.c) void {
-                if (implementation._displayLink.get(self)) |link_ptr| {
-                    const link: *objc.quartz_core.MetalDisplayLink = @ptrCast(link_ptr);
-                    link.invalidate();
-                }
-                implementation._displayLink.set(self, null);
-            }
-        };
-    });
-
-    pub const InternalInfo = objc.objc.ExternClass("MACHView", @This(), objc.app_kit.View, &.{});
-    pub const as = InternalInfo.as;
-    pub const retain = InternalInfo.retain;
-    pub const release = InternalInfo.release;
-    pub const autorelease = InternalInfo.autorelease;
-    pub const new = InternalInfo.new;
-    pub const alloc = InternalInfo.alloc;
-    pub const allocInit = InternalInfo.allocInit;
-
-    pub fn initWithFrame(self_: *@This(), frameRect_: objc.app_kit.Rect) *@This() {
-        return objc.objc.msgSend(self_, "initWithFrame:", *@This(), .{frameRect_});
-    }
-
-    pub fn currentDrawable(self_: *@This()) ?*objc.quartz_core.MetalDrawable {
-        return objc.objc.msgSend(self_, "currentDrawable", ?*objc.quartz_core.MetalDrawable, .{});
-    }
-
-    pub fn layer(self_: *@This()) *objc.quartz_core.MetalLayer {
-        return objc.objc.msgSend(self_, "layer", *objc.quartz_core.MetalLayer, .{});
-    }
-    pub fn setLayer(self_: *@This(), layer_: *objc.quartz_core.MetalLayer) void {
-        return objc.objc.msgSend(self_, "setLayer:", void, .{layer_});
-    }
-
-    pub fn setBlock_render(self: *@This(), block: *objc.foundation.Block(fn (*objc.quartz_core.MetalDrawable) void)) void {
-        setBlock_render_imp(self, block);
-    }
-    const setBlock_render_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.quartz_core.MetalDrawable) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_render:]" },
-    );
-
-    pub fn setBlock_keyDown(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_keyDown_imp(self, block);
-    }
-    const setBlock_keyDown_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_keyDown:]" },
-    );
-
-    pub fn setBlock_insertText(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event, u32) void)) void {
-        setBlock_insertText_imp(self, block);
-    }
-    const setBlock_insertText_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event, u32) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_insertText:]" },
-    );
-
-    pub fn setBlock_keyUp(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_keyUp_imp(self, block);
-    }
-    const setBlock_keyUp_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_keyUp:]" },
-    );
-
-    pub fn setBlock_flagsChanged(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_flagsChanged_imp(self, block);
-    }
-    const setBlock_flagsChanged_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_flagsChanged:]" },
-    );
-
-    pub fn setBlock_magnify(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_magnify_imp(self, block);
-    }
-    const setBlock_magnify_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_magnify:]" },
-    );
-
-    pub fn setBlock_mouseMoved(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_mouseMoved_imp(self, block);
-    }
-    const setBlock_mouseMoved_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_mouseMoved:]" },
-    );
-
-    pub fn setBlock_mouseDown(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_mouseDown_imp(self, block);
-    }
-    const setBlock_mouseDown_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_mouseDown:]" },
-    );
-
-    pub fn setBlock_mouseUp(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_mouseUp_imp(self, block);
-    }
-    const setBlock_mouseUp_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_mouseUp:]" },
-    );
-
-    pub fn setBlock_scrollWheel(self: *@This(), block: *objc.foundation.Block(fn (*objc.app_kit.Event) void)) void {
-        setBlock_scrollWheel_imp(self, block);
-    }
-    const setBlock_scrollWheel_imp = @extern(
-        *const fn (*@This(), *objc.foundation.Block(fn (*objc.app_kit.Event) void)) callconv(.c) void,
-        .{ .name = "\x01-[MACHView setBlock_scrollWheel:]" },
-    );
-
-    pub fn startDisplayLink(self: *@This()) bool {
-        return startDisplayLink_imp(self);
-    }
-    const startDisplayLink_imp = @extern(
-        *const fn (*@This()) callconv(.c) bool,
-        .{ .name = "\x01-[MACHView startDisplayLink]" },
-    );
-
-    pub fn stopDisplayLink(self: *@This()) void {
-        stopDisplayLink_imp(self);
-    }
-    const stopDisplayLink_imp = @extern(
-        *const fn (*@This()) callconv(.c) void,
-        .{ .name = "\x01-[MACHView stopDisplayLink]" },
-    );
-};
+            implementation._displayLink.set(self, null);
+        }
+    };
+});
 
 /// Queued resize or vsync-mode change, written by the main thread and consumed by render thread
 /// in renderThreadFn before each frame.
@@ -524,33 +444,28 @@ const PendingSwapChainUpdate = struct {
     vsync_mode: Core.VSyncMode,
 };
 
-/// Per-window platform state stored in `Core.windows` via `.native` field.
-///
-/// Copied by value when read/written through the objects system, so any data that must have a
-/// stable address (e.g. display_link_ctx, which is captured by an objc block) is heap
-/// allocated.
-pub const Native = struct {
-    window: *objc.app_kit.Window = undefined,
-    view: *MACHView = undefined,
-    metal_descriptor: *gpu.Surface.DescriptorFromMetalLayer = undefined,
-    display_link_ctx: ?*DisplayLinkContext = null,
+/// Core.windows '.native' field, i.e. per-window platform state.
+/// We use a heap-allocated pointer here so that we can pass a stable address through various ObjC
+/// classes as context.
+pub const Native = *NativeState;
 
-    /// Global event monitor for command-key keyUp workaround. Must be removed on window teardown.
-    key_up_monitor: ?*objc.objc.Id = null,
+const NativeState = struct {
+    core: *Core,
+    core_mod: mach.Mod(Core),
+    window_id: mach.ObjectID,
+    io: std.Io,
+    window: *objc.app_kit.Window,
+    view: *MACHView,
+    metal_descriptor: *gpu.Surface.DescriptorFromMetalLayer,
+    ready_sem: objc.system.dispatch_semaphore_t,
+    surface: *metal.Surface,
+
+    /// Global event monitor for command-key keyUp workaround. Removed on window teardown.
+    key_up_monitor: *objc.objc.Id,
 
     /// Set by the main thread (windowDidResize / vsync change); consumed by the render thread to
     /// recreate the swap chain before the next frame.
     pending_swap_chain_update: ?PendingSwapChainUpdate = null,
-};
-
-/// Per-window context for CAMetalDisplayLink. Heap-allocated so the pointer remains stable when
-/// Native is copied through the objects system. Passed as the block context to displayLinkWake.
-const DisplayLinkContext = struct {
-    /// Signaled by displayLinkWake on each vsync; the render thread waits on this to pace itself to
-    /// the display refresh rate.
-    ready_sem: objc.system.dispatch_semaphore_t,
-
-    surface: *metal.Surface,
 };
 
 var global_render_loop: ?*RenderLoop = null;
@@ -571,48 +486,44 @@ const RenderLoop = struct {
         self.thread = std.Thread.spawn(.{}, renderThreadFn, .{self}) catch return error.ThreadSpawnFailed;
     }
 
-    /// Registers displayLinkWake as the CAMetalDisplayLink callback for a window's view. Called
-    /// during window creation and when vsync is re-enabled at runtime.
-    fn attachDisplayLink(ctx: *DisplayLinkContext, view: *MACHView) void {
-        // Create an objc block that captures the DisplayLinkContext pointer, then register
-        // it as the view's display link render block.
-        var render_block = objc.foundation.stackBlockLiteral(displayLinkWake, ctx, null, null);
-        view.setBlock_render(render_block.asBlock().copy());
-
+    /// Starts the CAMetalDisplayLink for a window. Called during window creation and when
+    /// vsync is re-enabled at runtime.
+    fn attachDisplayLink(n: *NativeState) void {
         // Tell SwapChain.getCurrentTextureView (on the render thread) to consume display link
         // drawables instead of calling nextDrawable. This MUST be set before startDisplayLink,
         // because once the display link is started, Metal forbids nextDrawable() calls and the
         // render thread could race in between.
-        @atomicStore(bool, &ctx.surface.use_display_link, true, .release);
+        @atomicStore(bool, &n.surface.use_display_link, true, .release);
 
         // The display link provides external vsync pacing, so disable the layer's own
         // displaySyncEnabled to prevent present() from blocking a second time.
-        ctx.surface.layer.setDisplaySyncEnabled(false);
+        n.surface.layer.setDisplaySyncEnabled(false);
 
         // Start the display link.
-        if (!view.startDisplayLink()) {
+        if (!n.view.call(.startDisplayLink, .{})) {
             log.err("CAMetalDisplayLink unavailable (requires macOS 14+)", .{});
-            @atomicStore(bool, &ctx.surface.use_display_link, false, .release);
+            @atomicStore(bool, &n.surface.use_display_link, false, .release);
             return;
         }
     }
 
-    /// Stops the CAMetalDisplayLink for a window's view. Called when vsync is disabled  or when a
+    /// Stops the CAMetalDisplayLink for a window's view. Called when vsync is disabled or when a
     /// window is being destroyed.
-    fn detachDisplayLink(ctx: *DisplayLinkContext, view: *MACHView) void {
+    fn detachDisplayLink(n: *NativeState) void {
         // Stop the display link.
-        view.stopDisplayLink();
+        n.view.call(.stopDisplayLink, .{});
+
+        // Tell SwapChain.getCurrentTextureView to use nextDrawable again, and gate
+        // `metalDisplayLink:needsUpdate:` from forwarding any in-flight vsync notification.
+        @atomicStore(bool, &n.surface.use_display_link, false, .release);
 
         // Release any unconsumed drawable left by displayLinkWake.
-        const pending_ptr: *usize = @ptrCast(&ctx.surface.pending_drawable);
+        const pending_ptr: *usize = @ptrCast(&n.surface.pending_drawable);
         const prev = @atomicRmw(usize, pending_ptr, .Xchg, 0, .acq_rel);
         if (prev != 0) {
             const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
             prev_ptr.release();
         }
-
-        // Tell SwapChain.getCurrentTextureView to use nextDrawable again.
-        @atomicStore(bool, &ctx.surface.use_display_link, false, .release);
     }
 
     /// Stops the render loop, tears down all display links, and joins the render thread. Called
@@ -628,11 +539,9 @@ const RenderLoop = struct {
             defer self.core.windows.unlockShared();
             var windows = self.core.windows.slice();
             while (windows.next()) |window_id| {
-                if (self.core.windows.get(window_id, .native)) |native| {
-                    if (native.display_link_ctx) |ctx| {
-                        native.view.stopDisplayLink();
-                        _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
-                    }
+                if (self.core.windows.get(window_id, .native)) |n| {
+                    n.view.call(.stopDisplayLink, .{});
+                    _ = objc.system.dispatch_semaphore_signal(n.ready_sem);
                 }
             }
         }
@@ -663,31 +572,26 @@ const RenderLoop = struct {
             // state that the main thread hasn't applied yet).
             {
                 var all_have_display_link = true;
-                var wait_ctx: ?*DisplayLinkContext = null;
+                var wait_n: ?*NativeState = null;
                 {
                     self.core.windows.lockShared();
                     defer self.core.windows.unlockShared();
 
                     var windows = self.core.windows.slice();
                     while (windows.next()) |window_id| {
-                        const native_opt = self.core.windows.get(window_id, .native);
-                        const native = native_opt orelse continue;
-                        const ctx = native.display_link_ctx orelse {
-                            all_have_display_link = false;
-                            break;
-                        };
-                        if (!@atomicLoad(bool, &ctx.surface.use_display_link, .acquire)) {
+                        const n = self.core.windows.get(window_id, .native) orelse continue;
+                        if (!@atomicLoad(bool, &n.surface.use_display_link, .acquire)) {
                             all_have_display_link = false;
                             break;
                         }
-                        if (wait_ctx == null) wait_ctx = ctx;
+                        if (wait_n == null) wait_n = n;
                     }
                 }
 
                 if (all_have_display_link) {
-                    if (wait_ctx) |ctx| {
+                    if (wait_n) |n| {
                         _ = objc.system.dispatch_semaphore_wait(
-                            ctx.ready_sem,
+                            n.ready_sem,
                             objc.system.DISPATCH_TIME_FOREVER,
                         );
                     }
@@ -705,10 +609,10 @@ const RenderLoop = struct {
                 var windows = self.core.windows.slice();
                 while (windows.next()) |window_id| {
                     var core_window = self.core.windows.getValue(window_id);
-                    const native = core_window.native orelse continue;
-                    const update = native.pending_swap_chain_update orelse continue;
+                    const n = core_window.native orelse continue;
+                    const update = n.pending_swap_chain_update orelse continue;
 
-                    core_window.native.?.pending_swap_chain_update = null;
+                    n.pending_swap_chain_update = null;
                     core_window.width = update.width;
                     core_window.height = update.height;
                     core_window.framebuffer_width = update.framebuffer_width;
@@ -740,48 +644,41 @@ const RenderLoop = struct {
             };
         }
     }
+};
 
-    // CAMetalDisplayLink callback, invoked on every vsync for the window.
-    fn displayLinkWake(block: *objc.foundation.BlockLiteral(*DisplayLinkContext), drawable: *objc.quartz_core.MetalDrawable) callconv(.c) void {
-        const ctx = block.context;
+// CAMetalDisplayLink callback, invoked on every vsync for the window via MACHView's
+// `metalDisplayLink:needsUpdate:` IMP.
+fn displayLinkWake(n: *NativeState, drawable: *objc.quartz_core.MetalDrawable) void {
+    // Retain the drawable so it survives beyond this callback. It will be released in either
+    // SwapChain.getCurrentTextureView or SwapChain.deinit
+    _ = drawable.retain();
 
-        // Retain the drawable so it survives beyond this callback. It will be released in either
-        // SwapChain.getCurrentTextureView or SwapChain.deinit
-        _ = drawable.retain();
-
-        // When the render thread is slower than the display refresh rate, the display link still
-        // fires every vsync, so if the render thread hasn't consumed the previous drawable yet we
-        // should release the old one and replace it with the new one.
-        const pending_ptr: *usize = @ptrCast(&ctx.surface.pending_drawable);
-        const prev = @atomicRmw(usize, pending_ptr, .Xchg, @intFromPtr(drawable), .acq_rel);
-        if (prev != 0) {
-            const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
-            prev_ptr.release();
-        }
-
-        // Signal to the render thread that a vsync has occurred.
-        _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
+    // When the render thread is slower than the display refresh rate, the display link still
+    // fires every vsync, so if the render thread hasn't consumed the previous drawable yet we
+    // should release the old one and replace it with the new one.
+    const pending_ptr: *usize = @ptrCast(&n.surface.pending_drawable);
+    const prev = @atomicRmw(usize, pending_ptr, .Xchg, @intFromPtr(drawable), .acq_rel);
+    if (prev != 0) {
+        const prev_ptr: *objc.quartz_core.MetalDrawable = @ptrFromInt(prev);
+        prev_ptr.release();
     }
-};
 
-/// Captured context for objc block callbacks (view events, window delegate). Heap-allocated
-/// per window in initWindow so the pointer remains stable for the lifetime of the window's blocks.
-const WindowContext = struct {
-    core: *Core,
-    core_mod: mach.Mod(Core),
-    window_id: mach.ObjectID,
-    io: std.Io,
-};
+    // Signal to the render thread that a vsync has occurred.
+    _ = objc.system.dispatch_semaphore_signal(n.ready_sem);
+}
 
 // TODO(core): port libdispatch and use it instead of doing this directly.
-extern "System" fn dispatch_async(queue: *anyopaque, block: *objc.foundation.Block(fn () void)) void;
+extern "System" fn dispatch_async_f(queue: *anyopaque, context: ?*anyopaque, work: *const fn (?*anyopaque) callconv(.c) void) void;
 extern "System" var _dispatch_main_q: anyopaque;
 
-// Called by wakeMainThread when set.
-var main_tick_block: ?*objc.foundation.Block(fn () void) = null;
+// Context pointer + C function pointer that drive each main-thread tick. Both set by `run()`
+// before NSApp.run() starts. `applicationDidFinishLaunching:` runs the first tick directly,
+// subsequent ticks come from `wakeMainThread` via `dispatch_async_f`.
+var main_tick_ctx: ?*anyopaque = null;
+var main_tick_fn: ?*const fn (?*anyopaque) callconv(.c) void = null;
 
 // When true, a main tick is already enqueued on the main dispatch queue and additional wakes are
-// deduplicated. Required because `dispatch_async` (unlike e.g. `std.Io.Event.set`) does NOT
+// deduplicated. Required because `dispatch_async_f` (unlike e.g. `std.Io.Event.set`) does NOT
 // coalesce, so without this flag every wake would enqueue another tick with no upper bound on
 // backlog.
 var main_tick_pending: std.atomic.Value(bool) = .init(false);
@@ -789,8 +686,8 @@ var main_tick_pending: std.atomic.Value(bool) = .init(false);
 // Called by Core when the user calls Core.snapshotStart, Core.events, core.exit
 pub fn wakeMainThread(_: *Core) void {
     if (main_tick_pending.cmpxchgStrong(false, true, .acq_rel, .acquire) == null) {
-        const block = main_tick_block orelse return;
-        dispatch_async(&_dispatch_main_q, block);
+        const f = main_tick_fn orelse return;
+        dispatch_async_f(&_dispatch_main_q, main_tick_ctx, f);
     }
 }
 
@@ -799,41 +696,33 @@ pub fn wakeMainThread(_: *Core) void {
 /// is invoked by the app thread from `events()` and `snapshotStart()`.
 pub fn run(comptime on_each_update_fn: anytype, args_tuple: std.meta.ArgsTuple(@TypeOf(on_each_update_fn))) noreturn {
     const Args = @TypeOf(args_tuple);
-    const args_bytes = std.mem.asBytes(&args_tuple);
-    const ArgsBytes = @TypeOf(args_bytes.*);
+    // run() is noreturn, so this local stays valid for the lifetime of the process. Its
+    // address is what we pass to dispatch_async_f as the context.
+    var args = args_tuple;
     const Helper = struct {
-        pub fn cCallback(block: *objc.foundation.BlockLiteral(ArgsBytes)) callconv(.c) void {
-            const args: *Args = @ptrCast(&block.context);
+        pub fn tick(ctx: ?*anyopaque) callconv(.c) void {
+            const a: *Args = @ptrCast(@alignCast(ctx.?));
 
             // Reset the wake flag BEFORE running tick so any wake that arrives during tick
             // re-arms a follow-up dispatch.
             main_tick_pending.store(false, .release);
 
-            if (@call(.auto, on_each_update_fn, args.*) catch false) {
+            if (@call(.auto, on_each_update_fn, a.*) catch false) {
                 // Do not auto-redispatch. The next tick happens only when `wakeMainThread`
                 // is called (e.g. from the app thread's `events()` / `snapshotStart()`).
             } else {
-                // We copied the block when we called `setRunBlock()`, so we release it here when the looping will end.
-                block.release();
                 // NSApp.run() never returns, so exit the process here.
                 std.process.exit(0);
             }
         }
     };
-    var block_literal = objc.foundation.stackBlockLiteral(Helper.cCallback, args_bytes.*, null, null);
-
-    // Copy the block once; this stable, heap-owned reference is what `wakeMainThread` will
-    // re-dispatch for the lifetime of Core.
-    const dispatch_block = block_literal.asBlock().copy();
-    main_tick_block = dispatch_block;
+    main_tick_ctx = &args;
+    main_tick_fn = &Helper.tick;
 
     // `NSApplicationMain()` and `UIApplicationMain()` never return, so there's no point in trying to add any kind of cleanup work here.
     const ns_app = objc.app_kit.Application.sharedApplication();
 
     const delegate = MACHAppDelegate.allocInit();
-    // AppDelegate.applicationDidFinishLaunching invokes this block synchronously once, kicking
-    // off the very first main tick. Subsequent main ticks are driven by `wakeMainThread`.
-    delegate.setRunBlock(dispatch_block);
     ns_app.setDelegate(@ptrCast(delegate));
 
     ns_app.run();
@@ -850,19 +739,18 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     // Tear down native resources for deleted windows on the main thread where AppKit calls are safe.
     var deleted_windows = core.windows.sliceDeleted();
     while (deleted_windows.next()) |window_id| {
-        const native = core.windows.get(window_id, .native) orelse continue;
-        if (native.key_up_monitor) |monitor| {
-            objc.app_kit.Event.removeMonitor(monitor);
+        const n = core.windows.get(window_id, .native) orelse continue;
+        objc.app_kit.Event.removeMonitor(n.key_up_monitor);
+        if (@atomicLoad(bool, &n.surface.use_display_link, .acquire)) {
+            RenderLoop.detachDisplayLink(n);
         }
-        if (native.display_link_ctx) |ctx| {
-            RenderLoop.detachDisplayLink(ctx, native.view);
-            _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
-            core.allocator.destroy(ctx);
-        }
-        native.window.setIsVisible(false);
-        native.view.release();
-        native.window.release();
-        core.allocator.destroy(native.metal_descriptor);
+        // Signal the sem so the render thread (if blocked waiting on it) can unblock.
+        _ = objc.system.dispatch_semaphore_signal(n.ready_sem);
+        n.window.setIsVisible(false);
+        n.view.release();
+        n.window.release();
+        core.allocator.destroy(n.metal_descriptor);
+        core.allocator.destroy(n);
         core.windows.setRaw(window_id, .native, null);
         // The window_id object itself will be freed inside snapshotStart()
     }
@@ -871,13 +759,13 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     while (windows.next()) |window_id| {
         const core_window = core.windows.getValue(window_id);
 
-        const native = core_window.native orelse {
+        const n = core_window.native orelse {
             if (core_window.on_render != null) try initWindow(core, core_mod, window_id, io);
             continue;
         };
 
         // Update window decoration color.
-        const native_window: *objc.app_kit.Window = native.window;
+        const native_window: *objc.app_kit.Window = n.window;
         if (core.windows.updated(window_id, .decoration_color)) {
             if (core_window.decoration_color) |decoration_color| {
                 const color = objc.app_kit.Color.colorWithRed_green_blue_alpha(
@@ -897,7 +785,7 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
         if (core.windows.updated(window_id, .title)) {
             const string = objc.foundation.String.allocInit();
             defer string.release();
-            native.window.setTitle(string.initWithUTF8String(core_window.title));
+            n.window.setTitle(string.initWithUTF8String(core_window.title));
         }
 
         // Update window width/height.
@@ -948,18 +836,15 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
             // Only detach/attach the display link when transitioning between vsync-on and
             // vsync-off. Switching between vsync-on modes (e.g. .double → .triple) only
             // needs a swap chain recreation — the display link is already running.
-            if (native.display_link_ctx) |ctx| {
-                const have_display_link = @atomicLoad(bool, &ctx.surface.use_display_link, .acquire);
-                if (want_vsync and !have_display_link) {
-                    RenderLoop.attachDisplayLink(ctx, native.view);
-                } else if (!want_vsync and have_display_link) {
-                    RenderLoop.detachDisplayLink(ctx, native.view);
-                }
+            const have_display_link = @atomicLoad(bool, &n.surface.use_display_link, .acquire);
+            if (want_vsync and !have_display_link) {
+                RenderLoop.attachDisplayLink(n);
+            } else if (!want_vsync and have_display_link) {
+                RenderLoop.detachDisplayLink(n);
             }
 
             // Queue a swap chain recreation for the render thread.
-            var updated_native = native;
-            updated_native.pending_swap_chain_update = .{
+            n.pending_swap_chain_update = .{
                 .width = core_window.width,
                 .height = core_window.height,
                 .framebuffer_width = core_window.framebuffer_width,
@@ -967,12 +852,9 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
                 .pixel_density = core_window.pixel_density,
                 .vsync_mode = core_window.vsync_mode,
             };
-            core.windows.setRaw(window_id, .native, updated_native);
 
             // Wake the render thread so it picks up the swap chain update promptly.
-            if (native.display_link_ctx) |ctx| {
-                _ = objc.system.dispatch_semaphore_signal(ctx.ready_sem);
-            }
+            _ = objc.system.dispatch_semaphore_signal(n.ready_sem);
         }
     }
 
@@ -1005,8 +887,24 @@ fn initWindow(
 ) !void {
     var core_window = core.windows.getValue(window_id);
 
-    const win_ctx = try core.allocator.create(WindowContext);
-    win_ctx.* = .{ .core = core, .core_mod = core_mod, .window_id = window_id, .io = io };
+    // Allocate the heap-stable NativeState up front. ObjC ivars and the keyUpMonitor block
+    // capture this pointer; ObjC/Metal fields are populated as they're created below.
+    const n = try core.allocator.create(NativeState);
+    n.* = .{
+        .core = core,
+        .core_mod = core_mod,
+        .window_id = window_id,
+        .io = io,
+        .ready_sem = objc.system.dispatch_semaphore_create(0) orelse
+            return error.SemaphoreCreateFailed,
+
+        // Initialized later in this function
+        .window = undefined,
+        .view = undefined,
+        .metal_descriptor = undefined,
+        .surface = undefined,
+        .key_up_monitor = undefined,
+    };
 
     // Make the process a foreground UI application on the first window creation.
     if (!did_set_app_activation_policy) {
@@ -1016,45 +914,40 @@ fn initWindow(
         );
     }
 
-    var key_up_monitor: ?*objc.objc.Id = null;
     {
         // On macos, the command key in particular seems to be handled a bit differently and tends
         // to block the `keyUp` event from firing. To remedy this, we borrow the same fix GLFW uses
         // and add a monitor.
         const commandFn = struct {
-            pub fn commandFn(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) ?*objc.app_kit.Event {
-                const core_: *Core = block.context.core;
-                const window_id_ = block.context.window_id;
+            pub fn commandFn(block: *objc.foundation.BlockLiteral(*NativeState), event: *objc.app_kit.Event) callconv(.c) ?*objc.app_kit.Event {
+                const ns = block.context;
 
-                core_.windows.lockShared();
-                const native_opt = core_.windows.get(window_id_, .native);
-                core_.windows.unlockShared();
+                // Skip if the window isn't fully registered yet (initWindow still in progress).
+                ns.core.windows.lockShared();
+                const registered = ns.core.windows.get(ns.window_id, .native) != null;
+                ns.core.windows.unlockShared();
 
-                if (native_opt) |native| {
-                    const native_window: *objc.app_kit.Window = native.window;
-
-                    if (event.modifierFlags() & objc.app_kit.EventModifierFlagCommand != 0)
-                        native_window.sendEvent(event);
+                if (registered and event.modifierFlags() & objc.app_kit.EventModifierFlagCommand != 0) {
+                    ns.window.sendEvent(event);
                 }
                 return event;
             }
         }.commandFn;
 
-        var commandBlock = objc.foundation.stackBlockLiteral(commandFn, win_ctx, null, null);
-        const monitor = objc.app_kit.Event.addLocalMonitorForEventsMatchingMask_handler(
+        var commandBlock = objc.foundation.stackBlockLiteral(commandFn, n, null, null);
+        n.key_up_monitor = objc.app_kit.Event.addLocalMonitorForEventsMatchingMask_handler(
             objc.app_kit.EventMaskKeyUp,
             commandBlock.asBlock().copy(),
-        );
-        key_up_monitor = monitor;
+        ).?;
     }
 
     // Create the Metal layer.
-    const metal_descriptor = try core.allocator.create(gpu.Surface.DescriptorFromMetalLayer);
+    n.metal_descriptor = try core.allocator.create(gpu.Surface.DescriptorFromMetalLayer);
     const layer = objc.quartz_core.MetalLayer.new();
     defer layer.release();
-    metal_descriptor.* = .{ .layer = layer };
+    n.metal_descriptor.* = .{ .layer = layer };
     core_window.surface_descriptor = .{};
-    core_window.surface_descriptor.next_in_chain = .{ .from_metal_layer = metal_descriptor };
+    core_window.surface_descriptor.next_in_chain = .{ .from_metal_layer = n.metal_descriptor };
 
     // Handle window transparency
     if (core_window.transparent) layer.as(objc.quartz_core.Layer).setOpaque(false);
@@ -1074,16 +967,16 @@ fn initWindow(
         (if (!core_window.decorated) objc.app_kit.WindowStyleMaskFullSizeContentView else 0);
 
     // Create the AppKit window.
-    const native_window = objc.app_kit.Window.alloc().initWithContentRect_styleMask_backing_defer_screen(
+    n.window = objc.app_kit.Window.alloc().initWithContentRect_styleMask_backing_defer_screen(
         rect,
         window_style,
         objc.app_kit.BackingStoreBuffered,
         false,
         screen,
     );
-    native_window.setReleasedWhenClosed(false);
+    n.window.setReleasedWhenClosed(false);
 
-    const pixel_density: f32 = @floatCast(native_window.backingScaleFactor());
+    const pixel_density: f32 = @floatCast(n.window.backingScaleFactor());
     const window_width: f32 = @floatFromInt(core_window.width);
     const window_height: f32 = @floatFromInt(core_window.height);
 
@@ -1107,45 +1000,13 @@ fn initWindow(
 
     // initWithFrame is overridden in our MACHView, which creates a tracking area for mouse
     // tracking
-    var view = MACHView.allocInit();
-    view = view.initWithFrame(rect);
-    view.setLayer(@ptrCast(layer));
-
-    // Register objc block callbacks for view input events.
-    {
-        const bl = objc.foundation.stackBlockLiteral;
-
-        var keyDown = bl(ViewCallbacks.keyDown, win_ctx, null, null);
-        view.setBlock_keyDown(keyDown.asBlock().copy());
-
-        var insertText = bl(ViewCallbacks.insertText, win_ctx, null, null);
-        view.setBlock_insertText(insertText.asBlock().copy());
-
-        var keyUp = bl(ViewCallbacks.keyUp, win_ctx, null, null);
-        view.setBlock_keyUp(keyUp.asBlock().copy());
-
-        var flagsChanged = bl(ViewCallbacks.flagsChanged, win_ctx, null, null);
-        view.setBlock_flagsChanged(flagsChanged.asBlock().copy());
-
-        var magnify = bl(ViewCallbacks.magnify, win_ctx, null, null);
-        view.setBlock_magnify(magnify.asBlock().copy());
-
-        var mouseMoved = bl(ViewCallbacks.mouseMoved, win_ctx, null, null);
-        view.setBlock_mouseMoved(mouseMoved.asBlock().copy());
-
-        var mouseDown = bl(ViewCallbacks.mouseDown, win_ctx, null, null);
-        view.setBlock_mouseDown(mouseDown.asBlock().copy());
-
-        var mouseUp = bl(ViewCallbacks.mouseUp, win_ctx, null, null);
-        view.setBlock_mouseUp(mouseUp.asBlock().copy());
-
-        var scrollWheel = bl(ViewCallbacks.scrollWheel, win_ctx, null, null);
-        view.setBlock_scrollWheel(scrollWheel.asBlock().copy());
-    }
-    native_window.setContentView(@ptrCast(view));
+    n.view = MACHView.alloc().call(.initWithFrame, .{rect}).?;
+    n.view.as(objc.app_kit.View).setLayer(@ptrCast(layer));
+    MACHView.implementation._state.set(n.view, n);
+    n.window.setContentView(@ptrCast(n.view));
 
     // Center the window
-    native_window.center();
+    n.window.center();
 
     // Set decoration colors
     if (core_window.decoration_color) |decoration_color| {
@@ -1155,47 +1016,25 @@ fn initWindow(
             decoration_color.b,
             decoration_color.a,
         );
-        native_window.setBackgroundColor(color);
-        native_window.setTitlebarAppearsTransparent(true);
+        n.window.setBackgroundColor(color);
+        n.window.setTitlebarAppearsTransparent(true);
     } else {
         // Default to black so the window doesn't flash gray before the first frame.
-        native_window.setBackgroundColor(objc.app_kit.Color.colorWithRed_green_blue_alpha(0, 0, 0, 1));
+        n.window.setBackgroundColor(objc.app_kit.Color.colorWithRed_green_blue_alpha(0, 0, 0, 1));
     }
 
     // Set window title
     const string = objc.foundation.String.allocInit();
     defer string.release();
-    native_window.setTitle(string.initWithUTF8String(core_window.title));
+    n.window.setTitle(string.initWithUTF8String(core_window.title));
 
     // NSWindowDelegate receives resize and close notifications from AppKit.
     const delegate = MACHWindowDelegate.allocInit();
-    defer native_window.setDelegate(@ptrCast(delegate));
-    {
-        const bl = objc.foundation.stackBlockLiteral;
-
-        var didResize = bl(WindowDelegateCallbacks.windowDidResize, win_ctx, null, null);
-        delegate.setBlock_windowDidResize(didResize.asBlock().copy());
-
-        var shouldClose = bl(WindowDelegateCallbacks.windowShouldClose, win_ctx, null, null);
-        delegate.setBlock_windowShouldClose(shouldClose.asBlock().copy());
-
-        var didChangeBacking = bl(WindowDelegateCallbacks.windowDidChangeBackingProperties, win_ctx, null, null);
-        delegate.setBlock_windowDidChangeBackingProperties(didChangeBacking.asBlock().copy());
-
-        var didBecomeKey = bl(WindowDelegateCallbacks.windowDidBecomeKey, win_ctx, null, null);
-        delegate.setBlock_windowDidBecomeKey(didBecomeKey.asBlock().copy());
-
-        var didResignKey = bl(WindowDelegateCallbacks.windowDidResignKey, win_ctx, null, null);
-        delegate.setBlock_windowDidResignKey(didResignKey.asBlock().copy());
-    }
+    MACHWindowDelegate.implementation._state.set(delegate, n);
+    defer n.window.setDelegate(@ptrCast(delegate));
 
     // Store .native on the mach.Core window object.
-    core_window.native = .{
-        .window = native_window,
-        .view = view,
-        .metal_descriptor = metal_descriptor,
-        .key_up_monitor = key_up_monitor,
-    };
+    core_window.native = n;
     core.windows.setValueRaw(window_id, core_window);
 
     // Shared mach.Core.initWindow logic across windowing backends.
@@ -1204,29 +1043,16 @@ fn initWindow(
     // Start or update the global render loop if needed
     try ensureRenderLoop(core, core_mod, core.windows.internal.io);
 
-    // Create a per-window display link context and attach the CAMetalDisplayLink so vsync
-    // pacing begins immediately. Re-read the window value because initWindow modified it.
+    // Now that core.initWindow has created the surface, wire it into NativeState and attach the
+    // CAMetalDisplayLink so vsync pacing begins immediately.
     core_window = core.windows.getValue(window_id);
-    {
-        const surface: *metal.Surface = @ptrCast(@alignCast(core_window.surface));
-        const dl_ctx = try core.allocator.create(DisplayLinkContext);
-        dl_ctx.* = .{
-            .ready_sem = objc.system.dispatch_semaphore_create(0) orelse
-                return error.SemaphoreCreateFailed,
-            .surface = surface,
-        };
-
-        var native_val = core_window.native.?;
-        native_val.display_link_ctx = dl_ctx;
-        core.windows.setRaw(window_id, .native, native_val);
-
-        RenderLoop.attachDisplayLink(dl_ctx, view);
-    }
+    n.surface = @ptrCast(@alignCast(core_window.surface));
+    RenderLoop.attachDisplayLink(n);
 
     // Show the window only after the surface and display link are ready, so the user never sees
     // the window without rendered content on it.
-    native_window.setIsVisible(true);
-    native_window.makeKeyAndOrderFront(null);
+    n.window.setIsVisible(true);
+    n.window.makeKeyAndOrderFront(null);
 }
 
 /// Ensures the global render loop is running. Creates one if it doesn't exist yet. The render loop
@@ -1239,221 +1065,6 @@ fn ensureRenderLoop(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
     try rl.start();
     global_render_loop = rl;
 }
-
-/// Callbacks for NSWindowDelegate, invoked by AppKit on the main thread.
-const WindowDelegateCallbacks = struct {
-    /// Called by AppKit when the user resizes the window.
-    pub fn windowDidResize(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        handleResize(core, window_id);
-    }
-
-    /// Called by AppKit when the window's backing scale factor changes (e.g. when the window is
-    /// dragged between displays of different DPI). in this case the framebuffer size has changed so
-    /// we need to consider it as a potential resize event.
-    pub fn windowDidChangeBackingProperties(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        handleResize(core, window_id);
-    }
-
-    /// Called by AppKit when the window becomes key (focused).
-    pub fn windowDidBecomeKey(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .focus_gained = .{ .window_id = window_id } });
-    }
-
-    /// Called by AppKit when the window resigns key (loses focus).
-    pub fn windowDidResignKey(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .focus_lost = .{ .window_id = window_id } });
-    }
-
-    /// Called by AppKit when the user clicks the window's close button.
-    pub fn windowShouldClose(block: *objc.foundation.BlockLiteral(*WindowContext)) callconv(.c) bool {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .close = .{ .window_id = window_id } });
-        return false;
-    }
-};
-
-/// Handles a potential window resize, framebuffer resize, or DPI change.
-fn handleResize(core: *Core, window_id: mach.ObjectID) void {
-    core.windows.lock();
-    defer core.windows.unlock();
-
-    const core_window = core.windows.getValue(window_id);
-    const native = core_window.native orelse return;
-    const native_window: *objc.app_kit.Window = native.window;
-
-    // Determine the current width / height / pixel density of the window.
-    const frame = native_window.frame();
-    const content_rect = native_window.contentRectForFrameRect(frame);
-    const width: u32 = @intFromFloat(content_rect.size.width);
-    const height: u32 = @intFromFloat(content_rect.size.height);
-    const pixel_density: f32 = @floatCast(native_window.backingScaleFactor());
-
-    // Skip the work if nothing actually changed (handleResize can be called for many reasons.)
-    if (core_window.width == width and
-        core_window.height == height and
-        core_window.pixel_density == pixel_density) return;
-
-    const fb_width: u32 = @intFromFloat(@as(f32, @floatFromInt(width)) * pixel_density);
-    const fb_height: u32 = @intFromFloat(@as(f32, @floatFromInt(height)) * pixel_density);
-
-    // Queue a swap chain recreation for the render thread.
-    var updated_native = native;
-    updated_native.pending_swap_chain_update = .{
-        .width = width,
-        .height = height,
-        .framebuffer_width = fb_width,
-        .framebuffer_height = fb_height,
-        .pixel_density = pixel_density,
-        .vsync_mode = core_window.vsync_mode,
-    };
-    core.windows.setRaw(window_id, .native, updated_native);
-
-    core.pushEvent(.{ .resize = .{
-        .window_id = window_id,
-        .window_size = .{ .width = width, .height = height },
-        .framebuffer_size = .{ .width = fb_width, .height = fb_height },
-        .pixel_density = pixel_density,
-    } });
-}
-
-/// Callbacks for MACHView (NSView subclass), invoked by AppKit on the main thread for input events.
-const ViewCallbacks = struct {
-    pub fn mouseMoved(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        const mouse_location = event.locationInWindow();
-
-        core.windows.lockShared();
-        const window_height: f32 = @floatFromInt(core.windows.get(window_id, .height));
-        core.windows.unlockShared();
-
-        core.pushEvent(.{ .mouse_motion = .{
-            .window_id = window_id,
-            .pos = .{ .x = mouse_location.x, .y = window_height - mouse_location.y },
-        } });
-    }
-
-    pub fn mouseDown(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .mouse_press = .{
-            .window_id = window_id,
-            .button = @enumFromInt(event.buttonNumber()),
-            .pos = .{ .x = event.locationInWindow().x, .y = event.locationInWindow().y },
-            .mods = machModifierFromModifierFlag(event.modifierFlags()),
-        } });
-    }
-
-    pub fn mouseUp(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .mouse_release = .{
-            .window_id = window_id,
-            .button = @enumFromInt(event.buttonNumber()),
-            .pos = .{ .x = event.locationInWindow().x, .y = event.locationInWindow().y },
-            .mods = machModifierFromModifierFlag(event.modifierFlags()),
-        } });
-    }
-
-    pub fn scrollWheel(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        var scroll_delta_x = event.scrollingDeltaX();
-        var scroll_delta_y = event.scrollingDeltaY();
-        if (event.hasPreciseScrollingDeltas()) {
-            // Trackpad deltas are in pixels; scale down to match the
-            // line-based units expected by the scroll event consumer.
-            scroll_delta_x *= 0.1;
-            scroll_delta_y *= 0.1;
-        }
-
-        core.pushEvent(.{ .mouse_scroll = .{
-            .window_id = window_id,
-            .xoffset = @floatCast(scroll_delta_x),
-            .yoffset = @floatCast(scroll_delta_y),
-        } });
-    }
-
-    // e.g. fired on macOS using a trackpad
-    pub fn magnify(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .zoom_gesture = .{
-            .window_id = window_id,
-            .zoom = @floatCast(event.magnification()),
-            .phase = machPhaseFromPhase(event.phase()),
-        } });
-    }
-
-    pub fn keyDown(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-
-        if (event.isARepeat()) {
-            core.pushEvent(.{ .key_repeat = .{
-                .window_id = window_id,
-                .key = machKeyFromKeycode(event.keyCode()),
-                .mods = machModifierFromModifierFlag(event.modifierFlags()),
-            } });
-        } else {
-            core.pushEvent(.{ .key_press = .{
-                .window_id = window_id,
-                .key = machKeyFromKeycode(event.keyCode()),
-                .mods = machModifierFromModifierFlag(event.modifierFlags()),
-            } });
-        }
-    }
-
-    pub fn insertText(block: *objc.foundation.BlockLiteral(*WindowContext), _: *objc.app_kit.Event, codepoint: u32) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .char_input = .{ .codepoint = @intCast(codepoint), .window_id = window_id } });
-    }
-
-    pub fn keyUp(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        core.pushEvent(.{ .key_release = .{
-            .window_id = window_id,
-            .key = machKeyFromKeycode(event.keyCode()),
-            .mods = machModifierFromModifierFlag(event.modifierFlags()),
-        } });
-    }
-
-    pub fn flagsChanged(block: *objc.foundation.BlockLiteral(*WindowContext), event: *objc.app_kit.Event) callconv(.c) void {
-        const core: *Core = block.context.core;
-        const window_id = block.context.window_id;
-        const key = machKeyFromKeycode(event.keyCode());
-        const mods = machModifierFromModifierFlag(event.modifierFlags());
-        const key_flag = switch (key) {
-            .left_shift, .right_shift => objc.app_kit.EventModifierFlagShift,
-            .left_control, .right_control => objc.app_kit.EventModifierFlagControl,
-            .left_alt, .right_alt => objc.app_kit.EventModifierFlagOption,
-            .left_super, .right_super => objc.app_kit.EventModifierFlagCommand,
-            .caps_lock => objc.app_kit.EventModifierFlagCapsLock,
-            else => 0,
-        };
-
-        if (event.modifierFlags() & key_flag != 0) {
-            if (core.input_state.keyPressed(key)) {
-                core.pushEvent(.{ .key_release = .{ .window_id = window_id, .key = key, .mods = mods } });
-            } else {
-                core.pushEvent(.{ .key_press = .{ .window_id = window_id, .key = key, .mods = mods } });
-            }
-        } else {
-            core.pushEvent(.{ .key_release = .{ .window_id = window_id, .key = key, .mods = mods } });
-        }
-    }
-};
 
 fn machPhaseFromPhase(phase: objc.app_kit.EventPhase) Core.GesturePhase {
     return switch (phase) {
