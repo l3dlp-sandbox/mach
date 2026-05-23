@@ -65,6 +65,11 @@ sprite_texture: *gpu.Texture = undefined,
 sfx: mach.Audio.Opus = undefined,
 next_window_num: usize = 2,
 
+// Mouse capture demo state, updated from mouse_capture_* / mouse_motion_relative events.
+mouse_capture_status: enum { released, captured, denied } = .released,
+mouse_capture_dx_total: f64 = 0,
+mouse_capture_dy_total: f64 = 0,
+
 window_meta: mach.Objects(.{}, struct {
     window_id: mach.ObjectID,
     window_num: usize,
@@ -232,6 +237,16 @@ pub fn appTick(
                         };
                         core.windows.set(ev.window_id, .vsync_mode, new_vsync);
                     },
+                    .g => {
+                        // G key: toggle mouse capture on the focused window. The platform may
+                        // grant it instantly, deny it, or revoke it (e.g. on focus loss); which
+                        // we observe via the mouse_capture_{gained,lost} events below
+                        const want = !core.windows.get(ev.window_id, .mouse_capture);
+                        core.windows.set(ev.window_id, .mouse_capture, want);
+                        // Reset the accumulated delta whenever we start a new request.
+                        app.mouse_capture_dx_total = 0;
+                        app.mouse_capture_dy_total = 0;
+                    },
                     .one => {
                         // 1 key: create a new window
                         var title_buf: [32]u8 = undefined;
@@ -295,6 +310,17 @@ pub fn appTick(
                 }
             },
 
+            .mouse_capture_gained => {
+                app.mouse_capture_status = .captured;
+            },
+            .mouse_capture_lost => |ev| {
+                app.mouse_capture_status = if (ev.denied) .denied else .released;
+            },
+            .mouse_motion_relative => |ev| {
+                app.mouse_capture_dx_total += ev.dx;
+                app.mouse_capture_dy_total += ev.dy;
+            },
+
             .open => |ev| {
                 // Window opened: set it up if not the main window.
                 if (ev.window_id != app.window_id) {
@@ -331,9 +357,21 @@ pub fn appTick(
                         "[ render: {d}hz | input: {d}hz ]\n" ++
                         "[ Sprites: {d} | Windows: {d} ]\n" ++
                         "(v) sync: {s}\n" ++
+                        "(g) mouse capture: {s} (dx={d} dy={d})\n" ++
                         "(1) new window\n" ++
                         "(2) close window",
-                    .{ window_num, core.frame.rate, core.input.rate, num_spawned, window_count, @tagName(vsync_mode) },
+                    .{
+                        window_num,
+                        core.frame.rate,
+                        core.input.rate,
+                        num_spawned,
+                        window_count,
+                        @tagName(vsync_mode),
+                        @tagName(app.mouse_capture_status),
+                        // TODO(text): text.setFmt hashes args for memoization and cannot hash f64; round to i64.
+                        @as(i64, @intFromFloat(app.mouse_capture_dx_total)),
+                        @as(i64, @intFromFloat(app.mouse_capture_dy_total)),
+                    },
                 },
             });
 

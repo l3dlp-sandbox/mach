@@ -10,7 +10,6 @@ const Size = Core.Size;
 const DisplayMode = Core.DisplayMode;
 const CursorShape = Core.CursorShape;
 const VSyncMode = Core.VSyncMode;
-const CursorMode = Core.CursorMode;
 const Position = Core.Position;
 const Key = Core.KeyButtonID;
 const KeyMods = Core.KeyMods;
@@ -117,9 +116,15 @@ const MACHWindowDelegate = objc.objc.DefineClass(struct {
             n.core.pushEvent(.{ .focus_gained = .{ .window_id = n.window_id } });
         }
 
-        /// Called by AppKit when the window resigns key (loses focus).
+        /// Called by AppKit when the window resigns key (loses focus). Auto-releases mouse
+        /// capture.
         pub fn @"windowDidResignKey:"(self: *Self, _: ?*objc.app_kit.Notification) void {
             const n = state(self);
+            if (n.mouse_captured) {
+                n.core.windows.lock();
+                disableMouseCapture(n, false);
+                n.core.windows.unlock();
+            }
             n.core.pushEvent(.{ .focus_lost = .{ .window_id = n.window_id } });
         }
 
@@ -154,9 +159,26 @@ const MACHView = objc.objc.DefineClass(struct {
         return @ptrCast(@alignCast(implementation._state.get(v).?));
     }
 
-    /// Pushes a `mouse_motion` event with `event`'s window-relative position. Shared by all
-    /// the mouse{Moved,Dragged,rightMouseDragged,otherMouseDragged} IMPs.
+    /// Pushes a `mouse_motion` event with `event`'s window-relative position, OR a
+    /// `mouse_motion_relative` event with raw NSEvent deltas if the window currently has
+    /// mouse capture. Shared by all the mouse{Moved,Dragged,rightMouseDragged,otherMouseDragged}
+    /// IMPs.
     fn pushMouseMotion(n: *NativeState, event: *objc.app_kit.Event) void {
+        // While captured, the on-screen cursor is frozen and the cursor's window-relative
+        // position is meaningless. NSEvent deltaX/deltaY continue to report raw mouse motion
+        // even while CGAssociateMouseAndMouseCursorPosition is disabled.
+        if (n.mouse_captured) {
+            if (n.suppress_next_capture_motion) {
+                n.suppress_next_capture_motion = false;
+                return;
+            }
+            n.core.pushEvent(.{ .mouse_motion_relative = .{
+                .window_id = n.window_id,
+                .dx = objc.objc.msgSend(event, "deltaX", f64, .{}),
+                .dy = objc.objc.msgSend(event, "deltaY", f64, .{}),
+            } });
+            return;
+        }
         const mouse_location = event.locationInWindow();
         n.core.windows.lockShared();
         const window_height: f32 = @floatFromInt(n.core.windows.get(n.window_id, .height));
@@ -466,7 +488,108 @@ const NativeState = struct {
     /// Set by the main thread (windowDidResize / vsync change); consumed by the render thread to
     /// recreate the swap chain before the next frame.
     pending_swap_chain_update: ?PendingSwapChainUpdate = null,
+
+    /// Whether mouse capture is currently active for this window. When true, the OS cursor is
+    /// detached from physical mouse motion (via CGAssociateMouseAndMouseCursorPosition(false))
+    /// and the application receives `.mouse_motion_relative` events instead of `.mouse_motion`.
+    /// Tracks the actual platform state, which can lag the user-requested `Window.mouse_capture`
+    /// while focus is lost.
+    mouse_captured: bool = false,
+
+    /// Set in enableMouseCapture so we drop the phantom mouse-moved event AppKit synthesizes
+    /// in response to CGWarpMouseCursorPosition. Cleared after we drop that first event.
+    suppress_next_capture_motion: bool = false,
+
+    /// The cursor's screen position (in CoreGraphics coordinates, top-left origin) recorded
+    /// just before we warped to the window center in enableMouseCapture. Used by
+    /// disableMouseCapture to restore the cursor to where the user left it, instead of leaving
+    /// it stranded at the window center.
+    pre_capture_cursor_pos: ?objc.core_graphics.Point = null,
 };
+
+/// Enables mouse capture.
+///
+/// Safe to call when already captured (no-op).
+///
+/// Caller must hold `n.core.windows.lock()`.
+fn enableMouseCapture(n: *NativeState) void {
+    if (n.mouse_captured) return;
+
+    // Disconnect the cursor from physical mouse motion. Done BEFORE warping so the warp
+    // doesn't visibly move the cursor, and so the synthesized mouse-moved event produced by
+    // CGWarpMouseCursorPosition doesn't reach us with the cursor at an unexpected location.
+    // This is the same mechanism SDL3/GLFW use for "relative mouse mode": NSEvent deltas keep
+    // arriving while the visible cursor stays put.
+    _ = CGAssociateMouseAndMouseCursorPosition(0);
+
+    if (objc.app_kit.Screen.mainScreen()) |screen| {
+        const screen_frame = screen.frame();
+        const frame = n.window.frame();
+        const content_rect = n.window.contentRectForFrameRect(frame);
+
+        // Record the cursor's current screen position (in CoreGraphics top-left coords) so we
+        // can restore it in disableMouseCapture. `+[NSEvent mouseLocation]` returns the position
+        // in AppKit bottom-left coords; convert using the main display's height.
+        const NSPoint = objc.app_kit.Point;
+        const cur_appkit = objc.objc.msgSend(objc.app_kit.Event.InternalInfo.class(), "mouseLocation", NSPoint, .{});
+        n.pre_capture_cursor_pos = .{
+            .x = cur_appkit.x,
+            .y = screen_frame.size.height - cur_appkit.y,
+        };
+
+        // Warp to window center so a click during capture isn't interpreted by AppKit as a
+        // title bar / window edge drag/resize gesture.
+        //
+        // CGWarpMouseCursorPosition uses CoreGraphics screen coordinates (top-left origin), but
+        // NSWindow.frame is in AppKit screen coordinates (bottom-left origin); convert.
+        const center_x = content_rect.origin.x + content_rect.size.width / 2.0;
+        const center_y_appkit = content_rect.origin.y + content_rect.size.height / 2.0;
+        const center_y_cg = screen_frame.size.height - center_y_appkit;
+        _ = CGWarpMouseCursorPosition(.{ .x = center_x, .y = center_y_cg });
+    }
+
+    objc.app_kit.Cursor.hide();
+
+    n.mouse_captured = true;
+    // Drop the first motion event we receive: CGWarpMouseCursorPosition produces a synthesized
+    // mouse-moved event whose delta reflects the warp distance, not real mouse motion. We don't
+    // want to report that phantom delta to the application.
+    n.suppress_next_capture_motion = true;
+    n.core.pushEvent(.{ .mouse_capture_gained = .{ .window_id = n.window_id } });
+}
+
+/// Release mouse capture or deny a pending request.
+///
+/// Safe to call when no capture is active and `denied = false` (no-op).
+///
+/// Caller must hold `n.core.windows.lock()`.
+fn disableMouseCapture(n: *NativeState, denied: bool) void {
+    if (!n.mouse_captured) {
+        // We want to disable mouse capture, but its already not active.
+        if (!denied) return; // It wasn't denied, so nothing to do.
+
+        // Mouse capture was denied
+        n.core.windows.setRaw(n.window_id, .mouse_capture, false);
+        n.core.pushEvent(.{ .mouse_capture_lost = .{ .window_id = n.window_id, .denied = true } });
+        return;
+    }
+
+    // Mouse is captured, so uncapture. Restore the cursor to where it was before capture
+    // (warp while still disassociated, so the cursor's logical position is updated without a
+    // visible jump, then re-associate so subsequent physical motion is picked up from there).
+    if (n.pre_capture_cursor_pos) |pos| _ = CGWarpMouseCursorPosition(pos);
+    n.pre_capture_cursor_pos = null;
+    _ = CGAssociateMouseAndMouseCursorPosition(1);
+
+    // Respect the user's separate cursor_visible preference; only unhide if the application
+    // wants the cursor visible.
+    if (n.core.windows.get(n.window_id, .cursor_visible)) objc.app_kit.Cursor.unhide();
+
+    n.mouse_captured = false;
+    n.suppress_next_capture_motion = false;
+    n.core.windows.setRaw(n.window_id, .mouse_capture, false);
+    n.core.pushEvent(.{ .mouse_capture_lost = .{ .window_id = n.window_id, .denied = denied } });
+}
 
 var global_render_loop: ?*RenderLoop = null;
 var did_set_app_activation_policy: bool = false;
@@ -671,6 +794,9 @@ fn displayLinkWake(n: *NativeState, drawable: *objc.quartz_core.MetalDrawable) v
 extern "System" fn dispatch_async_f(queue: *anyopaque, context: ?*anyopaque, work: *const fn (?*anyopaque) callconv(.c) void) void;
 extern "System" var _dispatch_main_q: anyopaque;
 
+extern "CoreGraphics" fn CGAssociateMouseAndMouseCursorPosition(connected: c_int) c_int;
+extern "CoreGraphics" fn CGWarpMouseCursorPosition(point: objc.core_graphics.Point) c_int;
+
 // Context pointer + C function pointer that drive each main-thread tick. Both set by `run()`
 // before NSApp.run() starts. `applicationDidFinishLaunching:` runs the first tick directly,
 // subsequent ticks come from `wakeMainThread` via `dispatch_async_f`.
@@ -800,11 +926,32 @@ pub fn tick(core: *Core, core_mod: mach.Mod(Core), io: std.Io) !void {
             );
         }
 
-        // Update window cursor mode.
-        if (core.windows.updated(window_id, .cursor_mode)) {
-            switch (core_window.cursor_mode) {
-                .normal => objc.app_kit.Cursor.unhide(),
-                .disabled, .hidden => objc.app_kit.Cursor.hide(),
+        // Update cursor visibility. If the cursor is captured we keep it hidden regardless;
+        // capture takes priority over the app's cursor_visible preference.
+        if (core.windows.updated(window_id, .cursor_visible)) {
+            if (core_window.cursor_visible) {
+                if (!n.mouse_captured) objc.app_kit.Cursor.unhide();
+            } else {
+                objc.app_kit.Cursor.hide();
+            }
+        }
+
+        // Update window mouse capture state to match the user's request. macOS won't deliver
+        // mouse events to an unfocused window, so requesting capture without focus is denied
+        // (the user must focus the window first, then request again).
+        if (core.windows.updated(window_id, .mouse_capture)) {
+            if (core_window.mouse_capture) {
+                const is_key = objc.objc.msgSend(n.window, "isKeyWindow", bool, .{});
+                if (is_key) {
+                    enableMouseCapture(n);
+                } else {
+                    // Window isn't focused; capture is unavailable right now (not actively
+                    // denied), so we just immediately lose it. The user can re-request once
+                    // the window is focused.
+                    disableMouseCapture(n, false);
+                }
+            } else {
+                disableMouseCapture(n, false);
             }
         }
 

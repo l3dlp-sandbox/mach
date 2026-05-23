@@ -21,7 +21,6 @@ const MouseButton = Core.MouseButtonID;
 const DisplayMode = Core.DisplayMode;
 const CursorShape = Core.CursorShape;
 const VSyncMode = Core.VSyncMode;
-const CursorMode = Core.CursorMode;
 const Key = Core.KeyButtonID;
 const KeyMods = Core.KeyMods;
 const Joystick = Core.Joystick;

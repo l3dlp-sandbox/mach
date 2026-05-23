@@ -13,7 +13,6 @@ const Size = Core.Size;
 const DisplayMode = Core.DisplayMode;
 const CursorShape = Core.CursorShape;
 const VSyncMode = Core.VSyncMode;
-const CursorMode = Core.CursorMode;
 const Position = Core.Position;
 const Key = Core.KeyButtonID;
 const KeyMods = Core.KeyMods;
@@ -42,7 +41,7 @@ title: [:0]const u8,
 
 display_mode: DisplayMode,
 vsync_mode: VSyncMode,
-cursor_mode: CursorMode,
+cursor_visible: bool,
 cursor_shape: CursorShape,
 border: bool,
 headless: bool,
@@ -230,7 +229,7 @@ pub fn setSize(_: *Linux, _: Size) void {
     return;
 }
 
-pub fn setCursorMode(_: *Linux, _: CursorMode) void {
+pub fn setCursorVisible(_: *Linux, _: bool) void {
     return;
 }
 

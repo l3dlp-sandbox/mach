@@ -14,7 +14,6 @@ const Size = Core.Size;
 const DisplayMode = Core.DisplayMode;
 const CursorShape = Core.CursorShape;
 const VSyncMode = Core.VSyncMode;
-const CursorMode = Core.CursorMode;
 const Position = Core.Position;
 const Key = Core.KeyButtonID;
 const KeyMods = Core.KeyMods;

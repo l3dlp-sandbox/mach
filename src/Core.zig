@@ -127,9 +127,25 @@ windows: mach.Objects(
         /// Window display mode: fullscreen, windowed or borderless fullscreen
         display_mode: DisplayMode = .windowed,
 
-        /// Cursor
-        cursor_mode: CursorMode = .normal,
+        /// Whether or not the cursor should be visible when it is inside the window.
+        ///
+        /// When the mouse is captured, the cursor is always invisible irrespective of this field.
+        cursor_visible: bool = true,
+
+        /// The shape the cursor should use when it is inside the window.
         cursor_shape: CursorShape = .arrow,
+
+        /// Whether or not the mouse cursor should be captured by the window.
+        ///
+        /// Once set to true, the app requests to capture the mouse cursor - some platforms grant
+        /// this request instantly, while others (e.g. browsers) prompt the user to allow it. If the
+        /// request is denied, `mouse_capture` is set to `false` and a `.mouse_capture_lost` event
+        /// is sent with `.denied = true`. If the request is approved, `mouse_capture` remains
+        /// `true` and a `.mouse_capture_gained` event is sent.
+        ///
+        /// If the request was approved and your application sets `mouse_capture = false`, mouse
+        /// capture is released and setting it to true again would be a different request.
+        mouse_capture: bool = false,
 
         /// Target frames per second
         refresh_rate: u32 = 0,
@@ -870,8 +886,26 @@ pub const Event = union(enum) {
     /// Sent when the user is trying to input text.
     char_input: CharInput,
 
-    /// Sent when the mouse moves.
+    /// Sent when the mouse cursor moves.
+    ///
+    /// Not sent if the mouse is captured (i.e. after `.mouse_capture_gained` has been sent).
     mouse_motion: MouseMotion,
+
+    /// Sent when the mouse moves while the window has the mouse captured, providing raw mouse
+    /// motion deltas.
+    mouse_motion_relative: MouseMotionRelative,
+
+    /// Sent when a request to capture the mouse pointer succeeded.
+    ///
+    /// See the Window `.mouse_capture` field for more information.
+    mouse_capture_gained: MouseCaptureGained,
+
+    /// Sent when the mouse capture is lost:
+    /// * The platform declined the capture request (`.denied = true`), or
+    /// * The window lost focus, or
+    /// * The application set `Window.mouse_capture = false`, or
+    /// * The platform revoked the capture for any other reason.
+    mouse_capture_lost: MouseCaptureLost,
 
     /// Sent once when a mouse button is pressed down.
     mouse_press: MouseButton,
@@ -903,6 +937,29 @@ pub const Event = union(enum) {
 
         /// Mouse position, in window units, with sub-pixel precision when possible.
         pos: Position,
+    };
+
+    pub const MouseMotionRelative = struct {
+        window_id: mach.ObjectID,
+
+        /// Horizontal mouse delta in window units since the last motion event.
+        dx: f64,
+
+        /// Vertical mouse delta in window units since the last motion event.
+        dy: f64,
+    };
+
+    pub const MouseCaptureGained = struct {
+        window_id: mach.ObjectID,
+    };
+
+    pub const MouseCaptureLost = struct {
+        window_id: mach.ObjectID,
+
+        /// Whether or not the mouse capture request was denied. If it was granted but subsequently
+        /// lost, this will be false (e.g. focus loss, application set `.mouse_capture = false`,
+        /// etc.)
+        denied: bool,
     };
 
     pub const MouseButton = struct {
@@ -1220,19 +1277,6 @@ pub const Size = struct {
     }
 };
 
-pub const CursorMode = enum {
-    /// Makes the cursor visible and behaving normally.
-    normal,
-
-    /// Makes the cursor invisible when it is over the content area of the window but does not
-    /// restrict it from leaving.
-    hidden,
-
-    /// Hides and grabs the cursor, providing virtual and unlimited cursor movement. This is useful
-    /// for implementing for example 3D camera controls.
-    disabled,
-};
-
 pub const CursorShape = enum {
     arrow,
     ibeam,
@@ -1275,6 +1319,5 @@ test {
     @import("std").testing.refAllDecls(KeyButtonID);
     @import("std").testing.refAllDecls(KeyMods);
     @import("std").testing.refAllDecls(DisplayMode);
-    @import("std").testing.refAllDecls(CursorMode);
     @import("std").testing.refAllDecls(CursorShape);
 }
